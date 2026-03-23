@@ -184,7 +184,7 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
           final c2 = params?['content']?.toString() ?? '';
           if (c2.isNotEmpty) group.responseContent = c2;
           break;
-        case 'proxy_tool_response_content':
+        case 'proxy_tool_result_content':
           {
             final c3 = params?['content']?.toString() ?? '';
             if (c3.isNotEmpty) group.responseContent = c3;
@@ -231,7 +231,7 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
                 params?['totalTokens'] as int? ?? group.totalTokens;
           }
           break;
-        case 'proxy_tool_decision':
+        case 'proxy_tool_result_decision':
           group.decisionStatus =
               params?['status']?.toString() ?? group.decisionStatus;
           group.decisionReason =

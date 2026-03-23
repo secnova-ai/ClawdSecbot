@@ -65,7 +65,7 @@ mixin ProtectionMonitorTranslationMixin on State<ProtectionMonitorPage> {
             params?['index'] as int? ?? 0,
             params?['args']?.toString() ?? '',
           );
-        case 'proxy_tool_decision':
+        case 'proxy_tool_result_decision':
           {
             final status = params?['status']?.toString() ?? '';
             final reason = params?['reason']?.toString() ?? '';
@@ -74,7 +74,7 @@ mixin ProtectionMonitorTranslationMixin on State<ProtectionMonitorPage> {
             final reasonLabel = isZh ? '原因' : 'Reason';
             return '[ShepherdGate] $statusLabel: $status | $reasonLabel: $reason';
           }
-        case 'proxy_tool_response_content':
+        case 'proxy_tool_result_content':
           {
             final content = params?['content']?.toString() ?? '';
             final isZh = l10n.localeName.startsWith('zh');

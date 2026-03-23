@@ -26,24 +26,29 @@ class AuditLogDatabaseService {
 
   /// Save an audit log entry
   Future<void> saveAuditLog(AuditLog log) async {
-    final result = _callFFI('SaveAuditLogFFI', jsonEncode({
-      'id': log.id,
-      'timestamp': log.timestamp.toIso8601String(),
-      'request_id': log.requestId,
-      'model': log.model,
-      'request_content': log.requestContent,
-      'tool_calls': jsonEncode(log.toolCalls.map((e) => e.toJson()).toList()),
-      'output_content': log.outputContent,
-      'has_risk': log.hasRisk,
-      'risk_level': log.riskLevel,
-      'risk_reason': log.riskReason,
-      'confidence': log.confidence ?? 0,
-      'action': log.action,
-      'prompt_tokens': log.promptTokens ?? 0,
-      'completion_tokens': log.completionTokens ?? 0,
-      'total_tokens': log.totalTokens ?? 0,
-      'duration_ms': log.durationMs,
-    }));
+    final result = _callFFI(
+      'SaveAuditLogFFI',
+      jsonEncode({
+        'id': log.id,
+        'timestamp': log.timestamp.toIso8601String(),
+        'request_id': log.requestId,
+        'asset_name': log.assetName,
+        'asset_id': log.assetID,
+        'model': log.model,
+        'request_content': log.requestContent,
+        'tool_calls': jsonEncode(log.toolCalls.map((e) => e.toJson()).toList()),
+        'output_content': log.outputContent,
+        'has_risk': log.hasRisk,
+        'risk_level': log.riskLevel,
+        'risk_reason': log.riskReason,
+        'confidence': log.confidence ?? 0,
+        'action': log.action,
+        'prompt_tokens': log.promptTokens ?? 0,
+        'completion_tokens': log.completionTokens ?? 0,
+        'total_tokens': log.totalTokens ?? 0,
+        'duration_ms': log.durationMs,
+      }),
+    );
 
     if (result['success'] != true) {
       throw Exception('Failed to save audit log: ${result['error']}');
@@ -54,24 +59,32 @@ class AuditLogDatabaseService {
   Future<void> saveAuditLogsBatch(List<AuditLog> logs) async {
     if (logs.isEmpty) return;
 
-    final logsList = logs.map((log) => {
-      'id': log.id,
-      'timestamp': log.timestamp.toIso8601String(),
-      'request_id': log.requestId,
-      'model': log.model,
-      'request_content': log.requestContent,
-      'tool_calls': jsonEncode(log.toolCalls.map((e) => e.toJson()).toList()),
-      'output_content': log.outputContent,
-      'has_risk': log.hasRisk,
-      'risk_level': log.riskLevel,
-      'risk_reason': log.riskReason,
-      'confidence': log.confidence ?? 0,
-      'action': log.action,
-      'prompt_tokens': log.promptTokens ?? 0,
-      'completion_tokens': log.completionTokens ?? 0,
-      'total_tokens': log.totalTokens ?? 0,
-      'duration_ms': log.durationMs,
-    }).toList();
+    final logsList = logs
+        .map(
+          (log) => {
+            'id': log.id,
+            'timestamp': log.timestamp.toIso8601String(),
+            'request_id': log.requestId,
+            'asset_name': log.assetName,
+            'asset_id': log.assetID,
+            'model': log.model,
+            'request_content': log.requestContent,
+            'tool_calls': jsonEncode(
+              log.toolCalls.map((e) => e.toJson()).toList(),
+            ),
+            'output_content': log.outputContent,
+            'has_risk': log.hasRisk,
+            'risk_level': log.riskLevel,
+            'risk_reason': log.riskReason,
+            'confidence': log.confidence ?? 0,
+            'action': log.action,
+            'prompt_tokens': log.promptTokens ?? 0,
+            'completion_tokens': log.completionTokens ?? 0,
+            'total_tokens': log.totalTokens ?? 0,
+            'duration_ms': log.durationMs,
+          },
+        )
+        .toList();
 
     final result = _callFFI('SaveAuditLogsBatchFFI', jsonEncode(logsList));
     if (result['success'] != true) {
@@ -84,6 +97,8 @@ class AuditLogDatabaseService {
     int limit = 100,
     int offset = 0,
     bool riskOnly = false,
+    String? assetName,
+    String? assetID,
     DateTime? startTime,
     DateTime? endTime,
     String? searchQuery,
@@ -97,6 +112,12 @@ class AuditLogDatabaseService {
     if (endTime != null) filter['end_time'] = endTime.toIso8601String();
     if (searchQuery != null && searchQuery.isNotEmpty) {
       filter['search_query'] = searchQuery;
+    }
+    if (assetName != null && assetName.isNotEmpty) {
+      filter['asset_name'] = assetName;
+    }
+    if (assetID != null && assetID.isNotEmpty) {
+      filter['asset_id'] = assetID;
     }
 
     final result = _callFFI('GetAuditLogsFFI', jsonEncode(filter));
@@ -124,6 +145,8 @@ class AuditLogDatabaseService {
         id: row['id'] as String? ?? '',
         timestamp: DateTime.parse(row['timestamp'] as String),
         requestId: row['request_id'] as String? ?? '',
+        assetName: row['asset_name'] as String? ?? '',
+        assetID: row['asset_id'] as String? ?? '',
         model: row['model'] as String?,
         requestContent: row['request_content'] as String? ?? '',
         toolCalls: toolCalls,
@@ -142,18 +165,42 @@ class AuditLogDatabaseService {
   }
 
   /// Get audit log count with optional filtering
-  Future<int> getAuditLogCount({bool riskOnly = false}) async {
-    final result = _callFFI('GetAuditLogCountFFI', jsonEncode({
-      'risk_only': riskOnly,
-    }));
+  Future<int> getAuditLogCount({
+    bool riskOnly = false,
+    String? assetName,
+    String? assetID,
+  }) async {
+    final result = _callFFI(
+      'GetAuditLogCountFFI',
+      jsonEncode({
+        'risk_only': riskOnly,
+        if (assetName != null && assetName.isNotEmpty) 'asset_name': assetName,
+        if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
+      }),
+    );
 
     if (result['success'] != true) return 0;
     return result['data'] as int? ?? 0;
   }
 
   /// Get audit log statistics
-  Future<Map<String, dynamic>> getAuditLogStatistics() async {
-    final result = _callFFINoArg('GetAuditLogStatisticsFFI');
+  Future<Map<String, dynamic>> getAuditLogStatistics({
+    String? assetName,
+    String? assetID,
+  }) async {
+    final hasAssetFilter =
+        (assetName != null && assetName.isNotEmpty) ||
+        (assetID != null && assetID.isNotEmpty);
+    final result = hasAssetFilter
+        ? _callFFI(
+            'GetAuditLogStatisticsWithFilterFFI',
+            jsonEncode({
+              if (assetName != null && assetName.isNotEmpty)
+                'asset_name': assetName,
+              if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
+            }),
+          )
+        : _callFFINoArg('GetAuditLogStatisticsFFI');
     if (result['success'] != true) {
       return {
         'total': 0,
@@ -181,6 +228,26 @@ class AuditLogDatabaseService {
     };
   }
 
+  /// Get all asset tabs that still have audit log history
+  Future<List<Map<String, String>>> getAuditLogAssets() async {
+    final result = _callFFINoArg('GetAuditLogAssetsFFI');
+    if (result['success'] != true) return [];
+
+    final data = result['data'];
+    if (data == null || data is! List) return [];
+
+    return data
+        .map((item) {
+          final row = Map<String, dynamic>.from(item as Map);
+          return {
+            'asset_name': row['asset_name'] as String? ?? '',
+            'asset_id': row['asset_id'] as String? ?? '',
+          };
+        })
+        .where((item) => (item['asset_name'] ?? '').isNotEmpty)
+        .toList();
+  }
+
   /// Clear old audit logs (keep last N days)
   Future<void> cleanOldAuditLogs({int keepDays = 30}) async {
     _callFFI('CleanOldAuditLogsFFI', jsonEncode({'keep_days': keepDays}));
@@ -189,6 +256,29 @@ class AuditLogDatabaseService {
   /// Clear all audit logs
   Future<void> clearAllAuditLogs() async {
     _callFFINoArg('ClearAllAuditLogsFFI');
+  }
+
+  /// Clear audit logs for the current asset tab. Falls back to clearing all
+  /// logs when no asset filter is provided.
+  Future<void> clearAuditLogs({
+    String? assetName,
+    String? assetID,
+  }) async {
+    final hasAssetFilter =
+        (assetName != null && assetName.isNotEmpty) ||
+        (assetID != null && assetID.isNotEmpty);
+    if (!hasAssetFilter) {
+      await clearAllAuditLogs();
+      return;
+    }
+
+    _callFFI(
+      'ClearAuditLogsWithFilterFFI',
+      jsonEncode({
+        if (assetName != null && assetName.isNotEmpty) 'asset_name': assetName,
+        if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
+      }),
+    );
   }
 
   // --- Helper methods ---
