@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'dart:convert';
 import 'dart:io';
 import '../l10n/app_localizations.dart';
 import '../models/asset_model.dart';
 import '../models/risk_model.dart';
+import '../services/app_settings_database_service.dart';
 import '../utils/app_fonts.dart';
+import 'bot_icon_picker_dialog.dart';
 
 /// 扫描结果展示组件
 /// 用于展示扫描完成后的资产列表和风险信息
@@ -577,6 +580,56 @@ class _AssetCard extends StatefulWidget {
 
 class _AssetCardState extends State<_AssetCard> {
   late bool _isExpanded = widget.initiallyExpanded;
+  String? _iconName;
+  int? _iconColor;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedIcon();
+  }
+
+  IconData get _currentIcon =>
+      botIconDataMap[_iconName] ??
+      (widget.asset.displaySections.isNotEmpty
+          ? LucideIcons.fileJson
+          : LucideIcons.package);
+
+  Color get _currentIconColor => Color(_iconColor ?? 0xFF6366F1);
+
+  Future<void> _loadSavedIcon() async {
+    final saved = await AppSettingsDatabaseService()
+        .getSetting('asset_icon_${widget.asset.id}');
+    if (saved.isNotEmpty && mounted) {
+      try {
+        final data = jsonDecode(saved) as Map<String, dynamic>;
+        setState(() {
+          _iconName = data['icon'] as String?;
+          _iconColor = data['color'] as int?;
+        });
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _showIconPicker() async {
+    final result = await showDialog<BotIconSelection>(
+      context: context,
+      builder: (_) => BotIconPickerDialog(
+        currentIcon: _iconName,
+        currentColor: _iconColor,
+      ),
+    );
+    if (result != null && mounted) {
+      setState(() {
+        _iconName = result.iconName;
+        _iconColor = result.colorValue;
+      });
+      await AppSettingsDatabaseService().saveSetting(
+        'asset_icon_${widget.asset.id}',
+        jsonEncode({'icon': result.iconName, 'color': result.colorValue}),
+      );
+    }
+  }
 
   void _toggleExpand() {
     setState(() {
@@ -608,18 +661,22 @@ class _AssetCardState extends State<_AssetCard> {
               onTap: _toggleExpand,
               child: Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF6366F1).withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      asset.displaySections.isNotEmpty
-                          ? LucideIcons.fileJson
-                          : LucideIcons.package,
-                      color: const Color(0xFF6366F1),
-                      size: 18,
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: _showIconPicker,
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: _currentIconColor.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          _currentIcon,
+                          color: _currentIconColor,
+                          size: 18,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
