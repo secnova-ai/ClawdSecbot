@@ -112,7 +112,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get settings => '设置';
+  String get settings => '全局设置';
 
   @override
   String get language => '语言';

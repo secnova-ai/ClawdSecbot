@@ -1232,11 +1232,16 @@ class _MainPageState extends State<MainPage>
               ),
             ),
             const Spacer(),
-            _buildWindowButton(
-              icon: LucideIcons.cpu,
-              onTap: _handleSettingsTap,
+            IconButton(
+              icon: const Icon(LucideIcons.fileSearch, size: 16, color: Colors.white70),
+              tooltip: l10n.auditLog,
+              onPressed: showAuditLogWindow,
             ),
-            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(LucideIcons.cpu, size: 16, color: Colors.white70),
+              tooltip: l10n.settings,
+              onPressed: _handleSettingsTap,
+            ),
             PopupMenuButton<String>(
               icon: const Icon(
                 LucideIcons.languages,
@@ -1311,8 +1316,16 @@ class _MainPageState extends State<MainPage>
               ),
             ),
           ),
-          _buildWindowButton(icon: LucideIcons.cpu, onTap: _handleSettingsTap),
-          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(LucideIcons.fileSearch, size: 16, color: Colors.white70),
+            tooltip: l10n.auditLog,
+            onPressed: showAuditLogWindow,
+          ),
+          IconButton(
+            icon: const Icon(LucideIcons.cpu, size: 16, color: Colors.white70),
+            tooltip: l10n.settings,
+            onPressed: _handleSettingsTap,
+          ),
           PopupMenuButton<String>(
             icon: const Icon(
               LucideIcons.languages,
