@@ -12,6 +12,8 @@ type AuditLog struct {
 	ID               string          `json:"id"`
 	Timestamp        string          `json:"timestamp"`
 	RequestID        string          `json:"request_id"`
+	AssetName        string          `json:"asset_name,omitempty"`
+	AssetID          string          `json:"asset_id,omitempty"`
 	Model            string          `json:"model,omitempty"`
 	RequestContent   string          `json:"request_content"` // Summary of request messages
 	ToolCalls        []AuditToolCall `json:"tool_calls,omitempty"`
@@ -156,6 +158,30 @@ func (b *AuditLogBuffer) ClearAuditLogs() {
 	b.logs = make([]AuditLog, 0)
 }
 
+func (b *AuditLogBuffer) ClearAuditLogsWithFilter(assetName, assetID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if assetID == "" && assetName == "" {
+		b.logs = make([]AuditLog, 0)
+		return
+	}
+
+	filtered := make([]AuditLog, 0, len(b.logs))
+	for _, log := range b.logs {
+		matches := false
+		if assetID != "" {
+			matches = log.AssetID == assetID
+		} else {
+			matches = log.AssetName == assetName
+		}
+		if !matches {
+			filtered = append(filtered, log)
+		}
+	}
+	b.logs = filtered
+}
+
 // GetAndClearAuditLogs returns all logs and clears the buffer
 // This is used for batch persistence to SQLite from Dart side
 func (b *AuditLogBuffer) GetAndClearAuditLogs() []AuditLog {
@@ -199,5 +225,20 @@ func GetPendingAuditLogsInternal() string {
 // ClearAuditLogsInternal clears all audit logs from the buffer
 func ClearAuditLogsInternal() string {
 	auditLogBuffer.ClearAuditLogs()
+	return `{"success":true}`
+}
+
+func ClearAuditLogsWithFilterInternal(filterJSON string) string {
+	var input struct {
+		AssetName string `json:"asset_name,omitempty"`
+		AssetID   string `json:"asset_id,omitempty"`
+	}
+	if filterJSON != "" {
+		if err := json.Unmarshal([]byte(filterJSON), &input); err != nil {
+			return `{"success":false,"error":"invalid JSON"}`
+		}
+	}
+
+	auditLogBuffer.ClearAuditLogsWithFilter(input.AssetName, input.AssetID)
 	return `{"success":true}`
 }

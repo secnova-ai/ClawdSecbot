@@ -303,14 +303,20 @@ class ProtectionMonitorService {
     }
 
     // 计算增量用于数据库存储（支持计数器重置/资产切换）
-    final deltaPromptTokens = _deltaWithReset(_totalPromptTokens, prevPromptTokens);
+    final deltaPromptTokens = _deltaWithReset(
+      _totalPromptTokens,
+      prevPromptTokens,
+    );
     final deltaCompletionTokens = _deltaWithReset(
       _totalCompletionTokens,
       prevCompletionTokens,
     );
     final deltaToolCalls = _deltaWithReset(_totalToolCalls, prevToolCalls);
     final deltaAuditTokens = _deltaWithReset(_auditTokens, prevAuditTokens);
-    final deltaAnalysisCount = _deltaWithReset(_analysisCount, prevAnalysisCount);
+    final deltaAnalysisCount = _deltaWithReset(
+      _analysisCount,
+      prevAnalysisCount,
+    );
     final deltaBlockedCount = _deltaWithReset(_blockedCount, prevBlockedCount);
     final deltaWarningCount = _deltaWithReset(_warningCount, prevWarningCount);
 
@@ -545,7 +551,10 @@ class ProtectionMonitorService {
         MetricsDatabaseService()
             .saveApiMetrics(metrics, assetName: _assetName)
             .catchError((Object e) {
-              appLogger.error('[ProtectionMonitor] Failed to save API metrics', e);
+              appLogger.error(
+                '[ProtectionMonitor] Failed to save API metrics',
+                e,
+              );
             }),
       );
       unawaited(_saveStatisticsToDatabase());
@@ -639,8 +648,14 @@ class ProtectionMonitorService {
         _analysisCount,
         prevAnalysisCount,
       );
-      final deltaBlockedCount = _deltaWithReset(_blockedCount, prevBlockedCount);
-      final deltaWarningCount = _deltaWithReset(_warningCount, prevWarningCount);
+      final deltaBlockedCount = _deltaWithReset(
+        _blockedCount,
+        prevBlockedCount,
+      );
+      final deltaWarningCount = _deltaWithReset(
+        _warningCount,
+        prevWarningCount,
+      );
 
       final hasTokenChanges =
           deltaPromptTokens > 0 ||
@@ -749,10 +764,48 @@ class ProtectionMonitorService {
     }
   }
 
+  void clearAuditLogsBufferWithFilter({
+    String? assetName,
+    String? assetID,
+  }) {
+    final hasAssetFilter =
+        (assetName != null && assetName.isNotEmpty) ||
+        (assetID != null && assetID.isNotEmpty);
+    if (!hasAssetFilter) {
+      clearAuditLogsBuffer();
+      return;
+    }
+
+    try {
+      final dylib = _getDylib();
+      final clearLogs = dylib.lookupFunction<
+        ClearAuditLogsWithFilterC,
+        ClearAuditLogsWithFilterDart
+      >('ClearAuditLogsWithFilter');
+      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+        'FreeString',
+      );
+      final argPtr = jsonEncode({
+        if (assetName != null && assetName.isNotEmpty) 'asset_name': assetName,
+        if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
+      }).toNativeUtf8();
+      final resultPtr = clearLogs(argPtr);
+      freeString(resultPtr);
+      malloc.free(argPtr);
+    } catch (e) {
+      appLogger.error(
+        '[ProtectionMonitor] Clear filtered audit logs buffer failed',
+        e,
+      );
+    }
+  }
+
   Future<List<AuditLog>> getAuditLogs({
     int limit = 100,
     int offset = 0,
     bool riskOnly = false,
+    String? assetName,
+    String? assetID,
     DateTime? startTime,
     DateTime? endTime,
     String? searchQuery,
@@ -761,22 +814,48 @@ class ProtectionMonitorService {
       limit: limit,
       offset: offset,
       riskOnly: riskOnly,
+      assetName: assetName,
+      assetID: assetID,
       startTime: startTime,
       endTime: endTime,
       searchQuery: searchQuery,
     );
   }
 
-  Future<int> getAuditLogCount({bool riskOnly = false}) async {
-    return await AuditLogDatabaseService().getAuditLogCount(riskOnly: riskOnly);
+  Future<int> getAuditLogCount({
+    bool riskOnly = false,
+    String? assetName,
+    String? assetID,
+  }) async {
+    return await AuditLogDatabaseService().getAuditLogCount(
+      riskOnly: riskOnly,
+      assetName: assetName,
+      assetID: assetID,
+    );
   }
 
-  Future<Map<String, dynamic>> getAuditLogStatistics() async {
-    return await AuditLogDatabaseService().getAuditLogStatistics();
+  Future<Map<String, dynamic>> getAuditLogStatistics({
+    String? assetName,
+    String? assetID,
+  }) async {
+    return await AuditLogDatabaseService().getAuditLogStatistics(
+      assetName: assetName,
+      assetID: assetID,
+    );
   }
 
   Future<void> clearAllAuditLogs() async {
     await AuditLogDatabaseService().clearAllAuditLogs();
+  }
+
+  Future<void> clearAuditLogs({
+    String? assetName,
+    String? assetID,
+  }) async {
+    await AuditLogDatabaseService().clearAuditLogs(
+      assetName: assetName,
+      assetID: assetID,
+    );
   }
 
   /// 从 Go 缓冲拉取待持久化的安全事件，写入 SQLite 并通知 UI 流。

@@ -62,7 +62,7 @@ func TestAuditLog_BatchSave(t *testing.T) {
 		t.Fatalf("SaveAuditLogsBatch failed: %v", err)
 	}
 
-	count, err := repo.GetAuditLogCount(false)
+	count, err := repo.GetAuditLogCount(false, "", "")
 	if err != nil {
 		t.Fatalf("GetAuditLogCount failed: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestAuditLog_BatchSave(t *testing.T) {
 		t.Errorf("Expected 3 logs, got %d", count)
 	}
 
-	riskCount, err := repo.GetAuditLogCount(true)
+	riskCount, err := repo.GetAuditLogCount(true, "", "")
 	if err != nil {
 		t.Fatalf("GetAuditLogCount(riskOnly) failed: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestAuditLog_Statistics(t *testing.T) {
 	}
 	_ = repo.SaveAuditLogsBatch(logs)
 
-	stats, err := repo.GetAuditLogStatistics()
+	stats, err := repo.GetAuditLogStatistics("", "")
 	if err != nil {
 		t.Fatalf("GetAuditLogStatistics failed: %v", err)
 	}
@@ -109,6 +109,64 @@ func TestAuditLog_Statistics(t *testing.T) {
 	}
 	if stats.AllowedCount != 2 {
 		t.Errorf("Expected allowed_count=2, got %d", stats.AllowedCount)
+	}
+}
+
+func TestAuditLog_GetAuditLogAssets(t *testing.T) {
+	db := setupProtectionTestDB(t)
+	defer db.Close()
+
+	repo := NewAuditLogRepository(db)
+
+	logs := []*AuditLog{
+		{
+			ID:        "1",
+			Timestamp: time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339),
+			RequestID: "r1",
+			AssetName: "Bot A",
+			AssetID:   "asset-a",
+			Action:    "ALLOW",
+		},
+		{
+			ID:        "2",
+			Timestamp: time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339),
+			RequestID: "r2",
+			AssetName: "Bot B",
+			AssetID:   "asset-b",
+			Action:    "WARN",
+			HasRisk:   true,
+		},
+		{
+			ID:        "3",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			RequestID: "r3",
+			AssetName: "Bot A",
+			AssetID:   "asset-a",
+			Action:    "ALLOW",
+		},
+		{
+			ID:        "4",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			RequestID: "r4",
+			Action:    "ALLOW",
+		},
+	}
+	if err := repo.SaveAuditLogsBatch(logs); err != nil {
+		t.Fatalf("SaveAuditLogsBatch failed: %v", err)
+	}
+
+	assets, err := repo.GetAuditLogAssets()
+	if err != nil {
+		t.Fatalf("GetAuditLogAssets failed: %v", err)
+	}
+	if len(assets) != 2 {
+		t.Fatalf("Expected 2 assets, got %d", len(assets))
+	}
+	if assets[0].AssetName != "Bot A" || assets[0].AssetID != "asset-a" {
+		t.Errorf("Expected latest asset first to be Bot A/asset-a, got %+v", assets[0])
+	}
+	if assets[1].AssetName != "Bot B" || assets[1].AssetID != "asset-b" {
+		t.Errorf("Expected second asset to be Bot B/asset-b, got %+v", assets[1])
 	}
 }
 
@@ -158,7 +216,7 @@ func TestAuditLog_ClearAll(t *testing.T) {
 		t.Fatalf("ClearAllAuditLogs failed: %v", err)
 	}
 
-	count, _ := repo.GetAuditLogCount(false)
+	count, _ := repo.GetAuditLogCount(false, "", "")
 	if count != 0 {
 		t.Errorf("Expected 0 logs after clear, got %d", count)
 	}
