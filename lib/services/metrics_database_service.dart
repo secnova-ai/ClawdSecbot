@@ -8,6 +8,10 @@ import 'native_library_service.dart';
 // FFI type definitions
 typedef _OneArgC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef _OneArgDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
+typedef _TwoArgC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef _TwoArgDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 
 /// API 指标 FFI 持久化门面：通过 FFI 委托 Go 层进行数据持久化，Flutter 不直接操作 DB。
 class MetricsDatabaseService {
@@ -22,18 +26,26 @@ class MetricsDatabaseService {
   FreeStringDart? get _freeString => NativeLibraryService().freeString;
 
   /// Save API metrics
-  Future<void> saveApiMetrics(ApiMetrics metrics, {String? assetName}) async {
-    final result = _callFFI('SaveApiMetricsFFI', jsonEncode({
-      'timestamp': metrics.timestamp.toIso8601String(),
-      'prompt_tokens': metrics.promptTokens,
-      'completion_tokens': metrics.completionTokens,
-      'total_tokens': metrics.totalTokens,
-      'tool_call_count': metrics.toolCallCount,
-      'model': metrics.model,
-      'is_blocked': metrics.isBlocked,
-      'risk_level': metrics.riskLevel,
-      'asset_name': assetName ?? '',
-    }));
+  Future<void> saveApiMetrics(
+    ApiMetrics metrics, {
+    String? assetName,
+    String? assetID,
+  }) async {
+    final result = _callFFI(
+      'SaveApiMetricsFFI',
+      jsonEncode({
+        'timestamp': metrics.timestamp.toIso8601String(),
+        'prompt_tokens': metrics.promptTokens,
+        'completion_tokens': metrics.completionTokens,
+        'total_tokens': metrics.totalTokens,
+        'tool_call_count': metrics.toolCallCount,
+        'model': metrics.model,
+        'is_blocked': metrics.isBlocked,
+        'risk_level': metrics.riskLevel,
+        'asset_name': assetName ?? '',
+        'asset_id': assetID ?? '',
+      }),
+    );
 
     if (result['success'] != true) {
       throw Exception('Failed to save API metrics: ${result['error']}');
@@ -44,13 +56,18 @@ class MetricsDatabaseService {
   Future<ApiStatistics> getApiStatistics({
     Duration? duration,
     String? assetName,
+    String? assetID,
   }) async {
     final durationSeconds = (duration ?? const Duration(hours: 24)).inSeconds;
 
-    final result = _callFFI('GetApiStatisticsFFI', jsonEncode({
-      'duration_seconds': durationSeconds,
-      'asset_name': assetName ?? '',
-    }));
+    final result = _callFFI(
+      'GetApiStatisticsFFI',
+      jsonEncode({
+        'duration_seconds': durationSeconds,
+        'asset_name': assetName ?? '',
+        'asset_id': assetID ?? '',
+      }),
+    );
 
     if (result['success'] != true) return ApiStatistics.empty();
 
@@ -61,12 +78,14 @@ class MetricsDatabaseService {
     if (data['token_trend'] != null) {
       for (final item in data['token_trend'] as List) {
         final point = item as Map<String, dynamic>;
-        tokenTrend.add(TokenTrendPoint(
-          timestamp: DateTime.parse(point['timestamp'] as String),
-          tokens: point['tokens'] as int? ?? 0,
-          promptTokens: point['prompt_tokens'] as int? ?? 0,
-          completionTokens: point['completion_tokens'] as int? ?? 0,
-        ));
+        tokenTrend.add(
+          TokenTrendPoint(
+            timestamp: DateTime.parse(point['timestamp'] as String),
+            tokens: point['tokens'] as int? ?? 0,
+            promptTokens: point['prompt_tokens'] as int? ?? 0,
+            completionTokens: point['completion_tokens'] as int? ?? 0,
+          ),
+        );
       }
     }
 
@@ -74,10 +93,12 @@ class MetricsDatabaseService {
     if (data['tool_call_trend'] != null) {
       for (final item in data['tool_call_trend'] as List) {
         final point = item as Map<String, dynamic>;
-        toolCallTrend.add(ToolCallTrendPoint(
-          timestamp: DateTime.parse(point['timestamp'] as String),
-          count: point['count'] as int? ?? 0,
-        ));
+        toolCallTrend.add(
+          ToolCallTrendPoint(
+            timestamp: DateTime.parse(point['timestamp'] as String),
+            count: point['count'] as int? ?? 0,
+          ),
+        );
       }
     }
 
@@ -95,9 +116,10 @@ class MetricsDatabaseService {
 
   /// Get recent API metrics
   Future<List<ApiMetrics>> getRecentApiMetrics({int limit = 100}) async {
-    final result = _callFFI('GetRecentApiMetricsFFI', jsonEncode({
-      'limit': limit,
-    }));
+    final result = _callFFI(
+      'GetRecentApiMetricsFFI',
+      jsonEncode({'limit': limit}),
+    );
 
     if (result['success'] != true) return [];
 
@@ -126,19 +148,21 @@ class MetricsDatabaseService {
   }
 
   /// Get daily token usage for an asset
-  Future<int> getDailyTokenUsage(String assetName) async {
+  Future<int> getDailyTokenUsage(String assetName, String assetID) async {
     final dylib = _dylib;
     if (dylib == null || _freeString == null) return 0;
 
     try {
-      final func = dylib.lookupFunction<_OneArgC, _OneArgDart>(
+      final func = dylib.lookupFunction<_TwoArgC, _TwoArgDart>(
         'GetDailyTokenUsageFFI',
       );
-      final argPtr = assetName.toNativeUtf8();
-      final resultPtr = func(argPtr);
+      final assetNamePtr = assetName.toNativeUtf8();
+      final assetIDPtr = assetID.toNativeUtf8();
+      final resultPtr = func(assetNamePtr, assetIDPtr);
       final resultStr = resultPtr.toDartString();
       _freeString!(resultPtr);
-      malloc.free(argPtr);
+      malloc.free(assetNamePtr);
+      malloc.free(assetIDPtr);
 
       final result = jsonDecode(resultStr) as Map<String, dynamic>;
       if (result['success'] == true) {

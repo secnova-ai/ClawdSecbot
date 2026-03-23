@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"go_lib/core/logging"
@@ -160,10 +161,14 @@ func (r *ProtectionRepository) ClearProtectionState() error {
 
 // --- Protection Config ---
 
-// SaveProtectionConfig 保存保护配置（按资产名称）
+// SaveProtectionConfig 保存保护配置（按资产实例ID）
 func (r *ProtectionRepository) SaveProtectionConfig(config *ProtectionConfig) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
+	}
+	config.AssetID = strings.TrimSpace(config.AssetID)
+	if config.AssetID == "" {
+		return fmt.Errorf("asset_id is required")
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -219,12 +224,17 @@ func (r *ProtectionRepository) GetProtectionConfig(assetName string, assetID str
 	if r.db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
+	_ = assetName
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return nil, fmt.Errorf("asset_id is required")
+	}
 
 	row := r.db.QueryRow(`SELECT asset_name, asset_id, enabled, audit_only, sandbox_enabled, 
 		gateway_binary_path, gateway_config_path, custom_security_prompt, 
 		single_session_token_limit, daily_token_limit, 
 		path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at
-		FROM protection_config WHERE asset_name = ? AND asset_id = ?`, assetName, assetID)
+		FROM protection_config WHERE asset_id = ?`, assetID)
 
 	config, err := scanProtectionConfig(row)
 	if err == sql.ErrNoRows {
@@ -276,6 +286,11 @@ func (r *ProtectionRepository) SetProtectionEnabled(assetName string, assetID st
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
+	_ = assetName
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return fmt.Errorf("asset_id is required")
+	}
 
 	enabledInt := 0
 	if enabled {
@@ -283,8 +298,8 @@ func (r *ProtectionRepository) SetProtectionEnabled(assetName string, assetID st
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err := r.db.Exec(`UPDATE protection_config SET enabled = ?, updated_at = ? WHERE asset_name = ? AND asset_id = ?`,
-		enabledInt, now, assetName, assetID)
+	_, err := r.db.Exec(`UPDATE protection_config SET enabled = ?, updated_at = ? WHERE asset_id = ?`,
+		enabledInt, now, assetID)
 	if err != nil {
 		return fmt.Errorf("failed to set protection enabled: %w", err)
 	}
@@ -297,8 +312,13 @@ func (r *ProtectionRepository) DeleteProtectionConfig(assetName string, assetID 
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
+	_ = assetName
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return fmt.Errorf("asset_id is required")
+	}
 
-	_, err := r.db.Exec(`DELETE FROM protection_config WHERE asset_name = ? AND asset_id = ?`, assetName, assetID)
+	_, err := r.db.Exec(`DELETE FROM protection_config WHERE asset_id = ?`, assetID)
 	if err != nil {
 		return fmt.Errorf("failed to delete protection config: %w", err)
 	}
@@ -312,6 +332,10 @@ func (r *ProtectionRepository) DeleteProtectionConfig(assetName string, assetID 
 func (r *ProtectionRepository) SaveProtectionStatistics(stats *ProtectionStatistics) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
+	}
+	stats.AssetID = strings.TrimSpace(stats.AssetID)
+	if stats.AssetID == "" {
+		return fmt.Errorf("asset_id is required")
 	}
 
 	stats.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
@@ -338,11 +362,16 @@ func (r *ProtectionRepository) GetProtectionStatistics(assetName string, assetID
 	if r.db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
+	_ = assetName
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return nil, fmt.Errorf("asset_id is required")
+	}
 
 	row := r.db.QueryRow(`SELECT asset_name, asset_id, analysis_count, message_count, warning_count, blocked_count,
 		total_tokens, total_prompt_tokens, total_completion_tokens, total_tool_calls,
 		request_count, audit_tokens, audit_prompt_tokens, audit_completion_tokens, updated_at
-		FROM protection_statistics WHERE asset_name = ? AND asset_id = ?`, assetName, assetID)
+		FROM protection_statistics WHERE asset_id = ?`, assetID)
 
 	var stats ProtectionStatistics
 	var auditTokens, auditPromptTokens, auditCompletionTokens sql.NullInt64
@@ -377,8 +406,13 @@ func (r *ProtectionRepository) ClearProtectionStatistics(assetName string, asset
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
+	_ = assetName
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return fmt.Errorf("asset_id is required")
+	}
 
-	_, err := r.db.Exec(`DELETE FROM protection_statistics WHERE asset_name = ? AND asset_id = ?`, assetName, assetID)
+	_, err := r.db.Exec(`DELETE FROM protection_statistics WHERE asset_id = ?`, assetID)
 	if err != nil {
 		return fmt.Errorf("failed to clear protection statistics: %w", err)
 	}
@@ -388,97 +422,76 @@ func (r *ProtectionRepository) ClearProtectionStatistics(assetName string, asset
 
 // --- Shepherd Rules ---
 
-// GetShepherdSensitiveActions 获取指定资产的Shepherd敏感操作列表
-func (r *ProtectionRepository) GetShepherdSensitiveActions(assetName string) ([]string, error) {
+// GetShepherdSensitiveActions 获取指定资产实例的Shepherd敏感操作列表
+func (r *ProtectionRepository) GetShepherdSensitiveActions(assetID string) ([]string, bool, error) {
 	if r.db == nil {
-		return nil, fmt.Errorf("database not initialized")
+		return nil, false, fmt.Errorf("database not initialized")
+	}
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return nil, false, fmt.Errorf("asset_id is required")
 	}
 
-	row := r.db.QueryRow(`SELECT sensitive_actions FROM shepherd_rules WHERE id = 1`)
+	row := r.db.QueryRow(`SELECT sensitive_actions FROM shepherd_rules WHERE asset_id = ?`, assetID)
 
 	var raw sql.NullString
 	err := row.Scan(&raw)
 	if err == sql.ErrNoRows || !raw.Valid || raw.String == "" {
-		return []string{}, nil
+		return []string{}, false, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get shepherd rules: %w", err)
+		return nil, false, fmt.Errorf("failed to get shepherd rules: %w", err)
 	}
 
-	// 解析JSON：支持 map[assetName][]string 和 []string 两种格式
-	var decoded interface{}
-	if err := json.Unmarshal([]byte(raw.String), &decoded); err != nil {
-		return []string{}, nil
+	var actions []string
+	if err := json.Unmarshal([]byte(raw.String), &actions); err != nil {
+		return []string{}, true, nil
 	}
-
-	switch v := decoded.(type) {
-	case map[string]interface{}:
-		if actions, ok := v[assetName]; ok {
-			if list, ok := actions.([]interface{}); ok {
-				result := make([]string, 0, len(list))
-				for _, item := range list {
-					if s, ok := item.(string); ok {
-						result = append(result, s)
-					}
-				}
-				return result, nil
-			}
-		}
-		return []string{}, nil
-	case []interface{}:
-		result := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				result = append(result, s)
-			}
-		}
-		return result, nil
-	default:
-		return []string{}, nil
-	}
+	return normalizeShepherdActions(actions), true, nil
 }
 
-// SaveShepherdSensitiveActions 保存指定资产的Shepherd敏感操作列表
-func (r *ProtectionRepository) SaveShepherdSensitiveActions(assetName string, actions []string) error {
+// SaveShepherdSensitiveActions 保存指定资产实例的Shepherd敏感操作列表
+func (r *ProtectionRepository) SaveShepherdSensitiveActions(assetName, assetID string, actions []string) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
-
-	// 读取现有数据
-	row := r.db.QueryRow(`SELECT sensitive_actions FROM shepherd_rules WHERE id = 1`)
-	var raw sql.NullString
-	_ = row.Scan(&raw)
-
-	ruleMap := make(map[string]interface{})
-	if raw.Valid && raw.String != "" {
-		var decoded interface{}
-		if err := json.Unmarshal([]byte(raw.String), &decoded); err == nil {
-			switch v := decoded.(type) {
-			case map[string]interface{}:
-				ruleMap = v
-			case []interface{}:
-				ruleMap["GLOBAL"] = v
-			}
-		}
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return fmt.Errorf("asset_id is required")
 	}
 
-	ruleMap[assetName] = actions
-
-	jsonStr, err := json.Marshal(ruleMap)
+	jsonStr, err := json.Marshal(normalizeShepherdActions(actions))
 	if err != nil {
 		return fmt.Errorf("failed to marshal shepherd rules: %w", err)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err = r.db.Exec(`
-		INSERT OR REPLACE INTO shepherd_rules (id, sensitive_actions, updated_at)
-		VALUES (1, ?, ?)
-	`, string(jsonStr), now)
+		INSERT OR REPLACE INTO shepherd_rules (asset_id, asset_name, sensitive_actions, updated_at)
+		VALUES (?, ?, ?, ?)
+	`, assetID, assetName, string(jsonStr), now)
 	if err != nil {
 		return fmt.Errorf("failed to save shepherd rules: %w", err)
 	}
 
 	return nil
+}
+
+func normalizeShepherdActions(actions []string) []string {
+	seen := make(map[string]struct{}, len(actions))
+	normalized := make([]string, 0, len(actions))
+	for _, action := range actions {
+		trimmed := strings.TrimSpace(action)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
 }
 
 // --- ClearAllData ---

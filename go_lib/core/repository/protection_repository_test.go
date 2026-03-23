@@ -101,6 +101,7 @@ func TestProtectionConfig_CRUD(t *testing.T) {
 	// 保存配置
 	config := &ProtectionConfig{
 		AssetName:               "openclaw",
+		AssetID:                 "openclaw:test-1",
 		Enabled:                 true,
 		AuditOnly:               false,
 		SandboxEnabled:          true,
@@ -116,7 +117,7 @@ func TestProtectionConfig_CRUD(t *testing.T) {
 	}
 
 	// 获取配置
-	got, err := repo.GetProtectionConfig("openclaw", "")
+	got, err := repo.GetProtectionConfig("openclaw", "openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetProtectionConfig failed: %v", err)
 	}
@@ -140,7 +141,7 @@ func TestProtectionConfig_CRUD(t *testing.T) {
 	}
 
 	// 禁用
-	err = repo.SetProtectionEnabled("openclaw", "", false)
+	err = repo.SetProtectionEnabled("openclaw", "openclaw:test-1", false)
 	if err != nil {
 		t.Fatalf("SetProtectionEnabled failed: %v", err)
 	}
@@ -153,11 +154,11 @@ func TestProtectionConfig_CRUD(t *testing.T) {
 	}
 
 	// 删除
-	err = repo.DeleteProtectionConfig("openclaw", "")
+	err = repo.DeleteProtectionConfig("openclaw", "openclaw:test-1")
 	if err != nil {
 		t.Fatalf("DeleteProtectionConfig failed: %v", err)
 	}
-	got, err = repo.GetProtectionConfig("openclaw", "")
+	got, err = repo.GetProtectionConfig("openclaw", "openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetProtectionConfig failed: %v", err)
 	}
@@ -174,6 +175,7 @@ func TestProtectionStatistics_SaveAndGet(t *testing.T) {
 
 	stats := &ProtectionStatistics{
 		AssetName:     "openclaw",
+		AssetID:       "openclaw:test-1",
 		AnalysisCount: 100,
 		MessageCount:  200,
 		WarningCount:  5,
@@ -186,7 +188,7 @@ func TestProtectionStatistics_SaveAndGet(t *testing.T) {
 		t.Fatalf("SaveProtectionStatistics failed: %v", err)
 	}
 
-	got, err := repo.GetProtectionStatistics("openclaw", "")
+	got, err := repo.GetProtectionStatistics("openclaw", "openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetProtectionStatistics failed: %v", err)
 	}
@@ -198,11 +200,11 @@ func TestProtectionStatistics_SaveAndGet(t *testing.T) {
 	}
 
 	// 清空
-	err = repo.ClearProtectionStatistics("openclaw", "")
+	err = repo.ClearProtectionStatistics("openclaw", "openclaw:test-1")
 	if err != nil {
 		t.Fatalf("ClearProtectionStatistics failed: %v", err)
 	}
-	got, err = repo.GetProtectionStatistics("openclaw", "")
+	got, err = repo.GetProtectionStatistics("openclaw", "openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetProtectionStatistics failed: %v", err)
 	}
@@ -218,24 +220,30 @@ func TestShepherdRules_SaveAndGet(t *testing.T) {
 	repo := NewProtectionRepository(db)
 
 	// 初始为空
-	actions, err := repo.GetShepherdSensitiveActions("openclaw")
+	actions, found, err := repo.GetShepherdSensitiveActions("openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+	}
+	if found {
+		t.Fatalf("Expected found=false initially")
 	}
 	if len(actions) != 0 {
 		t.Fatalf("Expected 0 actions, got %d", len(actions))
 	}
 
 	// 保存
-	err = repo.SaveShepherdSensitiveActions("openclaw", []string{"action1", "action2"})
+	err = repo.SaveShepherdSensitiveActions("openclaw", "openclaw:test-1", []string{"action1", "action2"})
 	if err != nil {
 		t.Fatalf("SaveShepherdSensitiveActions failed: %v", err)
 	}
 
 	// 获取
-	actions, err = repo.GetShepherdSensitiveActions("openclaw")
+	actions, found, err = repo.GetShepherdSensitiveActions("openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+	}
+	if !found {
+		t.Fatalf("Expected found=true after save")
 	}
 	if len(actions) != 2 {
 		t.Fatalf("Expected 2 actions, got %d", len(actions))
@@ -245,13 +253,16 @@ func TestShepherdRules_SaveAndGet(t *testing.T) {
 	}
 
 	// 保存另一个资产的规则，不影响第一个
-	err = repo.SaveShepherdSensitiveActions("other_bot", []string{"action3"})
+	err = repo.SaveShepherdSensitiveActions("other_bot", "other:test-2", []string{"action3"})
 	if err != nil {
 		t.Fatalf("SaveShepherdSensitiveActions failed: %v", err)
 	}
-	actions, err = repo.GetShepherdSensitiveActions("openclaw")
+	actions, found, err = repo.GetShepherdSensitiveActions("openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+	}
+	if !found {
+		t.Fatalf("Expected found=true for openclaw after other bot save")
 	}
 	if len(actions) != 2 {
 		t.Fatalf("Expected 2 actions for openclaw, got %d", len(actions))

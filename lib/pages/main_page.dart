@@ -212,10 +212,13 @@ class _MainPageState extends State<MainPage>
     try {
       final enabledConfigs = await ProtectionDatabaseService()
           .getEnabledProtectionConfigs();
-      final assetName = enabledConfigs.isNotEmpty
-          ? enabledConfigs.first.assetName
-          : 'GLOBAL';
-      await PluginService().loadAndSyncShepherdRules(assetName);
+      if (enabledConfigs.isNotEmpty) {
+        final config = enabledConfigs.first;
+        await PluginService().loadAndSyncShepherdRules(
+          config.assetName,
+          config.assetID,
+        );
+      }
     } catch (e) {
       appLogger.error('[MainPage] Failed to init Shepherd rules', e);
     }
@@ -349,53 +352,15 @@ class _MainPageState extends State<MainPage>
       );
 
       for (final config in enabledConfigs) {
-        var resolvedAssetID = config.assetID;
-        if (resolvedAssetID.isEmpty) {
-          resolvedAssetID = _resolveAssetIDFromCachedScan(config.assetName);
-          if (resolvedAssetID.isNotEmpty) {
-            try {
-              final modelService = ModelConfigDatabaseService();
-              final oldBotModelConfig = await modelService.getBotModelConfig(
-                config.assetName,
-                config.assetID,
-              );
-              if (oldBotModelConfig != null) {
-                await modelService.saveBotModelConfig(
-                  oldBotModelConfig.copyWith(assetID: resolvedAssetID),
-                );
-                await modelService.deleteBotModelConfig(
-                  config.assetName,
-                  config.assetID,
-                );
-              }
-
-              await ProtectionDatabaseService().saveProtectionConfig(
-                config.copyWith(assetID: resolvedAssetID),
-              );
-              await ProtectionDatabaseService().deleteProtectionConfig(
-                config.assetName,
-                config.assetID,
-              );
-              appLogger.info(
-                '[MainPage] Migrated protection config assetID: ${config.assetName} -> $resolvedAssetID',
-              );
-            } catch (e) {
-              appLogger.warning(
-                '[MainPage] Failed to migrate empty assetID for ${config.assetName}: $e',
-              );
-            }
-          }
-        }
-
-        if (resolvedAssetID.isEmpty) {
+        if (config.assetID.isEmpty) {
           appLogger.warning(
             '[MainPage] Skip restoring protection without assetID: ${config.assetName}',
           );
           continue;
         }
 
-        _protectedAssetIDs.add(resolvedAssetID);
-        _protectedAssetNamesByID[resolvedAssetID] = config.assetName;
+        _protectedAssetIDs.add(config.assetID);
+        _protectedAssetNamesByID[config.assetID] = config.assetName;
       }
       appLogger.info(
         '[MainPage] Enabled assets: ${_protectedAssetIDs.map((id) => '${_protectedAssetNamesByID[id]}/$id').join(', ')}',
@@ -417,22 +382,6 @@ class _MainPageState extends State<MainPage>
         });
       }
     }
-  }
-
-  String _resolveAssetIDFromCachedScan(String assetName) {
-    final assets = _pendingScanResult?.assets ?? const <Asset>[];
-    final matches = assets
-        .where((asset) => asset.name == assetName && asset.id.isNotEmpty)
-        .toList();
-    if (matches.isEmpty) {
-      return '';
-    }
-    if (matches.length > 1) {
-      appLogger.warning(
-        '[MainPage] Multiple assets matched for empty assetID restore: $assetName, using first',
-      );
-    }
-    return matches.first.id;
   }
 
   Future<void> _startProxyInBackground() async {

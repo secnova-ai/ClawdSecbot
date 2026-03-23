@@ -34,37 +34,18 @@ func TestEnsureBundledShepherdRulesReleased(t *testing.T) {
 	}
 }
 
-func TestUpdateGlobalUserRulesPersistsToJSON(t *testing.T) {
+func TestSaveUserRulesPersistsToJSON(t *testing.T) {
 	targetRoot := t.TempDir()
 	rulesFile, err := ensureBundledShepherdRulesReleased(targetRoot)
 	if err != nil {
 		t.Fatalf("release bundled user rules failed: %v", err)
 	}
 
-	seedRules, err := loadUserRulesFromFile(rulesFile)
-	if err != nil {
-		t.Fatalf("load seed rules failed: %v", err)
-	}
-
-	globalRulesMu.Lock()
-	prevRules := cloneUserRules(globalUserRules)
-	prevLoaded := globalRulesLoaded
-	prevFile := globalRulesFile
-	globalUserRules = seedRules
-	globalRulesLoaded = true
-	globalRulesFile = rulesFile
-	globalRulesMu.Unlock()
-	defer func() {
-		globalRulesMu.Lock()
-		globalUserRules = prevRules
-		globalRulesLoaded = prevLoaded
-		globalRulesFile = prevFile
-		globalRulesMu.Unlock()
-	}()
-
 	input := []string{"delete_file", "send_email", "delete_file", " "}
-	if err := UpdateGlobalUserRules(input); err != nil {
-		t.Fatalf("UpdateGlobalUserRules failed: %v", err)
+	if err := saveUserRulesToFile(rulesFile, &UserRules{
+		SensitiveActions: normalizeSensitiveActions(input),
+	}); err != nil {
+		t.Fatalf("saveUserRulesToFile failed: %v", err)
 	}
 
 	loaded, err := loadUserRulesFromFile(rulesFile)

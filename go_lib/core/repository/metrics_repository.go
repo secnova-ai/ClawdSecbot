@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"go_lib/core/logging"
@@ -20,6 +21,7 @@ type ApiMetrics struct {
 	IsBlocked        bool   `json:"is_blocked"`
 	RiskLevel        string `json:"risk_level,omitempty"`
 	AssetName        string `json:"asset_name,omitempty"`
+	AssetID          string `json:"asset_id"`
 }
 
 // TokenTrendPoint Token趋势数据点
@@ -38,13 +40,13 @@ type ToolCallTrendPoint struct {
 
 // ApiStatistics API统计数据
 type ApiStatistics struct {
-	TotalTokens           int                  `json:"total_tokens"`
-	TotalPromptTokens     int                  `json:"total_prompt_tokens"`
-	TotalCompletionTokens int                  `json:"total_completion_tokens"`
-	TotalToolCalls        int                  `json:"total_tool_calls"`
-	RequestCount          int                  `json:"request_count"`
-	BlockedCount          int                  `json:"blocked_count"`
-	TokenTrend            []*TokenTrendPoint   `json:"token_trend"`
+	TotalTokens           int                   `json:"total_tokens"`
+	TotalPromptTokens     int                   `json:"total_prompt_tokens"`
+	TotalCompletionTokens int                   `json:"total_completion_tokens"`
+	TotalToolCalls        int                   `json:"total_tool_calls"`
+	RequestCount          int                   `json:"request_count"`
+	BlockedCount          int                   `json:"blocked_count"`
+	TokenTrend            []*TokenTrendPoint    `json:"token_trend"`
 	ToolCallTrend         []*ToolCallTrendPoint `json:"tool_call_trend"`
 }
 
@@ -66,6 +68,10 @@ func (r *MetricsRepository) SaveApiMetrics(metrics *ApiMetrics) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
+	metrics.AssetID = strings.TrimSpace(metrics.AssetID)
+	if metrics.AssetID == "" {
+		return fmt.Errorf("asset_id is required")
+	}
 
 	if metrics.Timestamp == "" {
 		metrics.Timestamp = time.Now().UTC().Format(time.RFC3339)
@@ -78,10 +84,10 @@ func (r *MetricsRepository) SaveApiMetrics(metrics *ApiMetrics) error {
 
 	_, err := r.db.Exec(`
 		INSERT INTO api_metrics (timestamp, prompt_tokens, completion_tokens, total_tokens, 
-			tool_call_count, model, is_blocked, risk_level, asset_name)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			tool_call_count, model, is_blocked, risk_level, asset_name, asset_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, metrics.Timestamp, metrics.PromptTokens, metrics.CompletionTokens, metrics.TotalTokens,
-		metrics.ToolCallCount, metrics.Model, isBlocked, metrics.RiskLevel, metrics.AssetName)
+		metrics.ToolCallCount, metrics.Model, isBlocked, metrics.RiskLevel, metrics.AssetName, metrics.AssetID)
 	if err != nil {
 		return fmt.Errorf("failed to save api metrics: %w", err)
 	}
@@ -90,7 +96,7 @@ func (r *MetricsRepository) SaveApiMetrics(metrics *ApiMetrics) error {
 }
 
 // GetApiStatistics 获取API统计数据
-func (r *MetricsRepository) GetApiStatistics(durationSeconds int, assetName string) (*ApiStatistics, error) {
+func (r *MetricsRepository) GetApiStatistics(durationSeconds int, assetID string) (*ApiStatistics, error) {
 	if r.db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
@@ -100,14 +106,13 @@ func (r *MetricsRepository) GetApiStatistics(durationSeconds int, assetName stri
 	}
 
 	cutoffTime := time.Now().Add(-time.Duration(durationSeconds) * time.Second).UTC().Format(time.RFC3339)
-
-	whereClause := "WHERE timestamp >= ?"
-	params := []interface{}{cutoffTime}
-
-	if assetName != "" {
-		whereClause += " AND asset_name = ?"
-		params = append(params, assetName)
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return nil, fmt.Errorf("asset_id is required")
 	}
+
+	whereClause := "WHERE timestamp >= ? AND asset_id = ?"
+	params := []interface{}{cutoffTime, assetID}
 
 	// 汇总统计
 	row := r.db.QueryRow(fmt.Sprintf(`
@@ -129,14 +134,14 @@ func (r *MetricsRepository) GetApiStatistics(durationSeconds int, assetName stri
 	}
 
 	// Token趋势
-	tokenTrend, err := r.getTokenTrend(cutoffTime, assetName)
+	tokenTrend, err := r.getTokenTrend(cutoffTime, assetID)
 	if err != nil {
 		logging.Warning("Failed to get token trend: %v", err)
 	}
 	stats.TokenTrend = tokenTrend
 
 	// 工具调用趋势
-	toolCallTrend, err := r.getToolCallTrend(cutoffTime, assetName)
+	toolCallTrend, err := r.getToolCallTrend(cutoffTime, assetID)
 	if err != nil {
 		logging.Warning("Failed to get tool call trend: %v", err)
 	}
@@ -153,14 +158,9 @@ func (r *MetricsRepository) GetApiStatistics(durationSeconds int, assetName stri
 }
 
 // getTokenTrend 获取Token使用趋势（按分钟聚合）
-func (r *MetricsRepository) getTokenTrend(cutoffTime, assetName string) ([]*TokenTrendPoint, error) {
-	whereClause := "WHERE timestamp >= ?"
-	params := []interface{}{cutoffTime}
-
-	if assetName != "" {
-		whereClause += " AND asset_name = ?"
-		params = append(params, assetName)
-	}
+func (r *MetricsRepository) getTokenTrend(cutoffTime, assetID string) ([]*TokenTrendPoint, error) {
+	whereClause := "WHERE timestamp >= ? AND asset_id = ?"
+	params := []interface{}{cutoffTime, assetID}
 
 	rows, err := r.db.Query(fmt.Sprintf(`
 		SELECT 
@@ -189,14 +189,9 @@ func (r *MetricsRepository) getTokenTrend(cutoffTime, assetName string) ([]*Toke
 }
 
 // getToolCallTrend 获取工具调用趋势（按分钟聚合）
-func (r *MetricsRepository) getToolCallTrend(cutoffTime, assetName string) ([]*ToolCallTrendPoint, error) {
-	whereClause := "WHERE timestamp >= ?"
-	params := []interface{}{cutoffTime}
-
-	if assetName != "" {
-		whereClause += " AND asset_name = ?"
-		params = append(params, assetName)
-	}
+func (r *MetricsRepository) getToolCallTrend(cutoffTime, assetID string) ([]*ToolCallTrendPoint, error) {
+	whereClause := "WHERE timestamp >= ? AND asset_id = ?"
+	params := []interface{}{cutoffTime, assetID}
 
 	rows, err := r.db.Query(fmt.Sprintf(`
 		SELECT 
@@ -233,7 +228,7 @@ func (r *MetricsRepository) GetRecentApiMetrics(limit int) ([]*ApiMetrics, error
 	}
 
 	rows, err := r.db.Query(`SELECT id, timestamp, prompt_tokens, completion_tokens, total_tokens,
-		tool_call_count, model, is_blocked, risk_level, asset_name
+		tool_call_count, model, is_blocked, risk_level, asset_name, asset_id
 		FROM api_metrics ORDER BY timestamp DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get recent api metrics: %w", err)
@@ -247,7 +242,7 @@ func (r *MetricsRepository) GetRecentApiMetrics(limit int) ([]*ApiMetrics, error
 		var model, riskLevel, assetName sql.NullString
 
 		if err := rows.Scan(&m.ID, &m.Timestamp, &m.PromptTokens, &m.CompletionTokens,
-			&m.TotalTokens, &m.ToolCallCount, &model, &isBlocked, &riskLevel, &assetName); err != nil {
+			&m.TotalTokens, &m.ToolCallCount, &model, &isBlocked, &riskLevel, &assetName, &m.AssetID); err != nil {
 			continue
 		}
 
@@ -284,9 +279,13 @@ func (r *MetricsRepository) CleanOldApiMetrics(keepDays int) error {
 }
 
 // GetDailyTokenUsage 获取指定资产当日的Token使用量
-func (r *MetricsRepository) GetDailyTokenUsage(assetName string) (int, error) {
+func (r *MetricsRepository) GetDailyTokenUsage(assetID string) (int, error) {
 	if r.db == nil {
 		return 0, fmt.Errorf("database not initialized")
+	}
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return 0, fmt.Errorf("asset_id is required")
 	}
 
 	now := time.Now()
@@ -296,8 +295,8 @@ func (r *MetricsRepository) GetDailyTokenUsage(assetName string) (int, error) {
 	var dailyTokens int
 	err := r.db.QueryRow(`
 		SELECT COALESCE(SUM(total_tokens), 0)
-		FROM api_metrics WHERE asset_name = ? AND timestamp >= ?
-	`, assetName, startStr).Scan(&dailyTokens)
+		FROM api_metrics WHERE asset_id = ? AND timestamp >= ?
+	`, assetID, startStr).Scan(&dailyTokens)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get daily token usage: %w", err)
 	}

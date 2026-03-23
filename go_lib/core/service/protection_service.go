@@ -2,8 +2,11 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"go_lib/core/logging"
+	"go_lib/core/proxy"
 	"go_lib/core/repository"
 	"go_lib/core/shepherd"
 )
@@ -68,7 +71,7 @@ func SaveProtectionConfig(jsonStr string) map[string]interface{} {
 	repo := repository.NewProtectionRepository(nil)
 
 	// 如果传入的配置没有 BotModelConfig，从数据库中读取已有的值并保留
-	if config.BotModelConfig == nil && config.AssetName != "" {
+	if config.BotModelConfig == nil && strings.TrimSpace(config.AssetID) != "" {
 		existing, err := repo.GetProtectionConfig(config.AssetName, config.AssetID)
 		if err == nil && existing != nil && existing.BotModelConfig != nil {
 			config.BotModelConfig = existing.BotModelConfig
@@ -203,30 +206,55 @@ func ClearProtectionStatistics(assetName string, assetID string) map[string]inte
 // ========== Shepherd规则操作 ==========
 
 // GetShepherdSensitiveActions 获取Shepherd敏感操作
-func GetShepherdSensitiveActions(assetName string) map[string]interface{} {
-	_ = assetName // Shepherd rules are global and persisted in JSON.
-	actions := shepherd.GetGlobalUserRules().SensitiveActions
+func GetShepherdSensitiveActions(assetName, assetID string) map[string]interface{} {
+	_ = assetName
+	if strings.TrimSpace(assetID) == "" {
+		return errorResult(fmt.Errorf("asset_id is required"))
+	}
+	repo := repository.NewProtectionRepository(nil)
+	actions, found, err := repo.GetShepherdSensitiveActions(assetID)
+	if err != nil {
+		logging.Error("Failed to get shepherd sensitive actions: %v", err)
+		return errorResult(err)
+	}
+	if !found {
+		defaultRules, defaultErr := shepherd.GetDefaultUserRules()
+		if defaultErr != nil {
+			logging.Error("Failed to load default shepherd rules: %v", defaultErr)
+			return errorResult(defaultErr)
+		}
+		actions = defaultRules.SensitiveActions
+	}
 	return successDataResult(actions)
 }
 
 // SaveShepherdSensitiveActions 保存Shepherd敏感操作
 func SaveShepherdSensitiveActions(jsonStr string) map[string]interface{} {
 	var input struct {
-		AssetName        string   `json:"asset_name"`
-		Actions          []string `json:"actions"`
-		SensitiveActions []string `json:"SensitiveActions"`
+		AssetName string   `json:"asset_name"`
+		AssetID   string   `json:"asset_id"`
+		Actions   []string `json:"actions"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &input); err != nil {
 		return errorMessageResult("invalid JSON: " + err.Error())
 	}
 
-	actions := input.Actions
-	if len(actions) == 0 {
-		actions = input.SensitiveActions
+	if strings.TrimSpace(input.AssetID) == "" {
+		return errorResult(fmt.Errorf("asset_id is required"))
 	}
-	if err := shepherd.UpdateGlobalUserRules(actions); err != nil {
+
+	repo := repository.NewProtectionRepository(nil)
+	if err := repo.SaveShepherdSensitiveActions(input.AssetName, input.AssetID, input.Actions); err != nil {
 		logging.Error("Failed to save shepherd sensitive actions: %v", err)
 		return errorResult(err)
+	}
+
+	rulesJSON, err := json.Marshal(map[string]interface{}{"SensitiveActions": input.Actions})
+	if err != nil {
+		return errorResult(err)
+	}
+	if result := proxy.UpdateShepherdRulesByAssetInternal(input.AssetName, input.AssetID, string(rulesJSON)); result != "ok" {
+		return errorMessageResult(result)
 	}
 
 	return successResult()

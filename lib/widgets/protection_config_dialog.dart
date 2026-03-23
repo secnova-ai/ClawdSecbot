@@ -205,6 +205,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       // Load Shepherd Rules
       final rules = await PluginService().loadAndSyncShepherdRules(
         widget.assetName,
+        widget.assetID,
       );
       _sensitiveActions.clear();
       _sensitiveActions.addAll(rules['sensitiveActions']!);
@@ -431,7 +432,14 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       );
 
       // Shepherd rules are persisted by Go JSON file directly.
-      await PluginService().updateShepherdRules(_sensitiveActions);
+      final ruleAssetID = _config.assetID.isNotEmpty
+          ? _config.assetID
+          : widget.assetID;
+      await PluginService().updateShepherdRules(
+        widget.assetName,
+        ruleAssetID,
+        _sensitiveActions,
+      );
 
       final newConfig = _config.copyWith(
         assetID: _config.assetID.isNotEmpty ? _config.assetID : widget.assetID,

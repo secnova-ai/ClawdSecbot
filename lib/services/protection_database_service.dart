@@ -75,7 +75,7 @@ class ProtectionDatabaseService {
     };
   }
 
-  /// Get protection state (async initialization included for backward compat)
+  /// Get protection state
   Future<Map<String, dynamic>?> getProtectionStateAsync() async {
     return getProtectionState();
   }
@@ -281,8 +281,15 @@ class ProtectionDatabaseService {
 
   // --- Shepherd Rules methods ---
 
-  Future<List<String>> getShepherdSensitiveActions(String assetName) async {
-    final result = _callFFIOneArg('GetShepherdSensitiveActionsFFI', assetName);
+  Future<List<String>> getShepherdSensitiveActions(
+    String assetName,
+    String assetID,
+  ) async {
+    final result = _callFFITwoArg(
+      'GetShepherdSensitiveActionsFFI',
+      assetName,
+      assetID,
+    );
     if (result['success'] != true) return [];
 
     final data = result['data'];
@@ -293,11 +300,16 @@ class ProtectionDatabaseService {
 
   Future<void> saveShepherdSensitiveActions(
     String assetName,
+    String assetID,
     List<String> actions,
   ) async {
     final result = _callFFI(
       'SaveShepherdSensitiveActionsFFI',
-      jsonEncode({'asset_name': assetName, 'actions': actions}),
+      jsonEncode({
+        'asset_name': assetName,
+        'asset_id': assetID,
+        'actions': actions,
+      }),
     );
 
     if (result['success'] != true) {

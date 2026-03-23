@@ -9,6 +9,7 @@ import '../config/build_config.dart';
 import '../utils/app_logger.dart';
 import 'native_library_service.dart';
 import 'bookmark_service.dart';
+import 'protection_database_service.dart';
 
 // C function signatures
 
@@ -28,11 +29,6 @@ typedef SetConfigPathDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
 typedef SetAppStoreBuildC = ffi.Pointer<Utf8> Function(ffi.Int32);
 typedef SetAppStoreBuildDart = ffi.Pointer<Utf8> Function(int);
-
-typedef UpdateShepherdRulesC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef UpdateShepherdRulesDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef GetShepherdRulesC = ffi.Pointer<Utf8> Function();
-typedef GetShepherdRulesDart = ffi.Pointer<Utf8> Function();
 
 // Database FFI signatures (used by model config methods)
 typedef SaveScanResultC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
@@ -187,55 +183,11 @@ class PluginService {
 
   Future<Map<String, List<String>>> loadAndSyncShepherdRules(
     String assetName,
+    String assetID,
   ) async {
-    // Shepherd rules are fully persisted by Go JSON file.
-    final sensitiveActions = _loadShepherdRulesFromPlugin();
-
-    // Sync to Go only when we have concrete rules to avoid wiping runtime rules accidentally.
-    if (sensitiveActions.isNotEmpty) {
-      await updateShepherdRules(sensitiveActions);
-    } else {
-      appLogger.warning(
-        '[Plugin] Shepherd rules empty for asset=$assetName, skip runtime sync',
-      );
-    }
-
+    final sensitiveActions = await ProtectionDatabaseService()
+        .getShepherdSensitiveActions(assetName, assetID);
     return {'sensitiveActions': sensitiveActions};
-  }
-
-  List<String> _loadShepherdRulesFromPlugin() {
-    final lib = dylib;
-    if (lib == null) {
-      appLogger.warning(
-        '[Plugin] Plugin not initialized, cannot load shepherd rules',
-      );
-      return const [];
-    }
-
-    try {
-      final getRules = lib
-          .lookupFunction<GetShepherdRulesC, GetShepherdRulesDart>(
-            'GetShepherdRulesFFI',
-          );
-      final resultPtr = getRules();
-      final result = resultPtr.toDartString();
-      freeString!(resultPtr);
-
-      final decoded = jsonDecode(result);
-      if (decoded is! Map<String, dynamic>) return const [];
-
-      final actions = decoded['SensitiveActions'];
-      if (actions is! List) return const [];
-
-      return actions
-          .whereType<String>()
-          .map((item) => item.trim())
-          .where((item) => item.isNotEmpty)
-          .toList(growable: false);
-    } catch (e) {
-      appLogger.error('[Plugin] Failed to load Shepherd rules', e);
-      return const [];
-    }
   }
 
   /// 通过FFI获取内置ReAct安全技能列表（name + description）
@@ -271,35 +223,16 @@ class PluginService {
     }
   }
 
-  Future<void> updateShepherdRules(List<String> sensitiveActions) async {
-    final lib = dylib;
-    if (lib == null) {
-      appLogger.warning(
-        '[Plugin] Plugin not initialized, cannot update shepherd rules',
-      );
-      return;
-    }
-
-    try {
-      final updateRules = lib
-          .lookupFunction<UpdateShepherdRulesC, UpdateShepherdRulesDart>(
-            'UpdateShepherdRulesFFI',
-          );
-
-      final rulesMap = {'SensitiveActions': sensitiveActions};
-      final jsonStr = jsonEncode(rulesMap);
-      final jsonPtr = jsonStr.toNativeUtf8();
-
-      final resultPtr = updateRules(jsonPtr);
-      final result = resultPtr.toDartString();
-
-      freeString!(resultPtr);
-      malloc.free(jsonPtr);
-
-      appLogger.info('[Plugin] Updated Shepherd rules: $result');
-    } catch (e) {
-      appLogger.error('[Plugin] Failed to update Shepherd rules: $e');
-    }
+  Future<void> updateShepherdRules(
+    String assetName,
+    String assetID,
+    List<String> sensitiveActions,
+  ) async {
+    await ProtectionDatabaseService().saveShepherdSensitiveActions(
+      assetName,
+      assetID,
+      sensitiveActions,
+    );
   }
 
   /// 通过FFI调用Go层保存安全模型配置

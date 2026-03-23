@@ -20,10 +20,25 @@ import '../utils/app_logger.dart';
 ///
 /// 由 [ProtectionService] 协调：通过 setProxySession / startProxyLogPolling / stopProxyLogPolling 与代理生命周期联动。
 class ProtectionMonitorService {
-  static final ProtectionMonitorService _instance =
-      ProtectionMonitorService._internal();
-  factory ProtectionMonitorService() => _instance;
-  ProtectionMonitorService._internal();
+  static const String defaultInstanceKey = '__global__';
+  static final Map<String, ProtectionMonitorService> _instances = {};
+
+  static String normalizeInstanceKey(String? instanceKey) {
+    final key = instanceKey?.trim() ?? '';
+    return key.isEmpty ? defaultInstanceKey : key;
+  }
+
+  factory ProtectionMonitorService([String instanceKey = defaultInstanceKey]) {
+    final normalizedKey = normalizeInstanceKey(instanceKey);
+    return _instances.putIfAbsent(
+      normalizedKey,
+      () => ProtectionMonitorService._internal(normalizedKey),
+    );
+  }
+
+  ProtectionMonitorService._internal(this._instanceKey);
+
+  final String _instanceKey;
 
   final StreamController<String> _logController =
       StreamController<String>.broadcast();
@@ -357,7 +372,11 @@ class ProtectionMonitorService {
       if (hasTokenChanges) {
         unawaited(
           MetricsDatabaseService()
-              .saveApiMetrics(apiMetrics, assetName: _assetName)
+              .saveApiMetrics(
+                apiMetrics,
+                assetName: _assetName,
+                assetID: _assetID,
+              )
               .catchError((Object e) {
                 appLogger.error(
                   '[ProtectionMonitor] Failed to save API metrics',
@@ -507,6 +526,7 @@ class ProtectionMonitorService {
       return await MetricsDatabaseService().getApiStatistics(
         duration: duration,
         assetName: _assetName,
+        assetID: _assetID,
       );
     } catch (e) {
       appLogger.error('[ProtectionMonitor] Get API statistics failed', e);
@@ -560,7 +580,7 @@ class ProtectionMonitorService {
       _metricsController.add(metrics);
       unawaited(
         MetricsDatabaseService()
-            .saveApiMetrics(metrics, assetName: _assetName)
+            .saveApiMetrics(metrics, assetName: _assetName, assetID: _assetID)
             .catchError((Object e) {
               appLogger.error(
                 '[ProtectionMonitor] Failed to save API metrics',
@@ -692,7 +712,11 @@ class ProtectionMonitorService {
         if (hasTokenChanges) {
           unawaited(
             MetricsDatabaseService()
-                .saveApiMetrics(metrics, assetName: _assetName)
+                .saveApiMetrics(
+                  metrics,
+                  assetName: _assetName,
+                  assetID: _assetID,
+                )
                 .catchError((Object e) {
                   appLogger.error(
                     '[ProtectionMonitor] Failed to save API metrics',
@@ -864,7 +888,7 @@ class ProtectionMonitorService {
     );
   }
 
-  void dispose() {
+  void dispose({bool removeInstance = true}) {
     stopProxyLogPolling();
     _logSubscription?.cancel();
     _metricsSubscription?.cancel();
@@ -875,5 +899,8 @@ class ProtectionMonitorService {
     _resultController.close();
     _metricsController.close();
     _securityEventController.close();
+    if (removeInstance) {
+      _instances.remove(_instanceKey);
+    }
   }
 }

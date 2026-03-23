@@ -4,6 +4,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 
 	"go_lib/core/logging"
 	"go_lib/core/repository"
@@ -28,6 +29,9 @@ func SaveBotModelConfig(jsonStr string) map[string]interface{} {
 
 	if input.AssetName == "" {
 		return errorMessageResult("asset_name is required")
+	}
+	if strings.TrimSpace(input.AssetID) == "" {
+		return errorMessageResult("asset_id is required")
 	}
 
 	repo := repository.NewProtectionRepository(nil)
@@ -69,6 +73,9 @@ func SaveBotModelConfig(jsonStr string) map[string]interface{} {
 // GetBotModelConfig loads bot model config for a specific asset instance.
 // Internally it reads from ProtectionConfig.BotModelConfig.
 func GetBotModelConfig(assetName string, assetID string) map[string]interface{} {
+	if strings.TrimSpace(assetID) == "" {
+		return errorMessageResult("asset_id is required")
+	}
 	repo := repository.NewProtectionRepository(nil)
 	config, err := repo.GetProtectionConfig(assetName, assetID)
 	if err != nil {
@@ -97,6 +104,9 @@ func GetBotModelConfig(assetName string, assetID string) map[string]interface{} 
 // DeleteBotModelConfig deletes bot model config for a specific asset instance.
 // Internally it clears ProtectionConfig.BotModelConfig.
 func DeleteBotModelConfig(assetName string, assetID string) map[string]interface{} {
+	if strings.TrimSpace(assetID) == "" {
+		return errorMessageResult("asset_id is required")
+	}
 	repo := repository.NewProtectionRepository(nil)
 
 	// Load existing protection config.

@@ -58,15 +58,8 @@ type ShepherdGate struct {
 
 	reactAnalyzer *ToolCallReActAnalyzer
 	reactSkillCfg ReActSkillRuntimeConfig
+	userRules     *UserRules
 }
-
-// Global UserRules storage
-var (
-	globalUserRules   = &UserRules{}
-	globalRulesMu     sync.RWMutex
-	globalRulesLoaded bool
-	globalRulesFile   string
-)
 
 // NewShepherdGate creates a new ShepherdGate instance
 func NewShepherdGate(config *repository.SecurityModelConfig) (*ShepherdGate, error) {
@@ -78,9 +71,6 @@ func NewShepherdGateWithRuntime(config *repository.SecurityModelConfig, reactCfg
 	if err := modelfactory.ValidateSecurityModelConfig(config); err != nil {
 		return nil, fmt.Errorf("invalid security model config: %w", err)
 	}
-	if err := ensureGlobalUserRulesLoaded(); err != nil {
-		logging.Warning("[ShepherdGate] Failed to load user rules from JSON, fallback to empty rules: %v", err)
-	}
 
 	ctx := context.Background()
 	chatModel, err := modelfactory.CreateChatModelFromConfig(ctx, config)
@@ -88,11 +78,18 @@ func NewShepherdGateWithRuntime(config *repository.SecurityModelConfig, reactCfg
 		return nil, fmt.Errorf("failed to create chat model: %w", err)
 	}
 
+	defaultRules, err := loadDefaultUserRules()
+	if err != nil {
+		logging.Warning("[ShepherdGate] Failed to load default user rules, fallback to empty rules: %v", err)
+		defaultRules = &UserRules{SensitiveActions: []string{}}
+	}
+
 	sg := &ShepherdGate{
 		modelConfig:   config,
 		chatModel:     chatModel,
 		language:      "en",
 		reactSkillCfg: normalizeReActSkillRuntimeConfig(reactCfg),
+		userRules:     cloneUserRules(defaultRules),
 	}
 
 	lang := skillscan.GetLanguageFromAppSettings()
@@ -116,7 +113,24 @@ func NewShepherdGateForTesting(chatModel model.ChatModel, language string, model
 		chatModel:   chatModel,
 		language:    language,
 		modelConfig: modelConfig,
+		userRules:   &UserRules{SensitiveActions: []string{}},
 	}
+}
+
+// GetUserRules returns a copy of current user rules for this gate instance.
+func (sg *ShepherdGate) GetUserRules() *UserRules {
+	sg.mu.RLock()
+	defer sg.mu.RUnlock()
+	return cloneUserRules(sg.userRules)
+}
+
+// UpdateUserRules updates user rules for this gate instance.
+func (sg *ShepherdGate) UpdateUserRules(sensitiveActions []string) {
+	sg.mu.Lock()
+	sg.userRules = &UserRules{
+		SensitiveActions: normalizeSensitiveActions(sensitiveActions),
+	}
+	sg.mu.Unlock()
 }
 
 // getEffectiveLanguage returns the current effective language.
@@ -274,7 +288,7 @@ func extractUsage(extra map[string]interface{}, defaultPromptTokens, defaultComp
 
 // CheckToolCall performs the security check
 func (sg *ShepherdGate) CheckToolCall(ctx context.Context, contextMessages []ConversationMessage, toolCalls []ToolCallInfo, toolResults []ToolResultInfo, lastUserMessage string) (*ShepherdDecision, error) {
-	rules := GetGlobalUserRules()
+	rules := sg.GetUserRules()
 
 	sg.mu.RLock()
 	reactAnalyzer := sg.reactAnalyzer

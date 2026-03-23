@@ -22,11 +22,49 @@ import '../utils/app_logger.dart';
 /// 合并了代理生命周期管理与协调编排，内部持有 [ProtectionMonitorService]
 /// 负责日志/事件/统计/审计。UI 层仅依赖本服务。
 class ProtectionService {
-  static final ProtectionService _instance = ProtectionService._internal();
-  factory ProtectionService() => _instance;
-  ProtectionService._internal();
+  static const String defaultInstanceKey = '__global__';
+  static final Map<String, ProtectionService> _instances = {};
 
-  final ProtectionMonitorService _monitor = ProtectionMonitorService();
+  static String normalizeInstanceKey(String? instanceKey) {
+    final key = instanceKey?.trim() ?? '';
+    return key.isEmpty ? defaultInstanceKey : key;
+  }
+
+  static String buildAssetScopedInstanceKey(
+    String assetName, [
+    String assetID = '',
+  ]) {
+    final normalizedAssetName = assetName.trim();
+    final normalizedAssetID = assetID.trim();
+    if (normalizedAssetID.isNotEmpty) {
+      return 'asset::$normalizedAssetID';
+    }
+    if (normalizedAssetName.isNotEmpty) {
+      return 'asset_name::${normalizedAssetName.toLowerCase()}';
+    }
+    return defaultInstanceKey;
+  }
+
+  factory ProtectionService([String instanceKey = defaultInstanceKey]) {
+    final normalizedKey = normalizeInstanceKey(instanceKey);
+    return _instances.putIfAbsent(
+      normalizedKey,
+      () => ProtectionService._internal(normalizedKey),
+    );
+  }
+
+  factory ProtectionService.scoped(String instanceKey) =>
+      ProtectionService(instanceKey);
+
+  factory ProtectionService.forAsset(String assetName, [String assetID = '']) =>
+      ProtectionService(buildAssetScopedInstanceKey(assetName, assetID));
+
+  ProtectionService._internal(this._instanceKey) {
+    _monitor = ProtectionMonitorService(_instanceKey);
+  }
+
+  final String _instanceKey;
+  late final ProtectionMonitorService _monitor;
 
   // === 代理状态 ===
   String? _assetName;
@@ -237,7 +275,7 @@ class ProtectionService {
     int initialDailyTokenUsage = runtimeConfig.initialDailyTokenUsage;
     if (_assetName != null && effectiveDailyTokenLimit > 0) {
       initialDailyTokenUsage = await MetricsDatabaseService()
-          .getDailyTokenUsage(_assetName!);
+          .getDailyTokenUsage(_assetName!, _assetID);
     }
 
     final ProtectionRuntimeConfig finalRuntimeConfig = ProtectionRuntimeConfig(
@@ -571,7 +609,7 @@ class ProtectionService {
       int initialDailyTokenUsage = 0;
       if (dailyTokenLimit > 0 && assetName.isNotEmpty) {
         initialDailyTokenUsage = await MetricsDatabaseService()
-            .getDailyTokenUsage(assetName);
+            .getDailyTokenUsage(assetName, assetID);
       }
 
       final configJson = jsonEncode({
@@ -912,7 +950,12 @@ class ProtectionService {
     riskLevel: riskLevel,
   );
 
-  void dispose() => _monitor.dispose();
+  void dispose({bool removeInstance = true}) {
+    _monitor.dispose(removeInstance: removeInstance);
+    if (removeInstance) {
+      _instances.remove(_instanceKey);
+    }
+  }
 
   AuditLogQueryResult getAuditLogsFromBuffer({
     int limit = 100,

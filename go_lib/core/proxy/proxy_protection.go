@@ -305,6 +305,11 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 		return nil, fmt.Errorf("failed to create shepherd gate: %w", err)
 	}
 	shepherdGate.SetAssetContext(protectionConfig.AssetName, protectionConfig.AssetID)
+	if persistedActions, found, repoErr := repository.NewProtectionRepository(nil).GetShepherdSensitiveActions(protectionConfig.AssetID); repoErr != nil {
+		logging.Warning("[ProxyProtection] Failed to load persisted shepherd rules for asset_id=%s: %v", protectionConfig.AssetID, repoErr)
+	} else if found {
+		shepherdGate.UpdateUserRules(persistedActions)
+	}
 	logging.Info("[ProxyProtection] Security model: Provider=%s, Model=%s", securityModel.Provider, securityModel.Model)
 
 	// ==================== Runtime Config ====================
@@ -410,6 +415,23 @@ func (pp *ProxyProtection) UpdateSecurityModelConfig(config *repository.Security
 	pp.sendTerminalLog("ShepherdGate 模型配置已更新")
 	logging.Info("ShepherdGate model config updated successfully")
 	return nil
+}
+
+// UpdateShepherdRules updates sensitive action rules for this proxy's ShepherdGate.
+func (pp *ProxyProtection) UpdateShepherdRules(sensitiveActions []string) error {
+	if pp.shepherdGate == nil {
+		return fmt.Errorf("ShepherdGate not initialized")
+	}
+	pp.shepherdGate.UpdateUserRules(sensitiveActions)
+	return nil
+}
+
+// GetShepherdRules returns current ShepherdGate user rules for this proxy.
+func (pp *ProxyProtection) GetShepherdRules() *shepherd.UserRules {
+	if pp.shepherdGate == nil {
+		return &shepherd.UserRules{SensitiveActions: []string{}}
+	}
+	return pp.shepherdGate.GetUserRules()
 }
 
 // updateBotForwardingProvider hot-swaps the proxy's forwarding provider

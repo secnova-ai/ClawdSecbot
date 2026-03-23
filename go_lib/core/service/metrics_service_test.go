@@ -16,7 +16,8 @@ func TestSaveApiMetrics(t *testing.T) {
 		"tool_call_count": 5,
 		"model": "gpt-4",
 		"is_blocked": false,
-		"asset_name": "openclaw"
+		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1"
 	}`
 
 	result := SaveApiMetrics(input)
@@ -45,10 +46,11 @@ func TestGetApiStatistics(t *testing.T) {
 		"prompt_tokens": 100,
 		"completion_tokens": 200,
 		"total_tokens": 300,
-		"asset_name": "openclaw"
+		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1"
 	}`)
 
-	result := GetApiStatistics(`{"duration_seconds": 3600, "asset_name": "openclaw"}`)
+	result := GetApiStatistics(`{"duration_seconds": 3600, "asset_name": "openclaw", "asset_id":"openclaw:test-1"}`)
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
@@ -73,7 +75,8 @@ func TestGetRecentApiMetrics(t *testing.T) {
 	SaveApiMetrics(`{
 		"prompt_tokens": 50,
 		"total_tokens": 100,
-		"asset_name": "openclaw"
+		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1"
 	}`)
 
 	result := GetRecentApiMetrics(`{"limit": 10}`)
@@ -120,7 +123,7 @@ func TestGetDailyTokenUsage(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	result := GetDailyTokenUsage("openclaw")
+	result := GetDailyTokenUsage("openclaw", "openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}

@@ -315,8 +315,8 @@ func ClearProtectionStatisticsFFI(assetNameC, assetIDC *C.char) *C.char {
 }
 
 //export GetShepherdSensitiveActionsFFI
-func GetShepherdSensitiveActionsFFI(assetNameC *C.char) *C.char {
-	return jsonToCString(service.GetShepherdSensitiveActions(C.GoString(assetNameC)))
+func GetShepherdSensitiveActionsFFI(assetNameC, assetIDC *C.char) *C.char {
+	return jsonToCString(service.GetShepherdSensitiveActions(C.GoString(assetNameC), C.GoString(assetIDC)))
 }
 
 //export SaveShepherdSensitiveActionsFFI
@@ -431,8 +431,8 @@ func CleanOldApiMetricsFFI(jsonC *C.char) *C.char {
 }
 
 //export GetDailyTokenUsageFFI
-func GetDailyTokenUsageFFI(assetNameC *C.char) *C.char {
-	return jsonToCString(service.GetDailyTokenUsage(C.GoString(assetNameC)))
+func GetDailyTokenUsageFFI(assetNameC, assetIDC *C.char) *C.char {
+	return jsonToCString(service.GetDailyTokenUsage(C.GoString(assetNameC), C.GoString(assetIDC)))
 }
 
 // ==================== 模型配置 FFI ====================
@@ -946,13 +946,20 @@ func WaitForProtectionLogs(sessionID *C.char, timeoutMs C.int) *C.char {
 // ==================== ShepherdGate FFI (core/shepherd) ====================
 
 //export UpdateShepherdRulesFFI
-func UpdateShepherdRulesFFI(rulesJSON *C.char) *C.char {
-	return C.CString(proxy.UpdateShepherdRulesInternal(C.GoString(rulesJSON)))
+func UpdateShepherdRulesFFI(assetNameC, assetIDC, rulesJSON *C.char) *C.char {
+	return C.CString(proxy.UpdateShepherdRulesByAssetInternal(
+		C.GoString(assetNameC),
+		C.GoString(assetIDC),
+		C.GoString(rulesJSON),
+	))
 }
 
 //export GetShepherdRulesFFI
-func GetShepherdRulesFFI() *C.char {
-	return C.CString(proxy.GetShepherdRulesInternal())
+func GetShepherdRulesFFI(assetNameC, assetIDC *C.char) *C.char {
+	return C.CString(proxy.GetShepherdRulesByAssetInternal(
+		C.GoString(assetNameC),
+		C.GoString(assetIDC),
+	))
 }
 
 //export ListBundledReActSkillsFFI

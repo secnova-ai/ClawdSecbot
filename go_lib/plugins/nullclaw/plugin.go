@@ -190,9 +190,6 @@ func (p *NullclawPlugin) GetProtectionStatus(assetID string) core.ProtectionStat
 
 	// Sync with live proxy state
 	proxy := GetProxyProtectionByAsset(nullclawAssetName, assetID)
-	if proxy == nil {
-		proxy = GetProxyProtection()
-	}
 	if proxy != nil {
 		running := proxy.IsRunning()
 		cached := p.protectionStatuses[assetID]

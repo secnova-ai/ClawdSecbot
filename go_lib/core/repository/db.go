@@ -149,12 +149,12 @@ func createProtectionTables(db *sql.DB) error {
 		return fmt.Errorf("failed to create protection_state table: %w", err)
 	}
 
-	// 保护配置表（按资产名称+实例ID）
+	// 保护配置表（按资产实例ID唯一）
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS protection_config (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			asset_name TEXT NOT NULL,
-			asset_id TEXT NOT NULL DEFAULT '',
+			asset_id TEXT NOT NULL,
 			enabled INTEGER NOT NULL DEFAULT 0,
 			audit_only INTEGER NOT NULL DEFAULT 0,
 			sandbox_enabled INTEGER NOT NULL DEFAULT 0,
@@ -169,23 +169,21 @@ func createProtectionTables(db *sql.DB) error {
 			bot_model_config TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
-			UNIQUE(asset_name, asset_id)
+			UNIQUE(asset_id)
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create protection_config table: %w", err)
 	}
 
-	// 确保 bot_model_config 列存在（新增列，已有表需要 ALTER TABLE）
+	// 确保 bot_model_config 列存在
 	migrateAddColumn(db, "protection_config", "bot_model_config", "TEXT")
-	// 确保 asset_id 列存在（多实例支持）
-	migrateAddColumn(db, "protection_config", "asset_id", "TEXT NOT NULL DEFAULT ''")
 
-	// 保护统计表（按资产名称+实例ID）
+	// 保护统计表（按资产实例ID唯一）
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS protection_statistics (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			asset_name TEXT NOT NULL,
-			asset_id TEXT NOT NULL DEFAULT '',
+			asset_id TEXT NOT NULL,
 			analysis_count INTEGER NOT NULL DEFAULT 0,
 			message_count INTEGER NOT NULL DEFAULT 0,
 			warning_count INTEGER NOT NULL DEFAULT 0,
@@ -199,19 +197,17 @@ func createProtectionTables(db *sql.DB) error {
 			audit_prompt_tokens INTEGER NOT NULL DEFAULT 0,
 			audit_completion_tokens INTEGER NOT NULL DEFAULT 0,
 			updated_at TEXT NOT NULL,
-			UNIQUE(asset_name, asset_id)
+			UNIQUE(asset_id)
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create protection_statistics table: %w", err)
 	}
 
-	// 确保 asset_id 列存在（多实例支持）
-	migrateAddColumn(db, "protection_statistics", "asset_id", "TEXT NOT NULL DEFAULT ''")
-
-	// Shepherd规则表（全局唯一，id=1）
+	// Shepherd规则表（按资产实例ID隔离）
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS shepherd_rules (
-			id INTEGER PRIMARY KEY CHECK (id = 1),
+			asset_id TEXT PRIMARY KEY,
+			asset_name TEXT NOT NULL,
 			sensitive_actions TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)
@@ -277,7 +273,8 @@ func createMetricsTables(db *sql.DB) error {
 			model TEXT,
 			is_blocked INTEGER NOT NULL DEFAULT 0,
 			risk_level TEXT,
-			asset_name TEXT
+			asset_name TEXT,
+			asset_id TEXT NOT NULL
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create api_metrics table: %w", err)
@@ -293,6 +290,12 @@ func createMetricsTables(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_api_metrics_asset ON api_metrics(asset_name)
 	`); err != nil {
 		return fmt.Errorf("failed to create api_metrics asset index: %w", err)
+	}
+
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_api_metrics_asset_id ON api_metrics(asset_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create api_metrics asset_id index: %w", err)
 	}
 
 	logging.Info("Metrics tables created/verified successfully")
