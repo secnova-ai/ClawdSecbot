@@ -41,33 +41,37 @@ ok() {
 show_help() {
     cat << 'EOF'
 Usage:
-  ./scripts/build_macos_release_new.sh --type <personal|appstore> [options]
+  ./scripts/build_macos_release_new.sh --type <community|business|appstore> [options]
 
 Description:
   Unified macOS release script for build/sign/package/notarize/upload.
 
 Stages:
   all        完整流程: build->sign->package->[notarize|upload]
-             appstore 自动上传, personal 自动公证, 默认生成 Universal Binary (arm64 + x86_64).
+             appstore 自动上传, community/business 自动公证, 默认生成 Universal Binary (arm64 + x86_64).
   test       本地测试: build(debug)->sign->package, 跳过上传和公证, 生成当前机器单架构, 构建速度更快, 适合本地调试.
              appstore+test 使用 Apple Development 证书 + Developer profile, 生成可本地运行的沙箱化 .pkg.
   build      仅构建 Flutter app 和 Go 动态库.
   sign       仅签名 (需先完成 build).
   package    仅打包 DMG/PKG (需先完成 sign).
-  notarize   仅公证 (仅 personal, 需先完成 package 或传 --pkg-path).
+  notarize   仅公证 (仅 community/business, 需先完成 package 或传 --pkg-path).
   upload     仅上传 (仅 appstore, 需先完成 package 或传 --pkg-path).
 
 Core Options:
-  --type <personal|appstore>           Release channel.
+  -t, --type <community|business|appstore>
+                                       Release channel. `personal` is accepted as a legacy alias of `community`.
   --stage <all|test|build|sign|package|notarize|upload>
                                        Execution stage (default: all).
   -v, --version <X.Y.Z>                Version string (default: 1.0.0).
-  -bn, --build-number <N>              Build number (default: 1).
+  -bn, --build <STAMP>                 Build timestamp (default: current time).
+      --build-number <STAMP>
+  -ar, --arch <universal|x86_64|arm64> Target arch (default: test=host, others=universal).
+  -br, --brand <NAME>                  Brand suffix, only allowed when type=business.
   --work-dir <dir>                     Output root directory (default: build).
   --pkg-path <path>                    Package path for upload/notarize stage.
 
 Notarization:
-  --enable-notarization <true|false>   Default: personal=true, appstore=false.
+  --enable-notarization <true|false>   Default: community/business=true, appstore=false.
   --notary-keychain-profile <name>     Preferred credentials for notarytool.
   --notary-apple-id <email>            Fallback Apple ID for notarytool.
   --notary-team-id <team_id>           Fallback Team ID for notarytool.
@@ -95,30 +99,30 @@ Examples:
   # ── 1. App Store Distribution ──
 
   # 一键全流程
-  ./scripts/build_macos_release_new.sh --type appstore --stage all -v 1.2.3 -bn 45
+  ./scripts/build_macos_release_new.sh --type appstore --stage all -v 1.2.3 -bn 202603230900
 
   # 分步执行
-  ./scripts/build_macos_release_new.sh --type appstore --stage build -v 1.2.3 -bn 45
-  ./scripts/build_macos_release_new.sh --type appstore --stage sign -v 1.2.3 -bn 45
-  ./scripts/build_macos_release_new.sh --type appstore --stage package -v 1.2.3 -bn 45
+  ./scripts/build_macos_release_new.sh --type appstore --stage build -v 1.2.3 -bn 202603230900
+  ./scripts/build_macos_release_new.sh --type appstore --stage sign -v 1.2.3 -bn 202603230900
+  ./scripts/build_macos_release_new.sh --type appstore --stage package -v 1.2.3 -bn 202603230900
   ./scripts/build_macos_release_new.sh --type appstore --stage upload \
-    --pkg-path build/build_macos_appstore/ClawdSecbot-1.2.3-universal-AppStore.pkg --upload true
+    --pkg-path build/build_macos_appstore/ClawdSecbot-1.2.3-202603230900-universal-appstore.pkg --upload true
 
-  # ── 2. Personal Distribution ──
+  # ── 2. Community Distribution ──
 
   # 一键全流程
-  ./scripts/build_macos_release_new.sh --type personal --stage all -v 1.2.3 -bn 45
+  ./scripts/build_macos_release_new.sh --type community --stage all -v 1.2.3 -bn 202603230900
 
   # 分步执行 (手动公证)
-  ./scripts/build_macos_release_new.sh --type personal --stage build -v 1.2.3 -bn 45
-  ./scripts/build_macos_release_new.sh --type personal --stage sign -v 1.2.3 -bn 45
-  ./scripts/build_macos_release_new.sh --type personal --stage package -v 1.2.3 -bn 45
-  ./scripts/build_macos_release_new.sh --type personal --stage notarize \
-    --pkg-path build/build_macos_personal/ClawdSecbot-1.2.3-universal-Personal.dmg -v 1.2.3 -bn 45
+  ./scripts/build_macos_release_new.sh --type community --stage build -v 1.2.3 -bn 202603230900
+  ./scripts/build_macos_release_new.sh --type community --stage sign -v 1.2.3 -bn 202603230900
+  ./scripts/build_macos_release_new.sh --type community --stage package -v 1.2.3 -bn 202603230900
+  ./scripts/build_macos_release_new.sh --type community --stage notarize \
+    --pkg-path build/build_macos_community/ClawdSecbot-1.2.3-202603230900-universal-community.dmg -v 1.2.3 -bn 202603230900
 
   # ── 3. Local Test ──
-  ./scripts/build_macos_release_new.sh --type personal --stage test -v 1.2.3 -bn 45
-  ./scripts/build_macos_release_new.sh --type appstore --stage test -v 1.2.3 -bn 45
+  ./scripts/build_macos_release_new.sh --type community --stage test -v 1.2.3 -bn 202603230900 -ar arm64
+  ./scripts/build_macos_release_new.sh --type appstore --stage test -v 1.2.3 -bn 202603230900 -ar x86_64
 EOF
 }
 
@@ -133,6 +137,75 @@ STEP=0
 next_step() {
     STEP=$((STEP + 1))
     echo "Step $STEP: $1"
+}
+
+default_build_number() {
+    date +"%Y%m%d%H%M"
+}
+
+normalize_package_type() {
+    local raw_type="$1"
+    case "$raw_type" in
+        personal|community)
+            echo "community"
+            ;;
+        business)
+            echo "business"
+            ;;
+        appstore)
+            echo "appstore"
+            ;;
+        *)
+            fail "Unsupported type: $raw_type"
+            ;;
+    esac
+}
+
+normalize_brand_name() {
+    local raw_brand="$1"
+    local normalized
+    normalized="$(printf '%s' "$raw_brand" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+    [[ -n "$normalized" ]] || fail "brand must contain letters or digits"
+    echo "$normalized"
+}
+
+normalize_macos_arch() {
+    local raw_arch="$1"
+    case "$raw_arch" in
+        universal|x86_64|arm64)
+            echo "$raw_arch"
+            ;;
+        amd64)
+            echo "x86_64"
+            ;;
+        *)
+            fail "Unsupported macOS arch: $raw_arch"
+            ;;
+    esac
+}
+
+build_variant_for_flutter() {
+    if [[ "$BUILD_TYPE" == "appstore" ]]; then
+        echo "appstore"
+    else
+        echo "personal"
+    fi
+}
+
+artifact_brand_segment() {
+    if [[ "$BUILD_TYPE" == "business" && -n "$BRAND_NAME" ]]; then
+        echo "-$BRAND_NAME"
+    fi
+}
+
+build_package_basename() {
+    printf '%s-%s-%s-%s-%s%s' \
+        "ClawdSecbot" \
+        "$VERSION" \
+        "$BUILD_NUMBER" \
+        "$BUILD_ARCH" \
+        "$BUILD_TYPE" \
+        "$(artifact_brand_segment)"
 }
 
 # 解析发布类型对应 entitlement 文件。
@@ -193,12 +266,12 @@ resolve_app_sign_identity() {
         echo "$identity"
         return
     fi
-    if [[ "$build_type" == "personal" ]]; then
+    if [[ "$build_type" == "community" || "$build_type" == "business" ]]; then
         identity="${PERSONAL_SIGN_IDENTITY:-$DEFAULT_PERSONAL_SIGN_IDENTITY}"
         if [[ -z "$identity" ]]; then
             identity="$(find_identity_by_keyword "Developer ID Application" "codesigning")"
         fi
-        [[ "$identity" == *"Developer ID Application"* ]] || fail "personal requires Developer ID Application identity"
+        [[ "$identity" == *"Developer ID Application"* ]] || fail "community/business requires Developer ID Application identity"
     else
         identity="${APPSTORE_SIGN_IDENTITY:-$DEFAULT_APPSTORE_SIGN_IDENTITY}"
         if [[ -z "$identity" ]]; then
@@ -235,6 +308,18 @@ unlock_keychain_if_needed() {
         security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PASSWORD}" "$keychain_path" >/dev/null 2>&1 || true
         ok "Keychain unlocked"
     fi
+}
+
+thin_app_bundle_to_arch() {
+    local app_bundle="$1"
+    local target_arch="$2"
+    local thinned_bundle="${app_bundle}.thinned"
+
+    [[ "$target_arch" == "arm64" || "$target_arch" == "x86_64" ]] || fail "thin_app_bundle_to_arch only supports arm64/x86_64"
+    rm -rf "$thinned_bundle"
+    ditto --arch "$target_arch" "$app_bundle" "$thinned_bundle"
+    rm -rf "$app_bundle"
+    mv "$thinned_bundle" "$app_bundle"
 }
 
 # 使用当前 type 自动签名参数签署目标文件。
@@ -582,6 +667,7 @@ TYPE=${BUILD_TYPE}
 VERSION=${VERSION}
 BUILD_NUMBER=${BUILD_NUMBER}
 ARCH=${BUILD_ARCH}
+BRAND=${BRAND_NAME}
 APP_BUNDLE_REL=ClawdSecbot.app
 PACKAGE_NAME=${package_name}
 EOF
@@ -629,7 +715,7 @@ create_personal_dmg() {
     local app_bundle="$1"
     local output_dir="$2"
     local dmg_dir="$output_dir/dmg_src"
-    local package_path="$output_dir/ClawdSecbot-${VERSION}-${BUILD_ARCH}-Personal.dmg"
+    local package_path="$output_dir/$(build_package_basename).dmg"
     rm -rf "$dmg_dir"
     mkdir -p "$dmg_dir"
     cp -R "$app_bundle" "$dmg_dir/"
@@ -651,7 +737,7 @@ create_personal_dmg() {
 create_appstore_pkg() {
     local app_bundle="$1"
     local output_dir="$2"
-    local package_path="$output_dir/ClawdSecbot-${VERSION}-${BUILD_ARCH}-AppStore.pkg"
+    local package_path="$output_dir/$(build_package_basename).pkg"
     rm -f "$package_path"
     # productbuild 会将进度日志输出到 stdout，这里重定向到 stderr，避免污染返回路径。
     if [[ "$STAGE" == "test" ]]; then
@@ -680,8 +766,8 @@ upload_appstore_pkg() {
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --type)
-                BUILD_TYPE="${2:-}"
+            -t|--type)
+                BUILD_TYPE="$(normalize_package_type "${2:-}")"
                 shift 2
                 ;;
             --stage)
@@ -692,8 +778,16 @@ parse_args() {
                 VERSION="${2:-}"
                 shift 2
                 ;;
-            -bn|--build-number)
+            -bn|--build|--build-number)
                 BUILD_NUMBER="${2:-}"
+                shift 2
+                ;;
+            -ar|--arch)
+                BUILD_ARCH="$(normalize_macos_arch "${2:-}")"
+                shift 2
+                ;;
+            -br|--brand)
+                BRAND_NAME="$(normalize_brand_name "${2:-}")"
                 shift 2
                 ;;
             --work-dir)
@@ -765,23 +859,31 @@ parse_args() {
 
 # 校验参数组合与默认值，并初始化目录变量。
 validate_and_init() {
-    [[ "$BUILD_TYPE" == "personal" || "$BUILD_TYPE" == "appstore" ]] || fail "type must be personal|appstore"
+    [[ "$BUILD_TYPE" == "community" || "$BUILD_TYPE" == "business" || "$BUILD_TYPE" == "appstore" ]] || fail "type must be community|business|appstore"
     [[ "$STAGE" == "all" || "$STAGE" == "test" || "$STAGE" == "build" || "$STAGE" == "sign" || "$STAGE" == "package" || "$STAGE" == "notarize" || "$STAGE" == "upload" ]] || fail "invalid stage"
     [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "version must be X.Y.Z"
-    [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]] || fail "build-number must be integer"
+    [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]] || fail "build-number must be digits only"
+    if [[ "$BUILD_TYPE" != "business" && -n "$BRAND_NAME" ]]; then
+        fail "brand is only allowed when type=business"
+    fi
 
-    # 自动计算构建架构: test=当前机器单架构, 其余=universal。
-    if [[ "$STAGE" == "test" ]]; then
-        BUILD_ARCH="$(normalize_host_arch)"
-    else
-        BUILD_ARCH="universal"
+    if [[ -z "$BUILD_ARCH" ]]; then
+        if [[ "$STAGE" == "test" ]]; then
+            BUILD_ARCH="$(normalize_host_arch)"
+        else
+            BUILD_ARCH="universal"
+        fi
+    fi
+
+    if [[ "$STAGE" == "test" && "$BUILD_ARCH" == "universal" ]]; then
+        fail "test stage does not support universal arch"
     fi
 
     if [[ -z "${ENABLE_NOTARIZATION}" ]]; then
-        if [[ "$BUILD_TYPE" == "personal" ]]; then
-            ENABLE_NOTARIZATION="true"
-        else
+        if [[ "$BUILD_TYPE" == "appstore" ]]; then
             ENABLE_NOTARIZATION="false"
+        else
+            ENABLE_NOTARIZATION="true"
         fi
     fi
 
@@ -815,14 +917,14 @@ run_build_stage() {
     else
         flutter_build_mode="--release"
         products_subdir="Release"
-        echo "Building Flutter (release, universal binary)"
+        echo "Building Flutter (release, arch: $BUILD_ARCH)"
     fi
 
     # Flutter macOS 不支持 --target-platform, --release 默认 Universal, --debug 默认当前机器架构。
     flutter build macos \
         $flutter_build_mode \
         --no-tree-shake-icons \
-        --dart-define=BUILD_VARIANT="$BUILD_TYPE" \
+        --dart-define=BUILD_VARIANT="$(build_variant_for_flutter)" \
         --build-name="$VERSION" \
         --build-number="$BUILD_NUMBER"
 
@@ -838,6 +940,10 @@ run_build_stage() {
     rm -rf "$OUTPUT_DIR/ClawdSecbot.app"
     cp -R "$APP_BUNDLE" "$OUTPUT_DIR/ClawdSecbot.app"
     APP_BUNDLE="$OUTPUT_DIR/ClawdSecbot.app"
+
+    if [[ "$BUILD_ARCH" != "universal" && "$STAGE" != "test" ]]; then
+        thin_app_bundle_to_arch "$APP_BUNDLE" "$BUILD_ARCH"
+    fi
 
     if [[ "$BUILD_ARCH" == "universal" ]]; then
         verify_app_arch_slices "$APP_BUNDLE" "arm64"
@@ -880,7 +986,7 @@ run_package_stage() {
     if [[ "$BUILD_TYPE" == "appstore" && "$STAGE" != "test" && ! -f "$APP_BUNDLE/Contents/embedded.provisionprofile" ]]; then
         fail "Missing embedded.provisionprofile in app bundle, run sign stage first"
     fi
-    if [[ "$BUILD_TYPE" == "personal" ]]; then
+    if [[ "$BUILD_TYPE" == "community" || "$BUILD_TYPE" == "business" ]]; then
         PACKAGE_PATH="$(create_personal_dmg "$APP_BUNDLE" "$OUTPUT_DIR")"
     else
         PACKAGE_PATH="$(create_appstore_pkg "$APP_BUNDLE" "$OUTPUT_DIR")"
@@ -895,7 +1001,7 @@ run_package_stage() {
 # 执行公证阶段，仅 personal 支持。
 run_notarize_stage() {
     next_step "Start notarize stage"
-    [[ "$BUILD_TYPE" == "personal" ]] || fail "notarize stage is only supported for personal type"
+    [[ "$BUILD_TYPE" != "appstore" ]] || fail "notarize stage is only supported for community/business types"
     [[ "$ENABLE_NOTARIZATION" == "true" ]] || fail "notarization is disabled"
     if [[ -z "$PACKAGE_PATH" ]]; then
         [[ -f "$OUTPUT_DIR/release_meta.env" ]] || fail "No package metadata found for notarize stage"
@@ -930,7 +1036,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
-BUILD_TYPE="personal"
+BUILD_TYPE="community"
 STAGE="all"
 WORK_DIR="build"
 BUILD_ARCH=""
@@ -944,7 +1050,8 @@ APP_SIGN_IDENTITY=""
 PKG_SIGN_IDENTITY=""
 
 VERSION="1.0.0"
-BUILD_NUMBER="1"
+BUILD_NUMBER="$(default_build_number)"
+BRAND_NAME=""
 
 ENABLE_NOTARIZATION=""
 NOTARY_KEYCHAIN_PROFILE="${NOTARY_KEYCHAIN_PROFILE:-}"
@@ -991,6 +1098,9 @@ echo "Type: $BUILD_TYPE"
 echo "Stage: $STAGE"
 echo "Arch: $BUILD_ARCH"
 echo "Version: $VERSION+$BUILD_NUMBER"
+if [[ -n "$BRAND_NAME" ]]; then
+    echo "Brand: $BRAND_NAME"
+fi
 echo "Output: $OUTPUT_DIR"
 echo "App sign identity: $APP_SIGN_IDENTITY"
 if [[ "$BUILD_TYPE" == "appstore" && "$STAGE" != "test" ]]; then
@@ -1004,7 +1114,7 @@ if [[ "$STAGE" == "all" ]]; then
     run_build_stage
     run_sign_stage
     run_package_stage
-    if [[ "$BUILD_TYPE" == "personal" && "$ENABLE_NOTARIZATION" == "true" ]]; then
+    if [[ "$BUILD_TYPE" != "appstore" && "$ENABLE_NOTARIZATION" == "true" ]]; then
         run_notarize_stage
     fi
     # appstore 全流程在 all 模式下自动上传，避免再次手动触发 upload 阶段。

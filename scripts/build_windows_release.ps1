@@ -3,20 +3,12 @@
 .SYNOPSIS
     Build Windows release for ClawdSecbot.
 .DESCRIPTION
-    Builds the Go shared library (DLL), Flutter Windows app, and packages the output.
-.PARAMETER Version
-    Version string in X.Y.Z format. Default: 1.0.0
-.PARAMETER BuildNumber
-    Build number integer. Default: 1
+    Builds the Go shared library (DLL), Flutter Windows app, and packages the output
+    with GNU-style CLI options.
 .EXAMPLE
-    .\scripts\build_windows_release.ps1
-    .\scripts\build_windows_release.ps1 -Version 1.3.0 -BuildNumber 7
+    .\scripts\build_windows_release.ps1 --help
+    .\scripts\build_windows_release.ps1 --version 1.3.0 --build 202603230900 --type community
 #>
-param(
-    [string]$Version = "1.0.0",
-    [int]$BuildNumber = 1,
-    [switch]$ForcePubGet
-)
 
 $ErrorActionPreference = "Stop"
 
@@ -26,6 +18,56 @@ $GoLibDir = Join-Path $ProjectRoot "go_lib"
 $PluginsDir = Join-Path $ProjectRoot "plugins"
 $OutputName = "botsec"
 $DllName = "${OutputName}.dll"
+$Version = "1.0.0"
+$BuildNumber = (Get-Date -Format 'yyyyMMddHHmm')
+$Arch = "x86_64"
+$Type = "community"
+$Brand = ""
+$ForcePubGet = $false
+
+function Normalize-PackageType([string]$RawType) {
+    $value = if ($null -eq $RawType) { '' } else { $RawType.ToLowerInvariant() }
+    switch ($value) {
+        'personal' { return 'community' }
+        'community' { return 'community' }
+        'business' { return 'business' }
+        'appstore' { Stop-WithError "Windows zip does not support type=appstore" }
+        default { Stop-WithError "Unsupported type: $RawType" }
+    }
+}
+
+function Normalize-Arch([string]$RawArch) {
+    $value = if ($null -eq $RawArch) { '' } else { $RawArch.ToLowerInvariant() }
+    switch ($value) {
+        'x86_64' { return 'x86_64' }
+        'amd64' { return 'x86_64' }
+        default { Stop-WithError "Windows zip only supports arch=x86_64" }
+    }
+}
+
+function Normalize-Brand([string]$RawBrand) {
+    $value = if ($null -eq $RawBrand) { '' } else { $RawBrand.ToLowerInvariant() }
+    $normalized = ($value -replace '[^a-z0-9]+', '-').Trim('-')
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+        Stop-WithError "Brand must contain letters or digits"
+    }
+    return $normalized
+}
+
+function Get-ArtifactTypeSegment {
+    return $script:Type
+}
+
+function Get-ArtifactBrandSegment {
+    if ($script:Type -eq 'business' -and -not [string]::IsNullOrWhiteSpace($script:Brand)) {
+        return "-$($script:Brand)"
+    }
+    return ""
+}
+
+function Get-ArtifactFileName([string]$Extension) {
+    return "ClawdSecbot-$Version-$BuildNumber-$Arch-$(Get-ArtifactTypeSegment)$(Get-ArtifactBrandSegment).$Extension"
+}
 
 function Write-Step([string]$msg) {
     Write-Host "[BUILD] $msg" -ForegroundColor Cyan
@@ -42,6 +84,76 @@ function Write-Warn([string]$msg) {
 function Stop-WithError([string]$msg) {
     Write-Host "[ERROR] $msg" -ForegroundColor Red
     exit 1
+}
+
+function Show-Help {
+    @'
+Usage:
+  .\scripts\build_windows_release.ps1 [options]
+
+Description:
+  Build and package the Windows release artifact for ClawdSecbot.
+
+Options:
+  -v,  --version <X.Y.Z>     Semantic version (default: 1.0.0)
+  -bn, --build <STAMP>       Build timestamp (default: current time, e.g. 202603230900)
+       --build-number <STAMP>
+  -ar, --arch <ARCH>         Target arch: x86_64
+  -t,  --type <TYPE>         Package type: community|business (default: community)
+  -br, --brand <NAME>        Brand suffix, only allowed when type=business
+       --force-pub-get       Force flutter pub get before build
+  -h,  --help                Show this help message and exit
+
+Examples:
+  .\scripts\build_windows_release.ps1 --help
+  .\scripts\build_windows_release.ps1 --version 1.3.0 --build 202603230900
+  .\scripts\build_windows_release.ps1 --version 1.3.0 --type business --brand acme
+'@ | Write-Host
+}
+
+function Get-RequiredOptionValue {
+    param(
+        [string[]]$CliArgs,
+        [int]$Index,
+        [string]$OptionName
+    )
+    if ($Index + 1 -ge $CliArgs.Length) {
+        Stop-WithError "Missing value for option: $OptionName"
+    }
+    return $CliArgs[$Index + 1]
+}
+
+function Parse-Args {
+    param([string[]]$CliArgs)
+
+    $i = 0
+    while ($i -lt $CliArgs.Length) {
+        $arg = $CliArgs[$i]
+        switch ($arg) {
+            '--help' { Show-Help; exit 0 }
+            '-h' { Show-Help; exit 0 }
+            '--version' { $script:Version = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '-v' { $script:Version = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '-Version' { $script:Version = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '--build' { $script:BuildNumber = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '--build-number' { $script:BuildNumber = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '-bn' { $script:BuildNumber = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '-Build' { $script:BuildNumber = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '-BuildNumber' { $script:BuildNumber = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '--arch' { $script:Arch = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '-ar' { $script:Arch = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '-Arch' { $script:Arch = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '--type' { $script:Type = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '-t' { $script:Type = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '-Type' { $script:Type = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '--brand' { $script:Brand = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '-br' { $script:Brand = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '-Brand' { $script:Brand = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '--force-pub-get' { $script:ForcePubGet = $true; $i += 1; continue }
+            '-ForcePubGet' { $script:ForcePubGet = $true; $i += 1; continue }
+            default { Stop-WithError "Unknown option: $arg" }
+        }
+    }
 }
 
 function Invoke-FlutterPubGetWithFallback {
@@ -206,9 +318,22 @@ function Get-CMakeCommand() {
     return $null
 }
 
+Parse-Args -CliArgs $args
+
 # Validate version format
 if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     Stop-WithError "Invalid version format: $Version (expected X.Y.Z)"
+}
+if ($BuildNumber -notmatch '^\d+$') {
+    Stop-WithError "Invalid build number: $BuildNumber (expected digits only)"
+}
+$Type = Normalize-PackageType $Type
+$Arch = Normalize-Arch $Arch
+if (-not [string]::IsNullOrWhiteSpace($Brand)) {
+    $Brand = Normalize-Brand $Brand
+}
+if ($Type -ne 'business' -and -not [string]::IsNullOrWhiteSpace($Brand)) {
+    Stop-WithError "Brand is only allowed when Type=business"
 }
 
 # Pre-build icon checks
@@ -235,6 +360,11 @@ Write-Host "============================================" -ForegroundColor White
 Write-Host " ClawdSecbot Windows Release Build"
 Write-Host "============================================" -ForegroundColor White
 Write-Host "Version:      ${Version}+${BuildNumber}"
+Write-Host "Type:         $Type"
+if (-not [string]::IsNullOrWhiteSpace($Brand)) {
+    Write-Host "Brand:        $Brand"
+}
+Write-Host "Arch:         $Arch"
 Write-Host "Project Root: $ProjectRoot"
 Write-Host ""
 
@@ -355,7 +485,11 @@ try {
     & flutter clean
     if ($LASTEXITCODE -ne 0) { Write-Warn "flutter clean returned non-zero (continuing)" }
 
-    Write-Step "Skipping explicit flutter pub get (flutter build will resolve dependencies)"
+    if (Test-NeedFlutterPubGet -ProjectRootPath $ProjectRoot -Force $ForcePubGet) {
+        Invoke-FlutterPubGetWithFallback
+    } else {
+        Write-Step "Skipping explicit flutter pub get (package config is up-to-date)"
+    }
 
     Write-Step "Building Flutter Windows release"
     $buildArgs = @("build", "windows", "--release", "--no-tree-shake-icons")
@@ -394,7 +528,7 @@ try {
 # Step 5: Package output
 $bundleDir = Join-Path $ProjectRoot "build\windows\x64\runner\Release"
 $outputDir = Join-Path $ProjectRoot "build\windows_release"
-$zipFile = Join-Path $ProjectRoot "build\ClawdSecbot-${Version}-windows-x64.zip"
+$zipFile = Join-Path $ProjectRoot ("build\" + (Get-ArtifactFileName "zip"))
 
 if (-not (Test-Path $bundleDir)) {
     # Try alternative path for older Flutter versions

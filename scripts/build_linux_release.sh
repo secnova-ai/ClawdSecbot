@@ -11,7 +11,7 @@ NC='\033[0m'
 PACKAGE_NAME="clawdsecbot"
 APP_DISPLAY_NAME="ClawdSecbot"
 DEFAULT_VERSION="1.0.0"
-DEFAULT_BUILD_NUMBER="1"
+DEFAULT_BUILD_NUMBER="$(date +"%Y%m%d%H%M")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 WORK_DIR="$PROJECT_ROOT/build/linux_packaging"
@@ -24,22 +24,28 @@ BUILD_RPM=false
 BUILD_MODE_EXPLICIT=false
 VERSION="$DEFAULT_VERSION"
 BUILD_NUMBER="$DEFAULT_BUILD_NUMBER"
+BUILD_ARCH=""
+PACKAGE_TYPE="community"
+BRAND_NAME=""
+DEB_ARCH=""
+RPM_ARCH=""
+FLUTTER_ARCH=""
 
 # 打印帮助信息，说明参数与输出产物。
 show_help() {
     cat << 'EOF'
-Usage: ./scripts/build_linux_release.sh [OPTIONS] [VERSION] [BUILD_NUMBER]
+Usage: ./scripts/build_linux_release.sh [OPTIONS]
 
 Build Linux release packages for ClawdSecbot.
 Default behavior builds both DEB and RPM in one run.
 
-Arguments:
-  VERSION                    Version number (default: 0.1.0)
-                             Format: X.Y.Z (e.g., 1.2.3)
-  BUILD_NUMBER               Release number (default: 1)
-                             Integer used as pubspec build metadata and RPM release.
-
 Options:
+  -v,  --version <X.Y.Z>     Semantic version (default: 1.0.0)
+  -bn, --build <STAMP>       Build timestamp (default: current time, e.g. 202603230900)
+       --build-number <STAMP>
+  -ar, --arch <ARCH>         Target arch: x86_64|amd64|arm64
+  -t,  --type <TYPE>         Package type: community|business (default: community)
+  -br, --brand <NAME>        Brand suffix, only allowed when type=business
   --deb                      Build DEB package only
   --rpm                      Build RPM package only
   --all                      Build both DEB and RPM (default)
@@ -47,10 +53,9 @@ Options:
 
 Examples:
   ./scripts/build_linux_release.sh
-  ./scripts/build_linux_release.sh 1.3.0
-  ./scripts/build_linux_release.sh 1.3.0 7
-  ./scripts/build_linux_release.sh --deb 1.3.0
-  ./scripts/build_linux_release.sh --rpm 1.3.0 7
+  ./scripts/build_linux_release.sh -v 1.3.0 -bn 202603230900 -ar x86_64
+  ./scripts/build_linux_release.sh --deb -v 1.3.0 -ar amd64
+  ./scripts/build_linux_release.sh --rpm -v 1.3.0 -t business -br acme -ar arm64
 EOF
 }
 
@@ -75,6 +80,69 @@ log_info() {
     echo "INFO: $1"
 }
 
+normalize_type() {
+    local raw_type="$1"
+    case "$raw_type" in
+        personal|community)
+            echo "community"
+            ;;
+        business)
+            echo "business"
+            ;;
+        appstore)
+            fail "Linux packages do not support type=appstore"
+            ;;
+        *)
+            fail "Unsupported type: $raw_type"
+            ;;
+    esac
+}
+
+normalize_brand() {
+    local raw_brand="$1"
+    local normalized
+    normalized="$(printf '%s' "$raw_brand" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+    [[ -n "$normalized" ]] || fail "brand must contain letters or digits"
+    echo "$normalized"
+}
+
+normalize_linux_arch() {
+    local raw_arch="$1"
+    case "$raw_arch" in
+        x86_64|amd64)
+            echo "x86_64"
+            ;;
+        arm64|aarch64)
+            echo "arm64"
+            ;;
+        *)
+            fail "Unsupported Linux arch: $raw_arch"
+            ;;
+    esac
+}
+
+artifact_type_segment() {
+    echo "$PACKAGE_TYPE"
+}
+
+artifact_brand_segment() {
+    if [[ "$PACKAGE_TYPE" == "business" && -n "$BRAND_NAME" ]]; then
+        echo "-$BRAND_NAME"
+    fi
+}
+
+build_artifact_name() {
+    local extension="$1"
+    printf '%s-%s-%s-%s-%s%s.%s' \
+        "$APP_DISPLAY_NAME" \
+        "$VERSION" \
+        "$BUILD_NUMBER" \
+        "$BUILD_ARCH" \
+        "$(artifact_type_segment)" \
+        "$(artifact_brand_segment)" \
+        "$extension"
+}
+
 # 校验依赖命令是否可用。
 require_command() {
     local cmd="$1"
@@ -83,10 +151,28 @@ require_command() {
 
 # 解析脚本参数并确定构建模式与版本号。
 parse_args() {
-    local positional=()
-
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            -v|--version)
+                VERSION="${2:-}"
+                shift 2
+                ;;
+            -bn|--build|--build-number)
+                BUILD_NUMBER="${2:-}"
+                shift 2
+                ;;
+            -ar|--arch)
+                BUILD_ARCH="$(normalize_linux_arch "${2:-}")"
+                shift 2
+                ;;
+            -t|--type)
+                PACKAGE_TYPE="$(normalize_type "${2:-}")"
+                shift 2
+                ;;
+            -br|--brand)
+                BRAND_NAME="$(normalize_brand "${2:-}")"
+                shift 2
+                ;;
             --deb)
                 BUILD_DEB=true
                 BUILD_MODE_EXPLICIT=true
@@ -110,10 +196,6 @@ parse_args() {
             -*)
                 fail "Unknown option: $1"
                 ;;
-            *)
-                positional+=("$1")
-                shift
-                ;;
         esac
     done
 
@@ -122,47 +204,40 @@ parse_args() {
         BUILD_RPM=true
     fi
 
-    if [[ ${#positional[@]} -ge 1 ]]; then
-        VERSION="${positional[0]}"
-    fi
-    if [[ ${#positional[@]} -ge 2 ]]; then
-        BUILD_NUMBER="${positional[1]}"
-    fi
-    if [[ ${#positional[@]} -gt 2 ]]; then
-        fail "Too many positional arguments. Use VERSION [BUILD_NUMBER]."
-    fi
-
     if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         fail "Invalid version format: $VERSION (expect: X.Y.Z)"
     fi
     if ! [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
-        fail "Invalid build number: $BUILD_NUMBER (expect: integer)"
+        fail "Invalid build number: $BUILD_NUMBER (expect: digits only)"
+    fi
+    if [[ "$PACKAGE_TYPE" != "business" && -n "$BRAND_NAME" ]]; then
+        fail "brand is only allowed when type=business"
     fi
 }
 
 # 根据当前 CPU 架构推导 Flutter、DEB、RPM 所需架构名称。
 detect_arch() {
     local host_arch
+    local normalized_host_arch
     host_arch="$(uname -m)"
+    normalized_host_arch="$(normalize_linux_arch "$host_arch")"
 
-    case "$host_arch" in
+    if [[ -z "$BUILD_ARCH" ]]; then
+        BUILD_ARCH="$normalized_host_arch"
+    elif [[ "$BUILD_ARCH" != "$normalized_host_arch" ]]; then
+        fail "Linux script does not support cross-build: requested $BUILD_ARCH but host is $normalized_host_arch"
+    fi
+
+    case "$BUILD_ARCH" in
         x86_64)
             DEB_ARCH="amd64"
             RPM_ARCH="x86_64"
             FLUTTER_ARCH="x64"
             ;;
-        aarch64|arm64)
+        arm64)
             DEB_ARCH="arm64"
             RPM_ARCH="aarch64"
             FLUTTER_ARCH="arm64"
-            ;;
-        armv7l)
-            DEB_ARCH="armhf"
-            RPM_ARCH="armv7hl"
-            FLUTTER_ARCH="arm"
-            ;;
-        *)
-            fail "Unsupported architecture: $host_arch"
             ;;
     esac
 }
@@ -301,7 +376,7 @@ EOF
 # 生成 DEB 控制文件并打包产出 deb 文件。
 build_deb_package() {
     local deb_work="$WORK_DIR/deb/${PACKAGE_NAME}_${VERSION}_${DEB_ARCH}"
-    local deb_file="$PROJECT_ROOT/build/${APP_DISPLAY_NAME}-${VERSION}-${DEB_ARCH}.deb"
+    local deb_file="$PROJECT_ROOT/build/$(build_artifact_name "deb")"
     local installed_size
 
     log_info "Building DEB package"
@@ -384,7 +459,7 @@ build_rpm_package() {
     local rpm_out_dir="$rpm_root/RPMS/$RPM_ARCH"
     local rpm_candidates=()
     local rpm_input
-    local rpm_file="$PROJECT_ROOT/build/${APP_DISPLAY_NAME}-${VERSION}-${RPM_ARCH}.rpm"
+    local rpm_file="$PROJECT_ROOT/build/$(build_artifact_name "rpm")"
 
     log_info "Building RPM package"
     rm -rf "$WORK_DIR/rpm"
@@ -473,10 +548,10 @@ print_summary() {
     ok "Linux release build completed"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     if [[ "$BUILD_DEB" == true ]]; then
-        echo "DEB: $PROJECT_ROOT/build/${APP_DISPLAY_NAME}-${VERSION}-${DEB_ARCH}.deb"
+        echo "DEB: $PROJECT_ROOT/build/$(build_artifact_name "deb")"
     fi
     if [[ "$BUILD_RPM" == true ]]; then
-        echo "RPM: $PROJECT_ROOT/build/${APP_DISPLAY_NAME}-${VERSION}-${RPM_ARCH}.rpm"
+        echo "RPM: $PROJECT_ROOT/build/$(build_artifact_name "rpm")"
     fi
 }
 
@@ -506,6 +581,10 @@ main() {
     echo "Building Linux Release Packages"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "Version: ${VERSION}+${BUILD_NUMBER}"
+    echo "Package Type: $PACKAGE_TYPE"
+    if [[ -n "$BRAND_NAME" ]]; then
+        echo "Brand: $BRAND_NAME"
+    fi
     echo "Architecture: deb=$DEB_ARCH rpm=$RPM_ARCH flutter=$FLUTTER_ARCH"
     echo "Build DEB: $BUILD_DEB"
     echo "Build RPM: $BUILD_RPM"
