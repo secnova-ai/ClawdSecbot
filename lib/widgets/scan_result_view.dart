@@ -155,10 +155,14 @@ class ScanResultView extends StatelessWidget {
             ...result.assets.map(
               (asset) => Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: _buildAssetCard(
-                  context,
-                  asset,
-                  l10n,
+                child: _AssetCard(
+                  key: ValueKey(asset.id),
+                  asset: asset,
+                  initiallyExpanded: result.assets.length <= 1,
+                  isProtected: protectedAssets.contains(asset.id),
+                  isRestoringProtection: isRestoringProtection,
+                  onShowProtectionConfig: onShowProtectionConfig,
+                  onShowProtectionMonitor: onShowProtectionMonitor,
                 ).animate().fadeIn().slideX(begin: 0.1, end: 0),
               ),
             ),
@@ -198,387 +202,6 @@ class ScanResultView extends StatelessWidget {
             fontSize: 14,
             fontWeight: FontWeight.w600,
             color: Colors.white,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAssetCard(
-    BuildContext context,
-    Asset asset,
-    AppLocalizations l10n,
-  ) {
-    final isProtected = protectedAssets.contains(asset.id);
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF6366F1).withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: const Color(0xFF6366F1).withValues(alpha: 0.3),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF6366F1).withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  asset.displaySections.isNotEmpty
-                      ? LucideIcons.fileJson
-                      : LucideIcons.package,
-                  color: const Color(0xFF6366F1),
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  asset.name,
-                  style: AppFonts.inter(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  asset.type,
-                  style: AppFonts.firaCode(fontSize: 10, color: Colors.white70),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (asset.version.isNotEmpty)
-            _buildConfigRow(l10n.version, asset.version, Colors.white70),
-          if (asset.ports.isNotEmpty)
-            _buildConfigRow(l10n.port, asset.ports.join(', '), Colors.white70),
-          if (asset.serviceName.isNotEmpty)
-            _buildConfigRow(
-              l10n.serviceName,
-              asset.serviceName,
-              Colors.white70,
-            ),
-          if (asset.processPaths.isNotEmpty)
-            _buildConfigRow(
-              l10n.processPaths,
-              asset.processPaths.join(', '),
-              Colors.white70,
-            ),
-          // Display structured config sections from the plugin
-          if (asset.displaySections.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            const Divider(color: Colors.white12),
-            const SizedBox(height: 8),
-            _buildDisplaySections(asset.displaySections),
-          ],
-          // 所有资产都显示防护按钮
-          const SizedBox(height: 12),
-          _buildProtectionButton(context, asset, isProtected, l10n),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDisplaySections(List<DisplaySection> sections) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (int i = 0; i < sections.length; i++) ...[
-          if (i > 0) const SizedBox(height: 12),
-          _buildConfigSectionHeader(
-            sections[i].title,
-            _mapSectionIcon(sections[i].icon),
-          ),
-          const SizedBox(height: 8),
-          for (final item in sections[i].items)
-            _buildConfigDetailRow(
-              item.label,
-              item.value,
-              _statusColor(item.status),
-            ),
-        ],
-      ],
-    );
-  }
-
-  IconData _mapSectionIcon(String iconName) {
-    switch (iconName) {
-      case 'globe':
-        return LucideIcons.globe;
-      case 'box':
-        return LucideIcons.box;
-      case 'file-text':
-        return LucideIcons.fileText;
-      case 'file':
-        return LucideIcons.file;
-      case 'shield':
-        return LucideIcons.shield;
-      case 'key':
-        return LucideIcons.key;
-      case 'lock':
-        return LucideIcons.lock;
-      case 'network':
-        return LucideIcons.network;
-      case 'settings':
-        return LucideIcons.settings;
-      default:
-        return LucideIcons.info;
-    }
-  }
-
-  Color _statusColor(String status) {
-    switch (status) {
-      case 'safe':
-        return const Color(0xFF22C55E);
-      case 'danger':
-        return const Color(0xFFEF4444);
-      case 'warning':
-        return const Color(0xFFF59E0B);
-      case 'neutral':
-      default:
-        return Colors.white70;
-    }
-  }
-
-  Widget _buildConfigSectionHeader(String title, IconData icon) {
-    return Row(
-      children: [
-        Icon(icon, size: 12, color: Colors.white54),
-        const SizedBox(width: 6),
-        Text(
-          title,
-          style: AppFonts.inter(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: Colors.white54,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildConfigDetailRow(String label, String value, Color valueColor) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 100,
-            child: Text(
-              label,
-              style: AppFonts.inter(fontSize: 11, color: Colors.white38),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: AppFonts.firaCode(fontSize: 11, color: valueColor),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProtectionButton(
-    BuildContext context,
-    Asset asset,
-    bool isProtected,
-    AppLocalizations l10n,
-  ) {
-    if (isProtected) {
-      // 已防护资产：显示防护监控和配置按钮
-      final isLoading = isRestoringProtection;
-      return Row(
-        children: [
-          MouseRegion(
-            cursor: isLoading
-                ? SystemMouseCursors.basic
-                : SystemMouseCursors.click,
-            child: GestureDetector(
-              onTap: isLoading ? null : () => onShowProtectionMonitor(asset),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: isLoading
-                        ? [
-                            const Color(0xFF22C55E).withValues(alpha: 0.5),
-                            const Color(0xFF16A34A).withValues(alpha: 0.5),
-                          ]
-                        : [const Color(0xFF22C55E), const Color(0xFF16A34A)],
-                  ),
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: isLoading
-                      ? []
-                      : [
-                          BoxShadow(
-                            color: const Color(
-                              0xFF22C55E,
-                            ).withValues(alpha: 0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (isLoading)
-                      const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    else
-                      const Icon(
-                        LucideIcons.shieldCheck,
-                        color: Colors.white,
-                        size: 14,
-                      ),
-                    const SizedBox(width: 6),
-                    Text(
-                      isLoading
-                          ? l10n.protectionStarting
-                          : l10n.protectionMonitor,
-                      style: AppFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          // 配置按钮（恢复防护期间禁用）
-          MouseRegion(
-            cursor: isLoading
-                ? SystemMouseCursors.basic
-                : SystemMouseCursors.click,
-            child: GestureDetector(
-              onTap: isLoading
-                  ? null
-                  : () => onShowProtectionConfig(asset, isEditMode: true),
-              child: Opacity(
-                opacity: isLoading ? 0.4 : 1.0,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.2),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        LucideIcons.settings,
-                        color: Colors.white70,
-                        size: 14,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        l10n.protectionConfigBtn,
-                        style: AppFonts.inter(
-                          fontSize: 12,
-                          color: Colors.white70,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
-    } else {
-      // 未防护资产：显示一键防护按钮
-      return MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          onTap: () => onShowProtectionConfig(asset, isEditMode: false),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-              ),
-              borderRadius: BorderRadius.circular(8),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF6366F1).withValues(alpha: 0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(LucideIcons.shield, color: Colors.white, size: 14),
-                const SizedBox(width: 6),
-                Text(
-                  l10n.oneClickProtection,
-                  style: AppFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-  }
-
-  Widget _buildConfigRow(String label, String value, Color valueColor) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 80,
-          child: Text(
-            label,
-            style: AppFonts.inter(fontSize: 12, color: Colors.white54),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: AppFonts.firaCode(fontSize: 12, color: valueColor),
           ),
         ),
       ],
@@ -879,8 +502,9 @@ class ScanResultView extends StatelessWidget {
     }
 
     final details = <String>[];
-    if (path.isNotEmpty)
+    if (path.isNotEmpty) {
       details.add(isZh ? '\u8def\u5f84: $path' : 'Path: $path');
+    }
     if (summary.isNotEmpty) {
       details.add(isZh ? '\u6458\u8981: $summary' : 'Summary: $summary');
     }
@@ -924,5 +548,555 @@ class ScanResultView extends StatelessWidget {
       case RiskLevel.critical:
         return l10n.riskLevelCritical;
     }
+  }
+}
+
+/// 单个 Bot 资产卡片，支持折叠/展开
+class _AssetCard extends StatefulWidget {
+  final Asset asset;
+  final bool initiallyExpanded;
+  final bool isProtected;
+  final bool isRestoringProtection;
+  final void Function(Asset asset, {required bool isEditMode})
+      onShowProtectionConfig;
+  final void Function(Asset asset) onShowProtectionMonitor;
+
+  const _AssetCard({
+    super.key,
+    required this.asset,
+    required this.initiallyExpanded,
+    required this.isProtected,
+    required this.isRestoringProtection,
+    required this.onShowProtectionConfig,
+    required this.onShowProtectionMonitor,
+  });
+
+  @override
+  State<_AssetCard> createState() => _AssetCardState();
+}
+
+class _AssetCardState extends State<_AssetCard> {
+  late bool _isExpanded = widget.initiallyExpanded;
+
+  void _toggleExpand() {
+    setState(() {
+      _isExpanded = !_isExpanded;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final asset = widget.asset;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF6366F1).withValues(alpha: 0.3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header row - 始终可见，点击切换折叠/展开
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: _toggleExpand,
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6366F1).withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      asset.displaySections.isNotEmpty
+                          ? LucideIcons.fileJson
+                          : LucideIcons.package,
+                      color: const Color(0xFF6366F1),
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      asset.name,
+                      style: AppFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  // 绑定地址 + 端口摘要
+                  if (asset.ports.isNotEmpty) ...[
+                    Text(
+                      _buildBindPortSummary(asset),
+                      style: AppFonts.firaCode(
+                        fontSize: 10,
+                        color: Colors.white54,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  // 防护状态徽章
+                  _buildProtectionBadge(l10n),
+                  const SizedBox(width: 8),
+                  // 类型徽章
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      asset.type,
+                      style: AppFonts.firaCode(
+                        fontSize: 10,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // 折叠/展开指示器
+                  Icon(
+                    _isExpanded
+                        ? LucideIcons.chevronDown
+                        : LucideIcons.chevronRight,
+                    size: 16,
+                    color: Colors.white54,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // Body - 展开/折叠动画
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+            clipBehavior: Clip.hardEdge,
+            child: _isExpanded
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 12),
+                      if (asset.version.isNotEmpty)
+                        _buildConfigRow(
+                          l10n.version,
+                          asset.version,
+                          Colors.white70,
+                        ),
+                      if (asset.serviceName.isNotEmpty)
+                        _buildConfigRow(
+                          l10n.serviceName,
+                          asset.serviceName,
+                          Colors.white70,
+                        ),
+                      if (asset.processPaths.isNotEmpty)
+                        _buildConfigRow(
+                          l10n.processPaths,
+                          asset.processPaths.join(', '),
+                          Colors.white70,
+                        ),
+                      // Display structured config sections from the plugin
+                      if (asset.displaySections.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        const Divider(color: Colors.white12),
+                        const SizedBox(height: 8),
+                        _buildDisplaySections(asset.displaySections),
+                      ],
+                      // 所有资产都显示防护按钮
+                      const SizedBox(height: 12),
+                      _buildProtectionButton(
+                        context,
+                        asset,
+                        widget.isProtected,
+                        l10n,
+                      ),
+                    ],
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建折叠态的绑定地址+端口摘要，如 "127.0.0.1:18789"
+  /// 绑定地址优先从 displaySections 的 Bind 值读取，确保与展开态一致
+  String _buildBindPortSummary(Asset asset) {
+    String bind = '';
+    for (final section in asset.displaySections) {
+      for (final item in section.items) {
+        if (item.label == 'Bind' && item.value.isNotEmpty) {
+          bind = item.value;
+          break;
+        }
+      }
+      if (bind.isNotEmpty) break;
+    }
+    if (bind.isNotEmpty) {
+      return asset.ports.map((p) => '$bind:$p').join(', ');
+    }
+    return asset.ports.map((p) => ':$p').join(', ');
+  }
+
+  Widget _buildProtectionBadge(AppLocalizations l10n) {
+    final isProtected = widget.isProtected;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: isProtected
+            ? const Color(0xFF22C55E).withValues(alpha: 0.2)
+            : Colors.white.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        isProtected ? l10n.protectionActive : l10n.protectionInactive,
+        style: AppFonts.inter(
+          fontSize: 10,
+          color: isProtected ? const Color(0xFF22C55E) : Colors.white54,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDisplaySections(List<DisplaySection> sections) {
+    final l10n = AppLocalizations.of(context)!;
+    final isZh = l10n.localeName.startsWith('zh');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (int i = 0; i < sections.length; i++) ...[
+          if (i > 0) const SizedBox(height: 12),
+          _buildConfigSectionHeader(
+            _localizeText(sections[i].title, isZh),
+            _mapSectionIcon(sections[i].icon),
+          ),
+          const SizedBox(height: 8),
+          for (final item in sections[i].items)
+            _buildConfigDetailRow(
+              _localizeText(item.label, isZh),
+              _localizeDisplayValue(item.value, isZh),
+              _statusColor(item.status),
+            ),
+        ],
+      ],
+    );
+  }
+
+  /// 将插件返回的英文标题/标签翻译为中文
+  String _localizeText(String text, bool isZh) {
+    if (!isZh) return text;
+    const zhMap = {
+      // Section titles
+      'Gateway Configuration': '网关配置',
+      'Sandbox': '沙箱',
+      'Logging': '日志',
+      'Config': '配置',
+      // Item labels
+      'Bind': '绑定地址',
+      'Port': '端口',
+      'Auth': '认证',
+      'Mode': '模式',
+      'Redact': '脱敏',
+      'Path': '路径',
+    };
+    return zhMap[text] ?? text;
+  }
+
+  /// 将插件返回的英文值翻译为中文
+  String _localizeDisplayValue(String value, bool isZh) {
+    if (!isZh) return value;
+    const zhMap = {
+      'Enabled': '已启用',
+      'Disabled': '已禁用',
+      'Token': 'Token 认证',
+      'Password': '密码认证',
+      'none': '未启用',
+      'on': '已开启',
+      'off': '已关闭',
+    };
+    return zhMap[value] ?? value;
+  }
+
+  IconData _mapSectionIcon(String iconName) {
+    switch (iconName) {
+      case 'globe':
+        return LucideIcons.globe;
+      case 'box':
+        return LucideIcons.box;
+      case 'file-text':
+        return LucideIcons.fileText;
+      case 'file':
+        return LucideIcons.file;
+      case 'shield':
+        return LucideIcons.shield;
+      case 'key':
+        return LucideIcons.key;
+      case 'lock':
+        return LucideIcons.lock;
+      case 'network':
+        return LucideIcons.network;
+      case 'settings':
+        return LucideIcons.settings;
+      default:
+        return LucideIcons.info;
+    }
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'safe':
+        return const Color(0xFF22C55E);
+      case 'danger':
+        return const Color(0xFFEF4444);
+      case 'warning':
+        return const Color(0xFFF59E0B);
+      case 'neutral':
+      default:
+        return Colors.white70;
+    }
+  }
+
+  Widget _buildConfigSectionHeader(String title, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, size: 12, color: Colors.white54),
+        const SizedBox(width: 6),
+        Text(
+          title,
+          style: AppFonts.inter(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: Colors.white54,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildConfigDetailRow(String label, String value, Color valueColor) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              label,
+              style: AppFonts.inter(fontSize: 11, color: Colors.white38),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: AppFonts.firaCode(fontSize: 11, color: valueColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProtectionButton(
+    BuildContext context,
+    Asset asset,
+    bool isProtected,
+    AppLocalizations l10n,
+  ) {
+    if (isProtected) {
+      // 已防护资产：显示防护监控和配置按钮
+      final isLoading = widget.isRestoringProtection;
+      return Row(
+        children: [
+          MouseRegion(
+            cursor: isLoading
+                ? SystemMouseCursors.basic
+                : SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: isLoading
+                  ? null
+                  : () => widget.onShowProtectionMonitor(asset),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: isLoading
+                        ? [
+                            const Color(0xFF22C55E).withValues(alpha: 0.5),
+                            const Color(0xFF16A34A).withValues(alpha: 0.5),
+                          ]
+                        : [const Color(0xFF22C55E), const Color(0xFF16A34A)],
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: isLoading
+                      ? []
+                      : [
+                          BoxShadow(
+                            color: const Color(
+                              0xFF22C55E,
+                            ).withValues(alpha: 0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isLoading)
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    else
+                      const Icon(
+                        LucideIcons.shieldCheck,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                    const SizedBox(width: 6),
+                    Text(
+                      isLoading
+                          ? l10n.protectionStarting
+                          : l10n.protectionMonitor,
+                      style: AppFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // 配置按钮（恢复防护期间禁用）
+          MouseRegion(
+            cursor: isLoading
+                ? SystemMouseCursors.basic
+                : SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: isLoading
+                  ? null
+                  : () =>
+                      widget.onShowProtectionConfig(asset, isEditMode: true),
+              child: Opacity(
+                opacity: isLoading ? 0.4 : 1.0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        LucideIcons.settings,
+                        color: Colors.white70,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        l10n.protectionConfigBtn,
+                        style: AppFonts.inter(
+                          fontSize: 12,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    } else {
+      // 未防护资产：显示一键防护按钮
+      return MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: () =>
+              widget.onShowProtectionConfig(asset, isEditMode: false),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+              ),
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF6366F1).withValues(alpha: 0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(LucideIcons.shield, color: Colors.white, size: 14),
+                const SizedBox(width: 6),
+                Text(
+                  l10n.oneClickProtection,
+                  style: AppFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget _buildConfigRow(String label, String value, Color valueColor) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 80,
+          child: Text(
+            label,
+            style: AppFonts.inter(fontSize: 12, color: Colors.white54),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: AppFonts.firaCode(fontSize: 12, color: valueColor),
+          ),
+        ),
+      ],
+    );
   }
 }
