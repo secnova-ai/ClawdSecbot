@@ -230,6 +230,8 @@ func createAuditLogTables(db *sql.DB) error {
 			id TEXT PRIMARY KEY,
 			timestamp TEXT NOT NULL,
 			request_id TEXT NOT NULL,
+			asset_name TEXT NOT NULL DEFAULT '',
+			asset_id TEXT NOT NULL DEFAULT '',
 			model TEXT,
 			request_content TEXT,
 			tool_calls TEXT,
@@ -258,6 +260,15 @@ func createAuditLogTables(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_has_risk ON audit_logs(has_risk)
 	`); err != nil {
 		return fmt.Errorf("failed to create audit_logs has_risk index: %w", err)
+	}
+
+	migrateAddColumn(db, "audit_logs", "asset_name", "TEXT NOT NULL DEFAULT ''")
+	migrateAddColumn(db, "audit_logs", "asset_id", "TEXT NOT NULL DEFAULT ''")
+
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_asset ON audit_logs(asset_name, asset_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create audit_logs asset index: %w", err)
 	}
 
 	logging.Info("Audit log tables created/verified successfully")

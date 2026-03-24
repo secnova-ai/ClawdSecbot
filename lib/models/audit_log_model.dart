@@ -3,6 +3,8 @@ class AuditLog {
   final String id;
   final DateTime timestamp;
   final String requestId;
+  final String assetName;
+  final String assetID;
   final String? model;
   final String requestContent;
   final List<AuditToolCall> toolCalls;
@@ -21,6 +23,8 @@ class AuditLog {
     required this.id,
     required this.timestamp,
     required this.requestId,
+    this.assetName = '',
+    this.assetID = '',
     this.model,
     required this.requestContent,
     required this.toolCalls,
@@ -41,6 +45,8 @@ class AuditLog {
       id: json['id'] as String,
       timestamp: DateTime.parse(json['timestamp'] as String),
       requestId: json['request_id'] as String,
+      assetName: json['asset_name'] as String? ?? '',
+      assetID: json['asset_id'] as String? ?? '',
       model: json['model'] as String?,
       requestContent: json['request_content'] as String? ?? '',
       toolCalls:
@@ -66,6 +72,8 @@ class AuditLog {
       'id': id,
       'timestamp': timestamp.toIso8601String(),
       'request_id': requestId,
+      'asset_name': assetName,
+      'asset_id': assetID,
       'model': model,
       'request_content': requestContent,
       'tool_calls': toolCalls.map((e) => e.toJson()).toList(),

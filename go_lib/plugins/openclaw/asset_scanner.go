@@ -204,12 +204,18 @@ func (s *OpenclawAssetScanner) enrichAssetWithConfig(asset *core.Asset) {
 		authDisplay = "Disabled"
 	}
 
+	// Normalize loopback address for display
+	displayBind := bind
+	if bind == "loopback" {
+		displayBind = "127.0.0.1"
+	}
+
 	asset.DisplaySections = []core.DisplaySection{
 		{
 			Title: "Gateway Configuration",
 			Icon:  "globe",
 			Items: []core.DisplayItem{
-				{Label: "Bind", Value: bind, Status: bindStatus},
+				{Label: "Bind", Value: displayBind, Status: bindStatus},
 				{Label: "Port", Value: gatewayPort, Status: "neutral"},
 				{Label: "Auth", Value: authDisplay, Status: authStatus},
 			},

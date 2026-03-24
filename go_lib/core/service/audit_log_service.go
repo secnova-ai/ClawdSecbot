@@ -64,14 +64,16 @@ func GetAuditLogs(filterJSON string) map[string]interface{} {
 // GetAuditLogCount 获取审计日志数量
 func GetAuditLogCount(jsonStr string) map[string]interface{} {
 	var input struct {
-		RiskOnly bool `json:"risk_only"`
+		RiskOnly  bool   `json:"risk_only"`
+		AssetName string `json:"asset_name,omitempty"`
+		AssetID   string `json:"asset_id,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &input); err != nil {
 		return errorMessageResult("invalid JSON: " + err.Error())
 	}
 
 	repo := repository.NewAuditLogRepository(nil)
-	count, err := repo.GetAuditLogCount(input.RiskOnly)
+	count, err := repo.GetAuditLogCount(input.RiskOnly, input.AssetName, input.AssetID)
 	if err != nil {
 		logging.Error("Failed to get audit log count: %v", err)
 		return errorResult(err)
@@ -82,8 +84,34 @@ func GetAuditLogCount(jsonStr string) map[string]interface{} {
 
 // GetAuditLogStatistics 获取审计日志统计
 func GetAuditLogStatistics() map[string]interface{} {
+	return GetAuditLogStatisticsWithFilter("{}")
+}
+
+func GetAuditLogAssets() map[string]interface{} {
 	repo := repository.NewAuditLogRepository(nil)
-	stats, err := repo.GetAuditLogStatistics()
+	assets, err := repo.GetAuditLogAssets()
+	if err != nil {
+		logging.Error("Failed to get audit log assets: %v", err)
+		return errorResult(err)
+	}
+
+	return successDataResult(assets)
+}
+
+// GetAuditLogStatisticsWithFilter 获取审计日志统计（支持按资产过滤）
+func GetAuditLogStatisticsWithFilter(jsonStr string) map[string]interface{} {
+	var input struct {
+		AssetName string `json:"asset_name,omitempty"`
+		AssetID   string `json:"asset_id,omitempty"`
+	}
+	if jsonStr != "" {
+		if err := json.Unmarshal([]byte(jsonStr), &input); err != nil {
+			return errorMessageResult("invalid JSON: " + err.Error())
+		}
+	}
+
+	repo := repository.NewAuditLogRepository(nil)
+	stats, err := repo.GetAuditLogStatistics(input.AssetName, input.AssetID)
 	if err != nil {
 		logging.Error("Failed to get audit log statistics: %v", err)
 		return errorResult(err)
@@ -115,6 +143,26 @@ func ClearAllAuditLogs() map[string]interface{} {
 	repo := repository.NewAuditLogRepository(nil)
 	if err := repo.ClearAllAuditLogs(); err != nil {
 		logging.Error("Failed to clear all audit logs: %v", err)
+		return errorResult(err)
+	}
+
+	return successResult()
+}
+
+func ClearAuditLogsWithFilter(jsonStr string) map[string]interface{} {
+	var input struct {
+		AssetName string `json:"asset_name,omitempty"`
+		AssetID   string `json:"asset_id,omitempty"`
+	}
+	if jsonStr != "" {
+		if err := json.Unmarshal([]byte(jsonStr), &input); err != nil {
+			return errorMessageResult("invalid JSON: " + err.Error())
+		}
+	}
+
+	repo := repository.NewAuditLogRepository(nil)
+	if err := repo.ClearAuditLogs(input.AssetName, input.AssetID); err != nil {
+		logging.Error("Failed to clear audit logs with filter: %v", err)
 		return errorResult(err)
 	}
 

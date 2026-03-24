@@ -113,7 +113,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get settings => 'Settings';
+  String get settings => 'Global Settings';
 
   @override
   String get language => 'Language';
