@@ -97,10 +97,6 @@ func (r *SecurityEventRepository) GetSecurityEvents(limit, offset int, assetName
 	if assetID != "" {
 		where = append(where, "asset_id = ?")
 		args = append(args, assetID)
-		if assetName != "" {
-			where = append(where, "asset_name = ?")
-			args = append(args, assetName)
-		}
 	} else if assetName != "" {
 		where = append(where, "asset_name = ?")
 		args = append(args, assetName)
@@ -148,10 +144,6 @@ func (r *SecurityEventRepository) GetSecurityEventCount(assetName, assetID strin
 	if assetID != "" {
 		where = append(where, "asset_id = ?")
 		args = append(args, assetID)
-		if assetName != "" {
-			where = append(where, "asset_name = ?")
-			args = append(args, assetName)
-		}
 	} else if assetName != "" {
 		where = append(where, "asset_name = ?")
 		args = append(args, assetName)
@@ -198,10 +190,6 @@ func (r *SecurityEventRepository) ClearAllSecurityEvents(assetName, assetID stri
 	if assetID != "" {
 		where = append(where, "asset_id = ?")
 		args = append(args, assetID)
-		if assetName != "" {
-			where = append(where, "asset_name = ?")
-			args = append(args, assetName)
-		}
 	} else if assetName != "" {
 		where = append(where, "asset_name = ?")
 		args = append(args, assetName)

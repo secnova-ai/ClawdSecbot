@@ -146,7 +146,7 @@ func TestPluginManager_ScanAssets_BindsInstanceByAssetID(t *testing.T) {
 	}
 }
 
-func TestPluginManager_GetProtectionStatus_AssetMismatchRejected(t *testing.T) {
+func TestPluginManager_GetProtectionStatus_ResolvedByAssetID(t *testing.T) {
 	pm := &PluginManager{
 		registeredPlugins: make(map[string]BotPlugin),
 		instances:         make(map[string]*AssetPluginInstance),
@@ -162,8 +162,8 @@ func TestPluginManager_GetProtectionStatus_AssetMismatchRejected(t *testing.T) {
 		t.Fatalf("ScanAllAssets failed: %v", err)
 	}
 
-	if _, err := pm.GetProtectionStatus("OtherBot", "openclaw:abc123"); err == nil {
-		t.Fatal("expected asset mismatch error, got nil")
+	if _, err := pm.GetProtectionStatus("OtherBot", "openclaw:abc123"); err != nil {
+		t.Fatalf("expected resolve by assetID even when assetName mismatches, got error: %v", err)
 	}
 }
 

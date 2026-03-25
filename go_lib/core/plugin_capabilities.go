@@ -242,7 +242,10 @@ func SyncGatewaySandboxByPlugin(assetName string) string {
 
 func SyncGatewaySandboxByAssetAndPlugin(assetName, assetID string) string {
 	assetID = strings.TrimSpace(assetID)
-	if strings.TrimSpace(assetName) == "" && assetID != "" {
+	assetName = strings.TrimSpace(assetName)
+
+	// Instance isolation must always be driven by asset_id when provided.
+	if assetID != "" {
 		plugin := GetPluginManager().GetPluginByAssetID(assetID)
 		if plugin == nil {
 			return capabilityError(fmt.Errorf("no plugin found for asset_id: %s", assetID))
@@ -261,7 +264,7 @@ func SyncGatewaySandboxByAssetAndPlugin(assetName, assetID string) string {
 	if err != nil {
 		return capabilityError(err)
 	}
-	return plugin.(GatewaySandboxCapability).SyncGatewaySandboxByAsset(assetID)
+	return plugin.(GatewaySandboxCapability).SyncGatewaySandbox()
 }
 
 func HasInitialBackupByPlugin(assetName string) string {

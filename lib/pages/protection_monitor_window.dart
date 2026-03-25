@@ -641,7 +641,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
       await Future.delayed(const Duration(milliseconds: 50));
 
       // Step 4: 加载历史统计数据
-      _protectionService.loadStatisticsFromDatabase();
+      await _protectionService.loadStatisticsFromDatabase();
 
       // Step 4.1: 加载防护配置
       await _loadProtectionConfig();

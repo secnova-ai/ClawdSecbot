@@ -108,7 +108,7 @@ func TestGetSecurityEvents_FilterByAssetID(t *testing.T) {
 		}
 	]`)
 
-	result := GetSecurityEvents(`{"limit": 10, "offset": 0, "asset_name": "nullclaw", "asset_id": "asset_null_1"}`)
+	result := GetSecurityEvents(`{"limit": 10, "offset": 0, "asset_name": "wrong_name_should_be_ignored", "asset_id": "asset_null_1"}`)
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
@@ -192,7 +192,7 @@ func TestClearSecurityEvents_FilterByAssetID(t *testing.T) {
 		}
 	]`)
 
-	clearResult := ClearSecurityEvents(`{"asset_name":"nullclaw","asset_id":"asset_null_1"}`)
+	clearResult := ClearSecurityEvents(`{"asset_name":"wrong_name_should_be_ignored","asset_id":"asset_null_1"}`)
 	if clearResult["success"] != true {
 		t.Fatalf("Expected clear success=true, got: %v", clearResult)
 	}

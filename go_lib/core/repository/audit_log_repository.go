@@ -14,6 +14,8 @@ type AuditLog struct {
 	ID               string `json:"id"`
 	Timestamp        string `json:"timestamp"`
 	RequestID        string `json:"request_id"`
+	AssetName        string `json:"asset_name,omitempty"`
+	AssetID          string `json:"asset_id,omitempty"`
 	Model            string `json:"model,omitempty"`
 	RequestContent   string `json:"request_content,omitempty"`
 	ToolCalls        string `json:"tool_calls,omitempty"`
@@ -34,6 +36,8 @@ type AuditLogFilter struct {
 	Limit       int    `json:"limit"`
 	Offset      int    `json:"offset"`
 	RiskOnly    bool   `json:"risk_only"`
+	AssetName   string `json:"asset_name,omitempty"`
+	AssetID     string `json:"asset_id,omitempty"`
 	StartTime   string `json:"start_time,omitempty"`
 	EndTime     string `json:"end_time,omitempty"`
 	SearchQuery string `json:"search_query,omitempty"`
@@ -73,11 +77,11 @@ func (r *AuditLogRepository) SaveAuditLog(log *AuditLog) error {
 
 	_, err := r.db.Exec(`
 		INSERT OR REPLACE INTO audit_logs 
-		(id, timestamp, request_id, model, request_content, tool_calls, output_content,
+		(id, timestamp, request_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
 		 has_risk, risk_level, risk_reason, confidence, action,
 		 prompt_tokens, completion_tokens, total_tokens, duration_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, log.ID, log.Timestamp, log.RequestID, log.Model,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, log.ID, log.Timestamp, log.RequestID, strings.TrimSpace(log.AssetName), strings.TrimSpace(log.AssetID), log.Model,
 		log.RequestContent, log.ToolCalls, log.OutputContent,
 		hasRisk, log.RiskLevel, log.RiskReason, log.Confidence, log.Action,
 		log.PromptTokens, log.CompletionTokens, log.TotalTokens, log.DurationMs)
@@ -105,10 +109,10 @@ func (r *AuditLogRepository) SaveAuditLogsBatch(logs []*AuditLog) error {
 
 	stmt, err := tx.Prepare(`
 		INSERT OR REPLACE INTO audit_logs 
-		(id, timestamp, request_id, model, request_content, tool_calls, output_content,
+		(id, timestamp, request_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
 		 has_risk, risk_level, risk_reason, confidence, action,
 		 prompt_tokens, completion_tokens, total_tokens, duration_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -120,7 +124,7 @@ func (r *AuditLogRepository) SaveAuditLogsBatch(logs []*AuditLog) error {
 		if log.HasRisk {
 			hasRisk = 1
 		}
-		_, err := stmt.Exec(log.ID, log.Timestamp, log.RequestID, log.Model,
+		_, err := stmt.Exec(log.ID, log.Timestamp, log.RequestID, strings.TrimSpace(log.AssetName), strings.TrimSpace(log.AssetID), log.Model,
 			log.RequestContent, log.ToolCalls, log.OutputContent,
 			hasRisk, log.RiskLevel, log.RiskReason, log.Confidence, log.Action,
 			log.PromptTokens, log.CompletionTokens, log.TotalTokens, log.DurationMs)
@@ -145,9 +149,19 @@ func (r *AuditLogRepository) GetAuditLogs(filter *AuditLogFilter) ([]*AuditLog, 
 	if filter.Limit <= 0 {
 		filter.Limit = 100
 	}
+	filter.AssetName = strings.TrimSpace(filter.AssetName)
+	filter.AssetID = strings.TrimSpace(filter.AssetID)
 
 	conditions := []string{}
 	params := []interface{}{}
+
+	if filter.AssetID != "" {
+		conditions = append(conditions, "asset_id = ?")
+		params = append(params, filter.AssetID)
+	} else if filter.AssetName != "" {
+		conditions = append(conditions, "asset_name = ?")
+		params = append(params, filter.AssetName)
+	}
 
 	if filter.RiskOnly {
 		conditions = append(conditions, "has_risk = 1")
@@ -174,7 +188,7 @@ func (r *AuditLogRepository) GetAuditLogs(filter *AuditLogFilter) ([]*AuditLog, 
 	params = append(params, filter.Limit, filter.Offset)
 
 	query := fmt.Sprintf(`
-		SELECT id, timestamp, request_id, model, request_content, tool_calls, output_content,
+		SELECT id, timestamp, request_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
 			has_risk, risk_level, risk_reason, confidence, action,
 			prompt_tokens, completion_tokens, total_tokens, duration_ms
 		FROM audit_logs %s ORDER BY timestamp DESC LIMIT ? OFFSET ?
@@ -203,18 +217,32 @@ func (r *AuditLogRepository) GetAuditLogs(filter *AuditLogFilter) ([]*AuditLog, 
 }
 
 // GetAuditLogCount 获取审计日志数量
-func (r *AuditLogRepository) GetAuditLogCount(riskOnly bool) (int, error) {
+func (r *AuditLogRepository) GetAuditLogCount(riskOnly bool, assetName, assetID string) (int, error) {
 	if r.db == nil {
 		return 0, fmt.Errorf("database not initialized")
 	}
 
-	whereClause := ""
+	assetName = strings.TrimSpace(assetName)
+	assetID = strings.TrimSpace(assetID)
+	where := make([]string, 0, 3)
+	args := make([]interface{}, 0, 2)
+	if assetID != "" {
+		where = append(where, "asset_id = ?")
+		args = append(args, assetID)
+	} else if assetName != "" {
+		where = append(where, "asset_name = ?")
+		args = append(args, assetName)
+	}
 	if riskOnly {
-		whereClause = "WHERE has_risk = 1"
+		where = append(where, "has_risk = 1")
+	}
+	whereClause := ""
+	if len(where) > 0 {
+		whereClause = " WHERE " + strings.Join(where, " AND ")
 	}
 
 	var count int
-	err := r.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM audit_logs %s", whereClause)).Scan(&count)
+	err := r.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM audit_logs%s", whereClause), args...).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count audit logs: %w", err)
 	}
@@ -223,19 +251,37 @@ func (r *AuditLogRepository) GetAuditLogCount(riskOnly bool) (int, error) {
 }
 
 // GetAuditLogStatistics 获取审计日志统计
-func (r *AuditLogRepository) GetAuditLogStatistics() (*AuditLogStatistics, error) {
+func (r *AuditLogRepository) GetAuditLogStatistics(assetName, assetID string) (*AuditLogStatistics, error) {
 	if r.db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
 
-	row := r.db.QueryRow(`
+	assetName = strings.TrimSpace(assetName)
+	assetID = strings.TrimSpace(assetID)
+	where := make([]string, 0, 2)
+	args := make([]interface{}, 0, 2)
+	if assetID != "" {
+		where = append(where, "asset_id = ?")
+		args = append(args, assetID)
+	} else if assetName != "" {
+		where = append(where, "asset_name = ?")
+		args = append(args, assetName)
+	}
+	whereClause := ""
+	if len(where) > 0 {
+		whereClause = "WHERE " + strings.Join(where, " AND ")
+	}
+
+	query := fmt.Sprintf(`
 		SELECT 
 			COUNT(*) as total,
 			COALESCE(SUM(CASE WHEN action = 'WARN' THEN 1 ELSE 0 END), 0) as risk_count,
 			COALESCE(SUM(CASE WHEN action = 'BLOCK' OR action = 'HARD_BLOCK' THEN 1 ELSE 0 END), 0) as blocked_count,
 			COALESCE(SUM(CASE WHEN action = 'ALLOW' THEN 1 ELSE 0 END), 0) as allowed_count
-		FROM audit_logs
-	`)
+		FROM audit_logs %s
+	`, whereClause)
+
+	row := r.db.QueryRow(query, args...)
 
 	var stats AuditLogStatistics
 	err := row.Scan(&stats.Total, &stats.RiskCount, &stats.BlockedCount, &stats.AllowedCount)
@@ -266,12 +312,28 @@ func (r *AuditLogRepository) CleanOldAuditLogs(keepDays int) error {
 }
 
 // ClearAllAuditLogs 清空所有审计日志
-func (r *AuditLogRepository) ClearAllAuditLogs() error {
+func (r *AuditLogRepository) ClearAllAuditLogs(assetName, assetID string) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
 
-	_, err := r.db.Exec("DELETE FROM audit_logs")
+	assetName = strings.TrimSpace(assetName)
+	assetID = strings.TrimSpace(assetID)
+	where := make([]string, 0, 2)
+	args := make([]interface{}, 0, 2)
+	if assetID != "" {
+		where = append(where, "asset_id = ?")
+		args = append(args, assetID)
+	} else if assetName != "" {
+		where = append(where, "asset_name = ?")
+		args = append(args, assetName)
+	}
+
+	query := "DELETE FROM audit_logs"
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	_, err := r.db.Exec(query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to clear all audit logs: %w", err)
 	}
@@ -283,11 +345,12 @@ func (r *AuditLogRepository) ClearAllAuditLogs() error {
 func scanAuditLog(rows *sql.Rows) (*AuditLog, error) {
 	var log AuditLog
 	var hasRisk int
+	var assetName, assetID sql.NullString
 	var model, requestContent, toolCalls, outputContent sql.NullString
 	var riskLevel, riskReason, action sql.NullString
 	var confidence, promptTokens, completionTokens, totalTokens sql.NullInt64
 
-	err := rows.Scan(&log.ID, &log.Timestamp, &log.RequestID,
+	err := rows.Scan(&log.ID, &log.Timestamp, &log.RequestID, &assetName, &assetID,
 		&model, &requestContent, &toolCalls, &outputContent,
 		&hasRisk, &riskLevel, &riskReason, &confidence, &action,
 		&promptTokens, &completionTokens, &totalTokens, &log.DurationMs)
@@ -300,6 +363,8 @@ func scanAuditLog(rows *sql.Rows) (*AuditLog, error) {
 	log.RequestContent = requestContent.String
 	log.ToolCalls = toolCalls.String
 	log.OutputContent = outputContent.String
+	log.AssetName = assetName.String
+	log.AssetID = assetID.String
 	log.RiskLevel = riskLevel.String
 	log.RiskReason = riskReason.String
 	log.Action = action.String

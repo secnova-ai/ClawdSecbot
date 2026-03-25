@@ -358,7 +358,12 @@ func GetAuditLogCountFFI(jsonC *C.char) *C.char {
 
 //export GetAuditLogStatisticsFFI
 func GetAuditLogStatisticsFFI() *C.char {
-	return jsonToCString(service.GetAuditLogStatistics())
+	return jsonToCString(service.GetAuditLogStatistics(`{}`))
+}
+
+//export GetAuditLogStatisticsByFilterFFI
+func GetAuditLogStatisticsByFilterFFI(jsonC *C.char) *C.char {
+	return jsonToCString(service.GetAuditLogStatistics(C.GoString(jsonC)))
 }
 
 //export CleanOldAuditLogsFFI
@@ -368,7 +373,12 @@ func CleanOldAuditLogsFFI(jsonC *C.char) *C.char {
 
 //export ClearAllAuditLogsFFI
 func ClearAllAuditLogsFFI() *C.char {
-	return jsonToCString(service.ClearAllAuditLogs())
+	return jsonToCString(service.ClearAllAuditLogs(`{}`))
+}
+
+//export ClearAllAuditLogsByFilterFFI
+func ClearAllAuditLogsByFilterFFI(jsonC *C.char) *C.char {
+	return jsonToCString(service.ClearAllAuditLogs(C.GoString(jsonC)))
 }
 
 // ==================== 安全事件 FFI ====================

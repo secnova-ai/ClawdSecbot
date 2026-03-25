@@ -121,8 +121,15 @@ class ProtectionMonitorService {
   int get baselineAuditCompletionTokens => _baselineAuditCompletionTokens;
 
   void setAssetName(String? name, [String assetID = '']) {
-    _assetName = name;
-    _assetID = assetID;
+    final normalizedName = name?.trim();
+    final normalizedAssetID = assetID.trim();
+    final changed =
+        _assetName != normalizedName || _assetID != normalizedAssetID;
+    _assetName = normalizedName;
+    _assetID = normalizedAssetID;
+    if (changed) {
+      resetMemoryState();
+    }
   }
 
   void setProxySession(String? sessionId, bool isRunning) {
@@ -138,6 +145,18 @@ class ProtectionMonitorService {
       return event.assetName == _assetName;
     }
     return true;
+  }
+
+  bool _matchesCurrentMetrics(Map<String, dynamic> metrics) {
+    final metricAssetID = (metrics['asset_id'] ?? '').toString().trim();
+    if (_assetID.isNotEmpty) {
+      return metricAssetID == _assetID;
+    }
+    final metricAssetName = (metrics['asset_name'] ?? '').toString().trim();
+    if ((_assetName ?? '').isNotEmpty) {
+      return metricAssetName == _assetName;
+    }
+    return false;
   }
 
   int _deltaWithReset(int current, int previous) {
@@ -223,7 +242,11 @@ class ProtectionMonitorService {
         _metricsSubscription = _messageBridgeService!.metricsStream
             .handleError(_handleBridgeError)
             .listen((metrics) {
-              scheduleMicrotask(() => _updateMetricsFromBridge(metrics));
+              scheduleMicrotask(() {
+                if (_matchesCurrentMetrics(metrics)) {
+                  _updateMetricsFromBridge(metrics);
+                }
+              });
             });
         _messageBridgeService!.errorStream
             .handleError((error, stackTrace) => _handleBridgeError(error))
@@ -811,6 +834,8 @@ class ProtectionMonitorService {
       limit: limit,
       offset: offset,
       riskOnly: riskOnly,
+      assetName: _assetName ?? '',
+      assetID: _assetID,
       startTime: startTime,
       endTime: endTime,
       searchQuery: searchQuery,
@@ -818,15 +843,25 @@ class ProtectionMonitorService {
   }
 
   Future<int> getAuditLogCount({bool riskOnly = false}) async {
-    return await AuditLogDatabaseService().getAuditLogCount(riskOnly: riskOnly);
+    return await AuditLogDatabaseService().getAuditLogCount(
+      riskOnly: riskOnly,
+      assetName: _assetName ?? '',
+      assetID: _assetID,
+    );
   }
 
   Future<Map<String, dynamic>> getAuditLogStatistics() async {
-    return await AuditLogDatabaseService().getAuditLogStatistics();
+    return await AuditLogDatabaseService().getAuditLogStatistics(
+      assetName: _assetName ?? '',
+      assetID: _assetID,
+    );
   }
 
   Future<void> clearAllAuditLogs() async {
-    await AuditLogDatabaseService().clearAllAuditLogs();
+    await AuditLogDatabaseService().clearAllAuditLogs(
+      assetName: _assetName ?? '',
+      assetID: _assetID,
+    );
   }
 
   /// 从 Go 缓冲拉取待持久化的安全事件，写入 SQLite 并通知 UI 流。

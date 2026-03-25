@@ -43,6 +43,8 @@ type ProxyProtection struct {
 	targetURL       string
 	originalBaseURL string // Original baseUrl to restore when stopping
 	providerName    string
+	assetName       string
+	assetID         string
 	// targetProviderName is the provider used to update openclaw.json after listen.
 	targetProviderName string
 	shepherdGate       *shepherd.ShepherdGate // ShepherdGate security module
@@ -329,6 +331,8 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 		targetURL:               actualBaseURL,
 		originalBaseURL:         botBaseURL,
 		providerName:            string(botProviderName),
+		assetName:               strings.TrimSpace(protectionConfig.AssetName),
+		assetID:                 strings.TrimSpace(protectionConfig.AssetID),
 		targetProviderName:      string(botProviderName),
 		shepherdGate:            shepherdGate,
 		toolValidator:           NewToolValidator(logChan),
@@ -548,6 +552,8 @@ func (pp *ProxyProtection) sendMetricsToCallback() {
 		"audit_completion_tokens": pp.auditCompletionTokens,
 		"total_tool_calls":        pp.totalToolCalls,
 		"request_count":           pp.requestCount,
+		"asset_name":              pp.assetName,
+		"asset_id":                pp.assetID,
 	}
 	pp.metricsMu.Unlock()
 
@@ -585,6 +591,8 @@ func (pp *ProxyProtection) saveAuditLog(hasRisk bool, riskLevel, riskReason stri
 	pp.currentAuditLog.Confidence = confidence
 	pp.currentAuditLog.Action = action
 	pp.currentAuditLog.Duration = duration
+	pp.currentAuditLog.AssetName = strings.TrimSpace(pp.assetName)
+	pp.currentAuditLog.AssetID = strings.TrimSpace(pp.assetID)
 
 	// Add to buffer
 	auditLogBuffer.AddAuditLog(*pp.currentAuditLog)
@@ -610,6 +618,8 @@ func (pp *ProxyProtection) finalizeAuditLog(outputContent string, generatedToolC
 	pp.currentAuditLog.CompletionTokens = completionTokens
 	pp.currentAuditLog.TotalTokens = totalTokens
 	pp.currentAuditLog.Duration = duration
+	pp.currentAuditLog.AssetName = strings.TrimSpace(pp.assetName)
+	pp.currentAuditLog.AssetID = strings.TrimSpace(pp.assetID)
 
 	// Add generated tool calls to audit log
 	for _, tc := range generatedToolCalls {
@@ -796,13 +806,11 @@ func GetProxyProtectionByAsset(assetName, assetID string) *ProxyProtection {
 }
 
 func buildAssetKey(assetName, assetID string) string {
-	name := strings.ToLower(strings.TrimSpace(assetName))
 	id := strings.TrimSpace(assetID)
-
-	if name == "" && id == "" {
+	if id == "" {
 		return defaultProxyAssetKey
 	}
-	return name + "::" + id
+	return id
 }
 
 // UpdateLanguage 更新全局语言设置

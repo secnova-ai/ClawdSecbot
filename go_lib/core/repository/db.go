@@ -226,6 +226,8 @@ func createAuditLogTables(db *sql.DB) error {
 			id TEXT PRIMARY KEY,
 			timestamp TEXT NOT NULL,
 			request_id TEXT NOT NULL,
+			asset_name TEXT NOT NULL DEFAULT '',
+			asset_id TEXT NOT NULL DEFAULT '',
 			model TEXT,
 			request_content TEXT,
 			tool_calls TEXT,
@@ -244,6 +246,9 @@ func createAuditLogTables(db *sql.DB) error {
 		return fmt.Errorf("failed to create audit_logs table: %w", err)
 	}
 
+	migrateAddColumn(db, "audit_logs", "asset_name", "TEXT NOT NULL DEFAULT ''")
+	migrateAddColumn(db, "audit_logs", "asset_id", "TEXT NOT NULL DEFAULT ''")
+
 	if _, err := db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)
 	`); err != nil {
@@ -254,6 +259,12 @@ func createAuditLogTables(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_has_risk ON audit_logs(has_risk)
 	`); err != nil {
 		return fmt.Errorf("failed to create audit_logs has_risk index: %w", err)
+	}
+
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_asset ON audit_logs(asset_id, timestamp)
+	`); err != nil {
+		return fmt.Errorf("failed to create audit_logs asset index: %w", err)
 	}
 
 	logging.Info("Audit log tables created/verified successfully")
@@ -353,9 +364,15 @@ func createSecurityEventTables(db *sql.DB) error {
 	}
 
 	if _, err := db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_security_events_asset ON security_events(asset_name, asset_id, timestamp)
+		CREATE INDEX IF NOT EXISTS idx_security_events_asset_id ON security_events(asset_id, timestamp)
 	`); err != nil {
-		return fmt.Errorf("failed to create security_events asset index: %w", err)
+		return fmt.Errorf("failed to create security_events asset_id index: %w", err)
+	}
+
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_security_events_asset_name ON security_events(asset_name, timestamp)
+	`); err != nil {
+		return fmt.Errorf("failed to create security_events asset_name index: %w", err)
 	}
 
 	logging.Info("Security event tables created/verified successfully")

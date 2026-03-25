@@ -90,9 +90,13 @@ func ScanSingleMergedAsset(opts PluginAssetScanOptions) ([]core.Asset, error) {
 		mergedAsset.Metadata = make(map[string]string)
 	}
 	mergedAsset.SourcePlugin = assetName
+	configPathFingerprint := strings.TrimSpace(mergedAsset.Metadata["config_path"])
+	if configPathFingerprint == "" {
+		configPathFingerprint = strings.TrimSpace(opts.ConfigPath)
+	}
 	mergedAsset.ID = core.ComputeAssetID(
-		mergedAsset.Name,
-		mergedAsset.Metadata["config_path"],
+		assetName,
+		configPathFingerprint,
 		mergedAsset.Ports,
 		mergedAsset.ProcessPaths,
 	)

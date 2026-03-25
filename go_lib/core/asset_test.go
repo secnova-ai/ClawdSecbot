@@ -136,10 +136,10 @@ func TestAssetMatchCriteriaFilePaths(t *testing.T) {
 
 func TestAssetMatchCriteriaCombined(t *testing.T) {
 	criteria := AssetMatchCriteria{
-		Ports:            []int{8080},
-		ProcessKeywords:  []string{"node"},
-		ServiceNames:     []string{"test-service"},
-		FilePaths:        []string{"~/.config"},
+		Ports:           []int{8080},
+		ProcessKeywords: []string{"node"},
+		ServiceNames:    []string{"test-service"},
+		FilePaths:       []string{"~/.config"},
 	}
 
 	data, err := json.Marshal(criteria)
@@ -188,5 +188,62 @@ func TestAssetEmpty(t *testing.T) {
 	}
 	if unmarshaled.Metadata != nil {
 		t.Error("Expected nil Metadata")
+	}
+}
+
+func TestComputeAssetID_DeterministicAndOrderInsensitive(t *testing.T) {
+	id1 := ComputeAssetID(
+		"Openclaw",
+		"/Users/test/.openclaw/config.json",
+		[]int{3000, 13436},
+		[]string{"/usr/local/bin/openclaw", "/Applications/Openclaw.app"},
+	)
+	id2 := ComputeAssetID(
+		"openclaw",
+		"/Users/test/.openclaw/config.json",
+		[]int{13436, 3000},
+		[]string{"/Applications/Openclaw.app", "/usr/local/bin/openclaw"},
+	)
+
+	if id1 != id2 {
+		t.Fatalf("expected deterministic id, got id1=%s id2=%s", id1, id2)
+	}
+}
+
+func TestComputeAssetID_UniqueAcrossPlugins(t *testing.T) {
+	openID := ComputeAssetID(
+		"Openclaw",
+		"/Users/test/.bot/config.json",
+		[]int{3000},
+		[]string{"/usr/local/bin/bot"},
+	)
+	nullID := ComputeAssetID(
+		"Nullclaw",
+		"/Users/test/.bot/config.json",
+		[]int{3000},
+		[]string{"/usr/local/bin/bot"},
+	)
+
+	if openID == nullID {
+		t.Fatalf("asset id collision across plugin types: %s", openID)
+	}
+}
+
+func TestComputeAssetID_UniqueForDifferentFingerprint(t *testing.T) {
+	id1 := ComputeAssetID(
+		"Openclaw",
+		"/Users/test/.openclaw/config-a.json",
+		[]int{3000},
+		[]string{"/usr/local/bin/openclaw"},
+	)
+	id2 := ComputeAssetID(
+		"Openclaw",
+		"/Users/test/.openclaw/config-b.json",
+		[]int{3000},
+		[]string{"/usr/local/bin/openclaw"},
+	)
+
+	if id1 == id2 {
+		t.Fatalf("expected different ids for different fingerprint, got %s", id1)
 	}
 }

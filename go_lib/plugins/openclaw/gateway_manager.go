@@ -290,15 +290,12 @@ func sanitizeFileName(name string) string {
 }
 
 func buildGatewayInstanceKey(assetName, assetID string) string {
-	name := strings.TrimSpace(assetName)
-	if name == "" {
-		name = openclawAssetName
-	}
+	_ = assetName
 	id := strings.TrimSpace(assetID)
-	if id == "" {
-		return name
+	if id != "" {
+		return id
 	}
-	return name + ":" + id
+	return openclawAssetName
 }
 
 func writeIfChanged(path string, oldBytes []byte, newBytes []byte) (bool, error) {

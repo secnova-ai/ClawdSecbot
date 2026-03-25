@@ -163,7 +163,7 @@ func (pm *PluginManager) resolvePluginInstance(assetName, assetID string) (*Asse
 	pm.mu.RUnlock()
 	if inst != nil {
 		if assetName != "" && normalizeAssetName(assetName) != normalizeAssetName(inst.AssetName) {
-			return nil, fmt.Errorf("asset mismatch: assetID %s belongs to %s, got %s", assetID, inst.AssetName, assetName)
+			logging.Warning("resolvePluginInstance: ignore assetName mismatch for assetID=%s, expected=%s, got=%s", assetID, inst.AssetName, assetName)
 		}
 		return inst, nil
 	}

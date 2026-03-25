@@ -16,10 +16,10 @@ func TestBuildAssetKey(t *testing.T) {
 			want:      defaultProxyAssetKey,
 		},
 		{
-			name:      "normalize asset name",
+			name:      "asset id key only",
 			assetName: " OpenClaw ",
 			assetID:   "asset-1",
-			want:      "openclaw::asset-1",
+			want:      "asset-1",
 		},
 	}
 

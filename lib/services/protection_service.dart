@@ -30,17 +30,10 @@ class ProtectionService {
     return key.isEmpty ? defaultInstanceKey : key;
   }
 
-  static String buildAssetScopedInstanceKey(
-    String assetName, [
-    String assetID = '',
-  ]) {
-    final normalizedAssetName = assetName.trim();
+  static String buildAssetScopedInstanceKey(String _, [String assetID = '']) {
     final normalizedAssetID = assetID.trim();
     if (normalizedAssetID.isNotEmpty) {
       return 'asset::$normalizedAssetID';
-    }
-    if (normalizedAssetName.isNotEmpty) {
-      return 'asset_name::${normalizedAssetName.toLowerCase()}';
     }
     return defaultInstanceKey;
   }
@@ -108,13 +101,14 @@ class ProtectionService {
   int get auditCompletionTokens => _monitor.auditCompletionTokens;
 
   void setAssetName(String name, [String assetID = '']) {
-    _assetName = name;
-    _assetID = assetID;
-    _monitor.setAssetName(name, assetID);
+    final normalizedName = name.trim();
+    final normalizedAssetID = assetID.trim();
+    _assetName = normalizedName;
+    _assetID = normalizedAssetID;
+    _monitor.setAssetName(normalizedName, normalizedAssetID);
   }
 
-  bool get _hasAssetBinding =>
-      (_assetName?.isNotEmpty ?? false) && _assetID.isNotEmpty;
+  bool get _hasAssetBinding => _assetID.isNotEmpty;
 
   // === 内部工具 ===
 
@@ -144,8 +138,8 @@ class ProtectionService {
       '[Protection] startProtectionProxy called: asset=$_assetName, auditOnly=${runtimeConfig.auditOnly}',
     );
 
-    // 加载基线统计
-    if (_monitor.baselineAnalysisCount == 0 && _assetName != null) {
+    // 切换资产实例时必须重新加载该资产的基线统计，避免复用上一资产数据。
+    if (_assetName != null) {
       await _monitor.loadStatisticsFromDatabase();
     }
 

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -95,6 +96,47 @@ func TestGetAuditLogs(t *testing.T) {
 	}
 }
 
+func TestGetAuditLogs_FilterByAssetID(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	SaveAuditLogsBatch(`[
+		{
+			"id":"log-open",
+			"timestamp":"2025-01-01T00:00:00Z",
+			"request_id":"req-open",
+			"asset_name":"openclaw",
+			"asset_id":"openclaw:a1",
+			"action":"ALLOW"
+		},
+		{
+			"id":"log-null",
+			"timestamp":"2025-01-01T00:00:01Z",
+			"request_id":"req-null",
+			"asset_name":"nullclaw",
+			"asset_id":"nullclaw:b1",
+			"action":"WARN",
+			"has_risk":true
+		}
+	]`)
+
+	result := GetAuditLogs(`{"limit":10,"offset":0,"asset_name":"nullclaw","asset_id":"nullclaw:b1"}`)
+	if result["success"] != true {
+		t.Fatalf("Expected success=true, got: %v", result)
+	}
+	raw, _ := json.Marshal(result["data"])
+	var rows []map[string]interface{}
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("failed to decode service result data: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("Expected 1 row, got %d", len(rows))
+	}
+	if got := rows[0]["asset_id"]; got != "nullclaw:b1" {
+		t.Fatalf("Expected asset_id nullclaw:b1, got %v", got)
+	}
+}
+
 // TestGetAuditLogs_InvalidJSON 验证JSON解析错误
 func TestGetAuditLogs_InvalidJSON(t *testing.T) {
 	cleanup := setupTestDB(t)
@@ -133,7 +175,7 @@ func TestGetAuditLogStatistics(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	result := GetAuditLogStatistics()
+	result := GetAuditLogStatistics(`{}`)
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
@@ -166,7 +208,7 @@ func TestClearAllAuditLogs(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	result := ClearAllAuditLogs()
+	result := ClearAllAuditLogs(`{}`)
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}

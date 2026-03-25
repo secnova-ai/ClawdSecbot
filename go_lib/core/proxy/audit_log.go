@@ -12,6 +12,8 @@ type AuditLog struct {
 	ID               string          `json:"id"`
 	Timestamp        string          `json:"timestamp"`
 	RequestID        string          `json:"request_id"`
+	AssetName        string          `json:"asset_name,omitempty"`
+	AssetID          string          `json:"asset_id,omitempty"`
 	Model            string          `json:"model,omitempty"`
 	RequestContent   string          `json:"request_content"` // Summary of request messages
 	ToolCalls        []AuditToolCall `json:"tool_calls,omitempty"`
