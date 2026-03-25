@@ -969,6 +969,8 @@ class ProtectionService {
     int limit = 100,
     int offset = 0,
     bool riskOnly = false,
+    String? assetName,
+    String? assetID,
     DateTime? startTime,
     DateTime? endTime,
     String? searchQuery,
@@ -976,18 +978,43 @@ class ProtectionService {
     limit: limit,
     offset: offset,
     riskOnly: riskOnly,
+    assetName: assetName,
+    assetID: assetID,
     startTime: startTime,
     endTime: endTime,
     searchQuery: searchQuery,
   );
 
-  Future<int> getAuditLogCount({bool riskOnly = false}) async =>
-      _monitor.getAuditLogCount(riskOnly: riskOnly);
+  Future<int> getAuditLogCount({
+    bool riskOnly = false,
+    String? assetName,
+    String? assetID,
+  }) async => _monitor.getAuditLogCount(
+    riskOnly: riskOnly,
+    assetName: assetName,
+    assetID: assetID,
+  );
 
-  Future<Map<String, dynamic>> getAuditLogStatistics() async =>
-      _monitor.getAuditLogStatistics();
+  Future<Map<String, dynamic>> getAuditLogStatistics({
+    String? assetName,
+    String? assetID,
+  }) async =>
+      _monitor.getAuditLogStatistics(assetName: assetName, assetID: assetID);
 
   Future<void> clearAllAuditLogs() async => _monitor.clearAllAuditLogs();
+
+  Future<void> clearAuditLogs({
+    String? assetName,
+    String? assetID,
+  }) async => _monitor.clearAuditLogs(assetName: assetName, assetID: assetID);
+
+  void clearAuditLogsBufferWithFilter({
+    String? assetName,
+    String? assetID,
+  }) => _monitor.clearAuditLogsBufferWithFilter(
+    assetName: assetName,
+    assetID: assetID,
+  );
 
   // === 安全事件委托 ===
 

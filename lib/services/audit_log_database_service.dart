@@ -8,6 +8,8 @@ import 'native_library_service.dart';
 // FFI type definitions
 typedef _OneArgC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef _OneArgDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
+typedef _NoArgC = ffi.Pointer<Utf8> Function();
+typedef _NoArgDart = ffi.Pointer<Utf8> Function();
 
 /// 审计日志 FFI 持久化门面：通过 FFI 委托 Go 层进行数据持久化，Flutter 不直接操作 DB。
 class AuditLogDatabaseService {
@@ -94,8 +96,8 @@ class AuditLogDatabaseService {
     int limit = 100,
     int offset = 0,
     bool riskOnly = false,
-    String assetName = '',
-    String assetID = '',
+    String? assetName,
+    String? assetID,
     DateTime? startTime,
     DateTime? endTime,
     String? searchQuery,
@@ -104,13 +106,17 @@ class AuditLogDatabaseService {
       'limit': limit,
       'offset': offset,
       'risk_only': riskOnly,
-      'asset_name': assetName,
-      'asset_id': assetID,
     };
     if (startTime != null) filter['start_time'] = startTime.toIso8601String();
     if (endTime != null) filter['end_time'] = endTime.toIso8601String();
     if (searchQuery != null && searchQuery.isNotEmpty) {
       filter['search_query'] = searchQuery;
+    }
+    if (assetName != null && assetName.isNotEmpty) {
+      filter['asset_name'] = assetName;
+    }
+    if (assetID != null && assetID.isNotEmpty) {
+      filter['asset_id'] = assetID;
     }
 
     final result = _callFFI('GetAuditLogsFFI', jsonEncode(filter));
@@ -160,15 +166,15 @@ class AuditLogDatabaseService {
   /// Get audit log count with optional filtering
   Future<int> getAuditLogCount({
     bool riskOnly = false,
-    String assetName = '',
-    String assetID = '',
+    String? assetName,
+    String? assetID,
   }) async {
     final result = _callFFI(
       'GetAuditLogCountFFI',
       jsonEncode({
         'risk_only': riskOnly,
-        'asset_name': assetName,
-        'asset_id': assetID,
+        if (assetName != null && assetName.isNotEmpty) 'asset_name': assetName,
+        if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
       }),
     );
 
@@ -178,13 +184,22 @@ class AuditLogDatabaseService {
 
   /// Get audit log statistics
   Future<Map<String, dynamic>> getAuditLogStatistics({
-    String assetName = '',
-    String assetID = '',
+    String? assetName,
+    String? assetID,
   }) async {
-    final result = _callFFI(
-      'GetAuditLogStatisticsByFilterFFI',
-      jsonEncode({'asset_name': assetName, 'asset_id': assetID}),
-    );
+    final hasAssetFilter =
+        (assetName != null && assetName.isNotEmpty) ||
+        (assetID != null && assetID.isNotEmpty);
+    final result = hasAssetFilter
+        ? _callFFI(
+            'GetAuditLogStatisticsWithFilterFFI',
+            jsonEncode({
+              if (assetName != null && assetName.isNotEmpty)
+                'asset_name': assetName,
+              if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
+            }),
+          )
+        : _callFFINoArg('GetAuditLogStatisticsFFI');
     if (result['success'] != true) {
       return {
         'total': 0,
@@ -212,23 +227,77 @@ class AuditLogDatabaseService {
     };
   }
 
+  /// Get all asset tabs that still have audit log history
+  Future<List<Map<String, String>>> getAuditLogAssets() async {
+    final result = _callFFINoArg('GetAuditLogAssetsFFI');
+    if (result['success'] != true) return [];
+
+    final data = result['data'];
+    if (data == null || data is! List) return [];
+
+    return data
+        .map((item) {
+          final row = Map<String, dynamic>.from(item as Map);
+          return {
+            'asset_name': row['asset_name'] as String? ?? '',
+            'asset_id': row['asset_id'] as String? ?? '',
+          };
+        })
+        .where((item) => (item['asset_name'] ?? '').isNotEmpty)
+        .toList();
+  }
+
   /// Clear old audit logs (keep last N days)
   Future<void> cleanOldAuditLogs({int keepDays = 30}) async {
     _callFFI('CleanOldAuditLogsFFI', jsonEncode({'keep_days': keepDays}));
   }
 
   /// Clear all audit logs
-  Future<void> clearAllAuditLogs({
-    String assetName = '',
-    String assetID = '',
+  Future<void> clearAllAuditLogs() async =>
+      _callFFINoArg('ClearAllAuditLogsFFI');
+
+  /// Clear audit logs for the current asset tab. Falls back to clearing all
+  /// logs when no asset filter is provided.
+  Future<void> clearAuditLogs({
+    String? assetName,
+    String? assetID,
   }) async {
+    final hasAssetFilter =
+        (assetName != null && assetName.isNotEmpty) ||
+        (assetID != null && assetID.isNotEmpty);
+    if (!hasAssetFilter) {
+      await clearAllAuditLogs();
+      return;
+    }
+
     _callFFI(
-      'ClearAllAuditLogsByFilterFFI',
-      jsonEncode({'asset_name': assetName, 'asset_id': assetID}),
+      'ClearAuditLogsWithFilterFFI',
+      jsonEncode({
+        if (assetName != null && assetName.isNotEmpty) 'asset_name': assetName,
+        if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
+      }),
     );
   }
 
   // --- Helper methods ---
+
+  Map<String, dynamic> _callFFINoArg(String funcName) {
+    final dylib = _dylib;
+    if (dylib == null || _freeString == null) {
+      return {'success': false, 'error': 'Native library not initialized'};
+    }
+
+    try {
+      final func = dylib.lookupFunction<_NoArgC, _NoArgDart>(funcName);
+      final resultPtr = func();
+      final result = resultPtr.toDartString();
+      _freeString!(resultPtr);
+      return jsonDecode(result) as Map<String, dynamic>;
+    } catch (e) {
+      appLogger.error('[AuditDB] $funcName failed: $e');
+      return {'success': false, 'error': '$funcName failed: $e'};
+    }
+  }
 
   Map<String, dynamic> _callFFI(String funcName, String jsonStr) {
     final dylib = _dylib;

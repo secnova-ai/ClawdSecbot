@@ -96,6 +96,11 @@ typedef GetPendingAuditLogsDart = ffi.Pointer<Utf8> Function();
 typedef ClearAuditLogsC = ffi.Pointer<Utf8> Function();
 typedef ClearAuditLogsDart = ffi.Pointer<Utf8> Function();
 
+typedef ClearAuditLogsWithFilterC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
+typedef ClearAuditLogsWithFilterDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
+
 // --- 安全事件缓冲 ---
 typedef GetPendingSecurityEventsC = ffi.Pointer<Utf8> Function();
 typedef GetPendingSecurityEventsDart = ffi.Pointer<Utf8> Function();

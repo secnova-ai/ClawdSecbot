@@ -116,7 +116,14 @@ void main(List<String> args) async {
           // Initialize database path and native library for audit log window
           await DatabaseService().init();
           await NativeLibraryService().initialize();
-          runApp(AuditLogWindowApp(windowId: windowId, locale: windowLocale));
+          runApp(
+            AuditLogWindowApp(
+              windowId: windowId,
+              locale: windowLocale,
+              initialAssetName: windowArgs['assetName'] ?? '',
+              initialAssetID: windowArgs['assetID'] ?? '',
+            ),
+          );
         } else {
           // Initialize database path and native library for protection monitor window
           await DatabaseService().init();

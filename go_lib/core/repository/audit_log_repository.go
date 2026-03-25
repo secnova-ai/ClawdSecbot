@@ -51,6 +51,11 @@ type AuditLogStatistics struct {
 	AllowedCount int `json:"allowed_count"`
 }
 
+type AuditLogAsset struct {
+	AssetName string `json:"asset_name"`
+	AssetID   string `json:"asset_id"`
+}
+
 // AuditLogRepository 审计日志仓库
 type AuditLogRepository struct {
 	db *sql.DB
@@ -155,16 +160,16 @@ func (r *AuditLogRepository) GetAuditLogs(filter *AuditLogFilter) ([]*AuditLog, 
 	conditions := []string{}
 	params := []interface{}{}
 
+	if filter.RiskOnly {
+		conditions = append(conditions, "has_risk = 1")
+	}
+	// asset_id is the unique instance key; when present it is sufficient and preferred.
 	if filter.AssetID != "" {
 		conditions = append(conditions, "asset_id = ?")
 		params = append(params, filter.AssetID)
 	} else if filter.AssetName != "" {
 		conditions = append(conditions, "asset_name = ?")
 		params = append(params, filter.AssetName)
-	}
-
-	if filter.RiskOnly {
-		conditions = append(conditions, "has_risk = 1")
 	}
 	if filter.StartTime != "" {
 		conditions = append(conditions, "timestamp >= ?")
@@ -224,25 +229,27 @@ func (r *AuditLogRepository) GetAuditLogCount(riskOnly bool, assetName, assetID 
 
 	assetName = strings.TrimSpace(assetName)
 	assetID = strings.TrimSpace(assetID)
-	where := make([]string, 0, 3)
-	args := make([]interface{}, 0, 2)
-	if assetID != "" {
-		where = append(where, "asset_id = ?")
-		args = append(args, assetID)
-	} else if assetName != "" {
-		where = append(where, "asset_name = ?")
-		args = append(args, assetName)
-	}
+	conditions := make([]string, 0, 3)
+	params := make([]interface{}, 0, 3)
 	if riskOnly {
-		where = append(where, "has_risk = 1")
+		conditions = append(conditions, "has_risk = 1")
 	}
+	// Prefer unique asset_id; only fallback to asset_name when asset_id is absent.
+	if assetID != "" {
+		conditions = append(conditions, "asset_id = ?")
+		params = append(params, assetID)
+	} else if assetName != "" {
+		conditions = append(conditions, "asset_name = ?")
+		params = append(params, assetName)
+	}
+
 	whereClause := ""
-	if len(where) > 0 {
-		whereClause = " WHERE " + strings.Join(where, " AND ")
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
 	var count int
-	err := r.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM audit_logs%s", whereClause), args...).Scan(&count)
+	err := r.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM audit_logs %s", whereClause), params...).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count audit logs: %w", err)
 	}
@@ -258,18 +265,20 @@ func (r *AuditLogRepository) GetAuditLogStatistics(assetName, assetID string) (*
 
 	assetName = strings.TrimSpace(assetName)
 	assetID = strings.TrimSpace(assetID)
-	where := make([]string, 0, 2)
-	args := make([]interface{}, 0, 2)
+	conditions := make([]string, 0, 2)
+	params := make([]interface{}, 0, 2)
+	// Prefer unique asset_id; only fallback to asset_name when asset_id is absent.
 	if assetID != "" {
-		where = append(where, "asset_id = ?")
-		args = append(args, assetID)
+		conditions = append(conditions, "asset_id = ?")
+		params = append(params, assetID)
 	} else if assetName != "" {
-		where = append(where, "asset_name = ?")
-		args = append(args, assetName)
+		conditions = append(conditions, "asset_name = ?")
+		params = append(params, assetName)
 	}
+
 	whereClause := ""
-	if len(where) > 0 {
-		whereClause = "WHERE " + strings.Join(where, " AND ")
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
 	query := fmt.Sprintf(`
@@ -281,7 +290,7 @@ func (r *AuditLogRepository) GetAuditLogStatistics(assetName, assetID string) (*
 		FROM audit_logs %s
 	`, whereClause)
 
-	row := r.db.QueryRow(query, args...)
+	row := r.db.QueryRow(query, params...)
 
 	var stats AuditLogStatistics
 	err := row.Scan(&stats.Total, &stats.RiskCount, &stats.BlockedCount, &stats.AllowedCount)
@@ -290,6 +299,36 @@ func (r *AuditLogRepository) GetAuditLogStatistics(assetName, assetID string) (*
 	}
 
 	return &stats, nil
+}
+
+func (r *AuditLogRepository) GetAuditLogAssets() ([]*AuditLogAsset, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	rows, err := r.db.Query(`
+		SELECT asset_name, asset_id
+		FROM audit_logs
+		WHERE asset_name != ''
+		GROUP BY asset_name, asset_id
+		ORDER BY MAX(timestamp) DESC, asset_name ASC, asset_id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query audit log assets: %w", err)
+	}
+	defer rows.Close()
+
+	assets := make([]*AuditLogAsset, 0)
+	for rows.Next() {
+		var asset AuditLogAsset
+		if err := rows.Scan(&asset.AssetName, &asset.AssetID); err != nil {
+			logging.Warning("Failed to scan audit log asset row: %v", err)
+			continue
+		}
+		assets = append(assets, &asset)
+	}
+
+	return assets, nil
 }
 
 // CleanOldAuditLogs 清理旧审计日志（保留最近N天）
@@ -341,6 +380,34 @@ func (r *AuditLogRepository) ClearAllAuditLogs(assetName, assetID string) error 
 	return nil
 }
 
+func (r *AuditLogRepository) ClearAuditLogs(assetName, assetID string) error {
+	if r.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	if assetID == "" && assetName == "" {
+		return r.ClearAllAuditLogs("", "")
+	}
+
+	var (
+		query string
+		args  []interface{}
+	)
+	if assetID != "" {
+		query = "DELETE FROM audit_logs WHERE asset_id = ?"
+		args = append(args, assetID)
+	} else {
+		query = "DELETE FROM audit_logs WHERE asset_name = ?"
+		args = append(args, assetName)
+	}
+
+	if _, err := r.db.Exec(query, args...); err != nil {
+		return fmt.Errorf("failed to clear filtered audit logs: %w", err)
+	}
+
+	return nil
+}
+
 // scanAuditLog 从查询结果行扫描AuditLog
 func scanAuditLog(rows *sql.Rows) (*AuditLog, error) {
 	var log AuditLog
@@ -358,13 +425,13 @@ func scanAuditLog(rows *sql.Rows) (*AuditLog, error) {
 		return nil, err
 	}
 
+	log.AssetName = assetName.String
+	log.AssetID = assetID.String
 	log.HasRisk = hasRisk == 1
 	log.Model = model.String
 	log.RequestContent = requestContent.String
 	log.ToolCalls = toolCalls.String
 	log.OutputContent = outputContent.String
-	log.AssetName = assetName.String
-	log.AssetID = assetID.String
 	log.RiskLevel = riskLevel.String
 	log.RiskReason = riskReason.String
 	log.Action = action.String

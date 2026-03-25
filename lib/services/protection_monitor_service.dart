@@ -822,45 +822,130 @@ class ProtectionMonitorService {
     }
   }
 
+  void clearAuditLogsBufferWithFilter({
+    String? assetName,
+    String? assetID,
+  }) {
+    final hasAssetFilter =
+        (assetName != null && assetName.isNotEmpty) ||
+        (assetID != null && assetID.isNotEmpty);
+    if (!hasAssetFilter) {
+      clearAuditLogsBuffer();
+      return;
+    }
+
+    try {
+      final dylib = _getDylib();
+      final clearLogs = dylib.lookupFunction<
+        ClearAuditLogsWithFilterC,
+        ClearAuditLogsWithFilterDart
+      >('ClearAuditLogsWithFilter');
+      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+        'FreeString',
+      );
+      final argPtr = jsonEncode({
+        if (assetName != null && assetName.isNotEmpty) 'asset_name': assetName,
+        if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
+      }).toNativeUtf8();
+      final resultPtr = clearLogs(argPtr);
+      freeString(resultPtr);
+      malloc.free(argPtr);
+    } catch (e) {
+      appLogger.error(
+        '[ProtectionMonitor] Clear filtered audit logs buffer failed',
+        e,
+      );
+    }
+  }
+
   Future<List<AuditLog>> getAuditLogs({
     int limit = 100,
     int offset = 0,
     bool riskOnly = false,
+    String? assetName,
+    String? assetID,
     DateTime? startTime,
     DateTime? endTime,
     String? searchQuery,
   }) async {
+    final effectiveAssetID =
+        (assetID != null && assetID.trim().isNotEmpty)
+            ? assetID.trim()
+            : (_assetID.isNotEmpty ? _assetID : null);
+    final effectiveAssetName =
+        (assetName != null && assetName.trim().isNotEmpty)
+            ? assetName.trim()
+            : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
+
     return await AuditLogDatabaseService().getAuditLogs(
       limit: limit,
       offset: offset,
       riskOnly: riskOnly,
-      assetName: _assetName ?? '',
-      assetID: _assetID,
+      assetName: effectiveAssetName,
+      assetID: effectiveAssetID,
       startTime: startTime,
       endTime: endTime,
       searchQuery: searchQuery,
     );
   }
 
-  Future<int> getAuditLogCount({bool riskOnly = false}) async {
+  Future<int> getAuditLogCount({
+    bool riskOnly = false,
+    String? assetName,
+    String? assetID,
+  }) async {
+    final effectiveAssetID =
+        (assetID != null && assetID.trim().isNotEmpty)
+            ? assetID.trim()
+            : (_assetID.isNotEmpty ? _assetID : null);
+    final effectiveAssetName =
+        (assetName != null && assetName.trim().isNotEmpty)
+            ? assetName.trim()
+            : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
     return await AuditLogDatabaseService().getAuditLogCount(
       riskOnly: riskOnly,
-      assetName: _assetName ?? '',
-      assetID: _assetID,
+      assetName: effectiveAssetName,
+      assetID: effectiveAssetID,
     );
   }
 
-  Future<Map<String, dynamic>> getAuditLogStatistics() async {
+  Future<Map<String, dynamic>> getAuditLogStatistics({
+    String? assetName,
+    String? assetID,
+  }) async {
+    final effectiveAssetID =
+        (assetID != null && assetID.trim().isNotEmpty)
+            ? assetID.trim()
+            : (_assetID.isNotEmpty ? _assetID : null);
+    final effectiveAssetName =
+        (assetName != null && assetName.trim().isNotEmpty)
+            ? assetName.trim()
+            : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
     return await AuditLogDatabaseService().getAuditLogStatistics(
-      assetName: _assetName ?? '',
-      assetID: _assetID,
+      assetName: effectiveAssetName,
+      assetID: effectiveAssetID,
     );
   }
 
   Future<void> clearAllAuditLogs() async {
-    await AuditLogDatabaseService().clearAllAuditLogs(
-      assetName: _assetName ?? '',
-      assetID: _assetID,
+    await AuditLogDatabaseService().clearAllAuditLogs();
+  }
+
+  Future<void> clearAuditLogs({
+    String? assetName,
+    String? assetID,
+  }) async {
+    final effectiveAssetID =
+        (assetID != null && assetID.trim().isNotEmpty)
+            ? assetID.trim()
+            : (_assetID.isNotEmpty ? _assetID : null);
+    final effectiveAssetName =
+        (assetName != null && assetName.trim().isNotEmpty)
+            ? assetName.trim()
+            : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
+    await AuditLogDatabaseService().clearAuditLogs(
+      assetName: effectiveAssetName,
+      assetID: effectiveAssetID,
     );
   }
 

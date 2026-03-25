@@ -253,15 +253,17 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildTypeSelector(),
-        const SizedBox(height: 16),
-        _buildFormFields(),
-        if (_error != null) ...[const SizedBox(height: 16), _buildError()],
-      ],
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildTypeSelector(),
+          const SizedBox(height: 16),
+          _buildFormFields(),
+          if (_error != null) ...[const SizedBox(height: 16), _buildError()],
+        ],
+      ),
     );
   }
 

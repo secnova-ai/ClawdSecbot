@@ -40,7 +40,7 @@
   "goIntegrationTest": "Go Integration Test",
   "close": "Close",
   "errorCallingGo": "Error calling Go: {error}",
-  "settings": "Settings",
+  "settings": "Global Settings",
   "language": "Language",
   "switchLanguage": "Switch Language",
 

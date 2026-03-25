@@ -299,7 +299,7 @@ abstract class AppLocalizations {
   /// No description provided for @settings.
   ///
   /// In zh, this message translates to:
-  /// **'设置'**
+  /// **'全局设置'**
   String get settings;
 
   /// No description provided for @language.

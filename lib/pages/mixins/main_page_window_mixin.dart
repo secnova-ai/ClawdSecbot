@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import '../../models/protection_analysis_model.dart';
 import '../../services/protection_database_service.dart';
+import '../../models/security_event_model.dart';
 import '../../services/protection_service.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/window_animation_helper.dart';
@@ -39,6 +40,8 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
   final Map<String, StreamSubscription<ProtectionAnalysisResult>>
   _relayResultSubscriptions = {};
   final Map<String, ProtectionService> _relayServices = {};
+  final Map<String, StreamSubscription<List<SecurityEvent>>>
+  _relaySecurityEventSubscriptions = {};
   final Map<String, Timer> _relayTimers = {};
   final Map<String, Timer> _relayStatsTimers = {};
   final Map<String, bool> _relayStatsInFlight = {};
@@ -63,7 +66,10 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
   }
 
   /// 创建审计日志窗口实例
-  Future<WindowController> createAuditLogWindow() async {
+  Future<WindowController> createAuditLogWindow([
+    String assetName = '',
+    String assetID = '',
+  ]) async {
     final currentLocale = Localizations.localeOf(context).languageCode;
     return WindowController.create(
       WindowConfiguration(
@@ -71,6 +77,8 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
         arguments: jsonEncode({
           'windowType': 'audit_log',
           'locale': currentLocale,
+          'assetName': assetName,
+          'assetID': assetID,
         }),
       ),
     );
@@ -90,7 +98,10 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
   }
 
   /// 打开审计日志窗口（单例行为）
-  Future<void> openAuditLogWindow() async {
+  Future<void> openAuditLogWindow([
+    String assetName = '',
+    String assetID = '',
+  ]) async {
     final existing = auditLogWindow;
     if (existing != null) {
       await bringAuditLogToFront(existing);
@@ -104,7 +115,7 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
       return;
     }
 
-    final createFuture = createAuditLogWindow();
+    final createFuture = createAuditLogWindow(assetName, assetID);
     openingAuditLogWindow = createFuture;
     try {
       final controller = await createFuture;
@@ -232,6 +243,20 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
           });
     });
 
+    _relaySecurityEventSubscriptions[windowKey] = service.securityEventStream
+        .listen((events) {
+          if (events.isEmpty) return;
+          final payload = events.map((e) => e.toJson()).toList();
+          controller
+              .invokeMethod('relaySecurityEvents', jsonEncode(payload))
+              .catchError((e) {
+                if (e.toString().contains('disposed') ||
+                    e.toString().contains('closed')) {
+                  _stopRelayForWindowKey(windowKey);
+                }
+              });
+        });
+
     _relayTimers[windowKey] = Timer.periodic(_relayInterval, (_) {
       if (!mounted) return;
       final ctrl = protectionMonitorWindows[windowKey];
@@ -287,6 +312,7 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
   void _stopRelayForWindowKey(String windowKey) {
     _relayLogSubscriptions.remove(windowKey)?.cancel();
     _relayResultSubscriptions.remove(windowKey)?.cancel();
+    _relaySecurityEventSubscriptions.remove(windowKey)?.cancel();
     _relayTimers.remove(windowKey)?.cancel();
     _relayStatsTimers.remove(windowKey)?.cancel();
     _relayStatsInFlight.remove(windowKey);

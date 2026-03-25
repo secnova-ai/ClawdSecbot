@@ -366,6 +366,16 @@ func GetAuditLogStatisticsByFilterFFI(jsonC *C.char) *C.char {
 	return jsonToCString(service.GetAuditLogStatistics(C.GoString(jsonC)))
 }
 
+//export GetAuditLogAssetsFFI
+func GetAuditLogAssetsFFI() *C.char {
+	return jsonToCString(service.GetAuditLogAssets())
+}
+
+//export GetAuditLogStatisticsWithFilterFFI
+func GetAuditLogStatisticsWithFilterFFI(jsonC *C.char) *C.char {
+	return jsonToCString(service.GetAuditLogStatisticsWithFilter(C.GoString(jsonC)))
+}
+
 //export CleanOldAuditLogsFFI
 func CleanOldAuditLogsFFI(jsonC *C.char) *C.char {
 	return jsonToCString(service.CleanOldAuditLogs(C.GoString(jsonC)))
@@ -379,6 +389,11 @@ func ClearAllAuditLogsFFI() *C.char {
 //export ClearAllAuditLogsByFilterFFI
 func ClearAllAuditLogsByFilterFFI(jsonC *C.char) *C.char {
 	return jsonToCString(service.ClearAllAuditLogs(C.GoString(jsonC)))
+}
+
+//export ClearAuditLogsWithFilterFFI
+func ClearAuditLogsWithFilterFFI(jsonC *C.char) *C.char {
+	return jsonToCString(service.ClearAuditLogsWithFilter(C.GoString(jsonC)))
 }
 
 // ==================== 安全事件 FFI ====================
@@ -762,6 +777,17 @@ func RegisterMessageCallback(callback C.DartCallback) *C.char {
 	callbackBridge = bridge
 	// 将回调桥接器设置到 openclaw 插件，使其能够发送日志和指标
 	proxy.SetCallbackBridge(bridge)
+	shepherd.GetSecurityEventBuffer().SetCallback(func(event shepherd.SecurityEvent) {
+		bridge.SendSecurityEvent(map[string]interface{}{
+			"id":          event.ID,
+			"timestamp":   event.Timestamp,
+			"event_type":  event.EventType,
+			"action_desc": event.ActionDesc,
+			"risk_type":   event.RiskType,
+			"detail":      event.Detail,
+			"source":      event.Source,
+		})
+	})
 	return jsonToCString(map[string]interface{}{"success": true, "mode": "callback"})
 }
 
@@ -774,6 +800,7 @@ func UnregisterMessageCallback() *C.char {
 	C.clearDartCallback()
 	// 清除 openclaw 插件的回调桥接器
 	proxy.SetCallbackBridge(nil)
+	shepherd.GetSecurityEventBuffer().SetCallback(nil)
 
 	if callbackBridge != nil {
 		callbackBridge.Close()
@@ -1048,6 +1075,11 @@ func GetPendingAuditLogs() *C.char {
 //export ClearAuditLogs
 func ClearAuditLogs() *C.char {
 	return C.CString(proxy.ClearAuditLogsInternal())
+}
+
+//export ClearAuditLogsWithFilter
+func ClearAuditLogsWithFilter(jsonC *C.char) *C.char {
+	return C.CString(proxy.ClearAuditLogsWithFilterInternal(C.GoString(jsonC)))
 }
 
 // ==================== Gateway Sandbox FFI (plugin capability dispatch) ====================

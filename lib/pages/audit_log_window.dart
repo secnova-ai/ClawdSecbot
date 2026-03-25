@@ -8,6 +8,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
 import '../l10n/app_localizations.dart';
 import '../models/audit_log_model.dart';
+import '../services/audit_log_database_service.dart';
 import '../services/protection_service.dart';
 import '../utils/window_animation_helper.dart';
 import '../widgets/hide_window_shortcut.dart';
@@ -18,11 +19,15 @@ const _appBackground = Color(0xFF0F0F23);
 class AuditLogWindowApp extends StatefulWidget {
   final String windowId;
   final String locale;
+  final String initialAssetName;
+  final String initialAssetID;
 
   const AuditLogWindowApp({
     super.key,
     required this.windowId,
     this.locale = 'en',
+    this.initialAssetName = '',
+    this.initialAssetID = '',
   });
 
   @override
@@ -83,7 +88,11 @@ class _AuditLogWindowAppState extends State<AuditLogWindowApp> {
           },
         ),
       },
-      home: AuditLogWindow(windowId: widget.windowId),
+      home: AuditLogWindow(
+        windowId: widget.windowId,
+        initialAssetName: widget.initialAssetName,
+        initialAssetID: widget.initialAssetID,
+      ),
     );
   }
 }
@@ -91,8 +100,15 @@ class _AuditLogWindowAppState extends State<AuditLogWindowApp> {
 /// Audit Log Window
 class AuditLogWindow extends StatefulWidget {
   final String windowId;
+  final String initialAssetName;
+  final String initialAssetID;
 
-  const AuditLogWindow({super.key, required this.windowId});
+  const AuditLogWindow({
+    super.key,
+    required this.windowId,
+    this.initialAssetName = '',
+    this.initialAssetID = '',
+  });
 
   @override
   State<AuditLogWindow> createState() => _AuditLogWindowState();
@@ -100,6 +116,8 @@ class AuditLogWindow extends StatefulWidget {
 
 class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
   final ProtectionService _agentService = ProtectionService();
+  final AuditLogDatabaseService _auditLogDatabaseService =
+      AuditLogDatabaseService();
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
@@ -113,10 +131,17 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
   AuditLog? _selectedLog;
   Map<String, dynamic> _statistics = {};
   bool _isMaximized = false;
+  List<_AuditAssetFilterTab> _assetTabs = const [
+    _AuditAssetFilterTab(label: 'All Bots', assetName: '', assetID: ''),
+  ];
+  String _selectedAssetName = '';
+  String _selectedAssetID = '';
 
   @override
   void initState() {
     super.initState();
+    _selectedAssetName = widget.initialAssetName.trim();
+    _selectedAssetID = widget.initialAssetID.trim();
     try {
       windowManager.addListener(this);
       if (Platform.isLinux || Platform.isWindows) {
@@ -130,6 +155,7 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
     }
     _loadLogs();
     _loadStatistics();
+    _loadAssetTabs();
     // Auto refresh every 5 seconds
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       _syncAndRefresh();
@@ -177,8 +203,44 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
   Future<void> _syncAndRefresh() async {
     // Sync pending logs from Go buffer to SQLite
     await _agentService.syncPendingAuditLogs();
+    await _loadAssetTabs();
     await _loadLogs();
     await _loadStatistics();
+  }
+
+  Future<void> _loadAssetTabs() async {
+    final tabs = <_AuditAssetFilterTab>[
+      const _AuditAssetFilterTab(label: 'All Bots', assetName: '', assetID: ''),
+    ];
+    final assets = await _auditLogDatabaseService.getAuditLogAssets();
+    for (final asset in assets) {
+      final exists = tabs.any(
+        (tab) =>
+            tab.assetName == asset['asset_name'] &&
+            tab.assetID == asset['asset_id'],
+      );
+      if (exists) continue;
+      tabs.add(
+        _AuditAssetFilterTab(
+          label: asset['asset_name'] ?? '',
+          assetName: asset['asset_name'] ?? '',
+          assetID: asset['asset_id'] ?? '',
+        ),
+      );
+    }
+    final hasCurrent = tabs.any(
+      (tab) =>
+          tab.assetName == _selectedAssetName &&
+          tab.assetID == _selectedAssetID,
+    );
+
+    setState(() {
+      _assetTabs = tabs;
+      if (!hasCurrent) {
+        _selectedAssetName = '';
+        _selectedAssetID = '';
+      }
+    });
   }
 
   Future<void> _syncMaximizedState() async {
@@ -210,12 +272,18 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
       limit: _pageSize,
       offset: _currentPage * _pageSize,
       riskOnly: _riskOnly,
+      assetName: _selectedAssetName,
+      assetID: _selectedAssetID,
       searchQuery: _searchController.text.isNotEmpty
           ? _searchController.text
           : null,
     );
 
-    final count = await _agentService.getAuditLogCount(riskOnly: _riskOnly);
+    final count = await _agentService.getAuditLogCount(
+      riskOnly: _riskOnly,
+      assetName: _selectedAssetName,
+      assetID: _selectedAssetID,
+    );
 
     setState(() {
       _logs = logs;
@@ -225,7 +293,10 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
   }
 
   Future<void> _loadStatistics() async {
-    final stats = await _agentService.getAuditLogStatistics();
+    final stats = await _agentService.getAuditLogStatistics(
+      assetName: _selectedAssetName,
+      assetID: _selectedAssetID,
+    );
     setState(() => _statistics = stats);
   }
 
@@ -240,6 +311,17 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
       _currentPage = 0;
     });
     _loadLogs();
+    _loadStatistics();
+  }
+
+  void _onAssetTabChanged(_AuditAssetFilterTab tab) {
+    setState(() {
+      _selectedAssetName = tab.assetName;
+      _selectedAssetID = tab.assetID;
+      _currentPage = 0;
+    });
+    _loadLogs();
+    _loadStatistics();
   }
 
   void _onPageChanged(int page) {
@@ -249,17 +331,36 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
 
   void _clearAllLogs() {
     final l10n = AppLocalizations.of(context);
+    final hasAssetFilter =
+        _selectedAssetName.isNotEmpty || _selectedAssetID.isNotEmpty;
+    final currentTabLabel = _assetTabs
+        .where(
+          (tab) =>
+              tab.assetName == _selectedAssetName &&
+              tab.assetID == _selectedAssetID,
+        )
+        .map((tab) => tab.label)
+        .cast<String?>()
+        .firstWhere((label) => label != null && label.isNotEmpty, orElse: () {
+          return _selectedAssetName.isNotEmpty ? _selectedAssetName : null;
+        });
+    final confirmTitle = hasAssetFilter
+        ? '${l10n?.auditLogClear ?? 'Clear'} ${currentTabLabel ?? ''}'.trim()
+        : (l10n?.auditLogClearConfirmTitle ?? 'Clear All Logs');
+    final confirmMessage = hasAssetFilter
+        ? '确定要清空当前标签页“${currentTabLabel ?? _selectedAssetName}”的审计日志吗？此操作无法撤销。'
+        : (l10n?.auditLogClearConfirmMessage ??
+              'Are you sure you want to clear all audit logs? This action cannot be undone.');
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
         title: Text(
-          l10n?.auditLogClearConfirmTitle ?? 'Clear All Logs',
+          confirmTitle,
           style: const TextStyle(color: Colors.white),
         ),
         content: Text(
-          l10n?.auditLogClearConfirmMessage ??
-              'Are you sure you want to clear all audit logs? This action cannot be undone.',
+          confirmMessage,
           style: const TextStyle(color: Colors.white70),
         ),
         actions: [
@@ -268,12 +369,21 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
             child: Text(l10n?.auditLogCancel ?? 'Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              _agentService.clearAllAuditLogs();
-              _agentService.clearAuditLogsBuffer();
-              Navigator.pop(ctx);
-              _loadLogs();
-              _loadStatistics();
+            onPressed: () async {
+              final navigator = Navigator.of(ctx);
+              await _agentService.clearAuditLogs(
+                assetName: _selectedAssetName,
+                assetID: _selectedAssetID,
+              );
+              _agentService.clearAuditLogsBufferWithFilter(
+                assetName: _selectedAssetName,
+                assetID: _selectedAssetID,
+              );
+              navigator.pop();
+              if (!mounted) return;
+              await _loadAssetTabs();
+              await _loadLogs();
+              await _loadStatistics();
             },
             child: Text(
               l10n?.auditLogClear ?? 'Clear',
@@ -412,7 +522,9 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
             icon: const Icon(LucideIcons.trash2, size: 16),
             color: Colors.white70,
             onPressed: _clearAllLogs,
-            tooltip: l10n?.auditLogClearAll ?? 'Clear All',
+            tooltip: (_selectedAssetName.isNotEmpty || _selectedAssetID.isNotEmpty)
+                ? (l10n?.auditLogClear ?? 'Clear')
+                : (l10n?.auditLogClearAll ?? 'Clear All'),
           ),
           if (Platform.isWindows) ...[
             const SizedBox(width: 8),
@@ -550,44 +662,75 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
     final l10n = AppLocalizations.of(context);
     return Container(
       padding: const EdgeInsets.all(12),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: TextField(
-              controller: _searchController,
-              onChanged: _onSearchChanged,
-              style: AppFonts.inter(fontSize: 13, color: Colors.white),
-              decoration: InputDecoration(
-                hintText: l10n?.auditLogSearchHint ?? 'Search logs...',
-                hintStyle: AppFonts.inter(fontSize: 13, color: Colors.white38),
-                prefixIcon: const Icon(
-                  LucideIcons.search,
-                  size: 16,
-                  color: Colors.white38,
-                ),
-                filled: true,
-                fillColor: Colors.black.withValues(alpha: 0.3),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-              ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _assetTabs.map((tab) {
+                final selected =
+                    _selectedAssetName == tab.assetName &&
+                    _selectedAssetID == tab.assetID;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(tab.label, style: AppFonts.inter(fontSize: 12)),
+                    selected: selected,
+                    onSelected: (_) => _onAssetTabChanged(tab),
+                    selectedColor: const Color(
+                      0xFF6366F1,
+                    ).withValues(alpha: 0.3),
+                    checkmarkColor: const Color(0xFF6366F1),
+                  ),
+                );
+              }).toList(),
             ),
           ),
-          const SizedBox(width: 12),
-          FilterChip(
-            label: Text(
-              l10n?.auditLogRiskOnly ?? 'Risk Only',
-              style: AppFonts.inter(fontSize: 12),
-            ),
-            selected: _riskOnly,
-            onSelected: _onRiskFilterChanged,
-            selectedColor: const Color(0xFF6366F1).withValues(alpha: 0.3),
-            checkmarkColor: const Color(0xFF6366F1),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: _onSearchChanged,
+                  style: AppFonts.inter(fontSize: 13, color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: l10n?.auditLogSearchHint ?? 'Search logs...',
+                    hintStyle: AppFonts.inter(
+                      fontSize: 13,
+                      color: Colors.white38,
+                    ),
+                    prefixIcon: const Icon(
+                      LucideIcons.search,
+                      size: 16,
+                      color: Colors.white38,
+                    ),
+                    filled: true,
+                    fillColor: Colors.black.withValues(alpha: 0.3),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilterChip(
+                label: Text(
+                  l10n?.auditLogRiskOnly ?? 'Risk Only',
+                  style: AppFonts.inter(fontSize: 12),
+                ),
+                selected: _riskOnly,
+                onSelected: _onRiskFilterChanged,
+                selectedColor: const Color(0xFF6366F1).withValues(alpha: 0.3),
+                checkmarkColor: const Color(0xFF6366F1),
+              ),
+            ],
           ),
         ],
       ),
@@ -1145,4 +1288,16 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
     return '${localTime.year}-${localTime.month.toString().padLeft(2, '0')}-${localTime.day.toString().padLeft(2, '0')} '
         '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:${localTime.second.toString().padLeft(2, '0')}';
   }
+}
+
+class _AuditAssetFilterTab {
+  final String label;
+  final String assetName;
+  final String assetID;
+
+  const _AuditAssetFilterTab({
+    required this.label,
+    required this.assetName,
+    required this.assetID,
+  });
 }

@@ -64,12 +64,16 @@ class _ProtectionMonitorWindowAppState
       StreamController<ProtectionAnalysisResult>.broadcast();
   final StreamController<Map<String, dynamic>> _relayStatsController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final StreamController<List<SecurityEvent>> _relaySecurityEventController =
+      StreamController<List<SecurityEvent>>.broadcast();
 
   Stream<List<String>> get relayedLogBatches => _relayLogController.stream;
   Stream<ProtectionAnalysisResult> get relayedResultStream =>
       _relayResultController.stream;
   Stream<Map<String, dynamic>> get relayedStatsStream =>
       _relayStatsController.stream;
+  Stream<List<SecurityEvent>> get relayedSecurityEventStream =>
+      _relaySecurityEventController.stream;
 
   @override
   void initState() {
@@ -147,6 +151,19 @@ class _ProtectionMonitorWindowAppState
               _relayStatsController.add(map);
             }
           } catch (_) {}
+        } else if (call.method == 'relaySecurityEvents') {
+          try {
+            final args = call.arguments;
+            final List<dynamic> list = args is String
+                ? jsonDecode(args) as List<dynamic>
+                : args as List<dynamic>;
+            final events = list
+                .map((e) => SecurityEvent.fromJson(e as Map<String, dynamic>))
+                .toList();
+            if (!_relaySecurityEventController.isClosed) {
+              _relaySecurityEventController.add(events);
+            }
+          } catch (_) {}
         }
         return null;
       });
@@ -158,6 +175,7 @@ class _ProtectionMonitorWindowAppState
     _relayLogController.close();
     _relayResultController.close();
     _relayStatsController.close();
+    _relaySecurityEventController.close();
     super.dispose();
   }
 
@@ -213,6 +231,9 @@ class _ProtectionMonitorWindowAppState
         relayedLogBatches: Platform.isLinux ? relayedLogBatches : null,
         relayedResultStream: Platform.isLinux ? relayedResultStream : null,
         relayedStatsStream: Platform.isLinux ? relayedStatsStream : null,
+        relayedSecurityEventStream: Platform.isLinux
+            ? relayedSecurityEventStream
+            : null,
       ),
     );
   }
@@ -227,6 +248,7 @@ class ProtectionMonitorPage extends StatefulWidget {
   final Stream<List<String>>? relayedLogBatches;
   final Stream<ProtectionAnalysisResult>? relayedResultStream;
   final Stream<Map<String, dynamic>>? relayedStatsStream;
+  final Stream<List<SecurityEvent>>? relayedSecurityEventStream;
 
   const ProtectionMonitorPage({
     super.key,
@@ -236,6 +258,7 @@ class ProtectionMonitorPage extends StatefulWidget {
     this.relayedLogBatches,
     this.relayedResultStream,
     this.relayedStatsStream,
+    this.relayedSecurityEventStream,
   });
 
   @override
@@ -762,6 +785,16 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
             _updateApiMetrics();
           }
         });
+
+        if (widget.relayedSecurityEventStream != null) {
+          _securityEventSubscription = widget.relayedSecurityEventStream!
+              .listen((events) {
+                if (!mounted || events.isEmpty) return;
+                setState(() {
+                  _securityEvents.insertAll(0, events);
+                });
+              });
+        }
       } else {
         // 本进程流（主窗口或 macOS 同进程子窗口）
         _logSubscription = _protectionService.logStream.listen((log) {
