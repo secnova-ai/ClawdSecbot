@@ -40,8 +40,6 @@ type ProxyProtection struct {
 	proxy           *chatmodelrouting.Proxy
 	server          *http.Server
 	port            int
-	assetName       string
-	assetID         string
 	targetURL       string
 	originalBaseURL string // Original baseUrl to restore when stopping
 	providerName    string
@@ -330,8 +328,6 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 
 	pp := &ProxyProtection{
 		port:                    port,
-		assetName:               protectionConfig.AssetName,
-		assetID:                 protectionConfig.AssetID,
 		targetURL:               actualBaseURL,
 		originalBaseURL:         botBaseURL,
 		providerName:            string(botProviderName),
