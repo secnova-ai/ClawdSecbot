@@ -490,7 +490,7 @@ func (bs *BatchScanSession) run(config *repository.SecurityModelConfig) {
 			hash := bs.SkillHashes[skillName]
 			if hash != "" {
 				if saveErr := scanRepo.SaveSkillScanResult(&repository.SkillScanRecord{
-					SkillName: skillName, SkillHash: hash, Safe: false,
+					SkillName: skillName, SkillHash: hash, SkillPath: skillPath, SourcePlugin: openclawPluginID, Safe: false,
 					Issues: []string{err.Error()}, RiskLevel: "error",
 				}); saveErr != nil {
 					logging.Error("[BatchScan] Failed to save error result for %s: %v", skillName, saveErr)
@@ -513,7 +513,7 @@ func (bs *BatchScanSession) run(config *repository.SecurityModelConfig) {
 			// Save failed result to DB so skill won't appear as "unscanned"
 			if hash != "" {
 				if saveErr := scanRepo.SaveSkillScanResult(&repository.SkillScanRecord{
-					SkillName: skillName, SkillHash: hash, Safe: false,
+					SkillName: skillName, SkillHash: hash, SkillPath: skillPath, SourcePlugin: openclawPluginID, Safe: false,
 					Issues: []string{fmt.Sprintf("Analysis failed: %v", err)}, RiskLevel: "error",
 				}); saveErr != nil {
 					logging.Error("[BatchScan] Failed to save error result for %s: %v", skillName, saveErr)
@@ -536,7 +536,7 @@ func (bs *BatchScanSession) run(config *repository.SecurityModelConfig) {
 			riskLevel = result.RiskLevel
 		}
 		if err := scanRepo.SaveSkillScanResult(&repository.SkillScanRecord{
-			SkillName: skillName, SkillHash: hash, Safe: safe, Issues: issues, RiskLevel: riskLevel,
+			SkillName: skillName, SkillHash: hash, SkillPath: skillPath, SourcePlugin: openclawPluginID, Safe: safe, Issues: issues, RiskLevel: riskLevel,
 		}); err != nil {
 			logging.Error("[BatchScan] Failed to save result for %s: %v", skillName, err)
 		} else {

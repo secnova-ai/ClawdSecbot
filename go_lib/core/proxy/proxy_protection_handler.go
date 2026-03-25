@@ -668,7 +668,10 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 				securityModel := pp.shepherdGate.GetModelName()
 				logging.Info("[ProxyProtection] ShepherdGate tool result detection triggered: toolCalls=%d, toolResults=%d, securityModel=%s", len(toolCallInfos), len(toolResultInfos), securityModel)
 
-				decision, err := pp.shepherdGate.CheckToolCall(pp.ctx, contextMessages, toolCallInfos, toolResultInfos, cachedLastUserMsg, requestID)
+				// 使用代理服务的生命周期 context（pp.ctx）而非请求 context，
+				// 防止客户端断连或请求超时导致 ShepherdGate 分析中途取消，影响代理正常转发。
+				checkCtx := shepherd.WithBotID(pp.ctx, pp.assetID)
+				decision, err := pp.shepherdGate.CheckToolCall(checkCtx, contextMessages, toolCallInfos, toolResultInfos, cachedLastUserMsg, requestID)
 
 				pp.statsMu.Lock()
 				pp.analysisCount++

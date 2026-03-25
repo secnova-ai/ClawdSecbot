@@ -429,12 +429,22 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 		return nil, fmt.Errorf("failed to create shepherd gate: %w", err)
 	}
 	shepherdGate.SetAssetContext(protectionConfig.AssetName, protectionConfig.AssetID)
-	if persistedActions, found, repoErr := repository.NewProtectionRepository(nil).GetShepherdSensitiveActions(protectionConfig.AssetID); repoErr != nil {
+	if persistedActions, found, repoErr := repository.NewProtectionRepository(nil).GetShepherdSensitiveActions(protectionConfig.AssetName, protectionConfig.AssetID); repoErr != nil {
 		logging.Warning("[ProxyProtection] Failed to load persisted shepherd rules for asset_id=%s: %v", protectionConfig.AssetID, repoErr)
 	} else if found {
 		shepherdGate.UpdateUserRules(persistedActions)
 	}
 	logging.Info("[ProxyProtection] Security model: Provider=%s, Model=%s", securityModel.Provider, securityModel.Model)
+	if protectionConfig.AssetName != "" {
+		repo := repository.NewProtectionRepository(nil)
+		userRules, found, err := repo.GetShepherdSensitiveActions(protectionConfig.AssetName, protectionConfig.AssetID)
+		if err != nil {
+			logging.Warning("[ProxyProtection] Failed to load instance user rules: asset=%s id=%s err=%v",
+				protectionConfig.AssetName, protectionConfig.AssetID, err)
+		} else if found {
+			shepherdGate.UpdateUserRules(userRules)
+		}
+	}
 
 	// ==================== Runtime Config ====================
 	auditOnly := false
@@ -559,6 +569,17 @@ func (pp *ProxyProtection) GetShepherdRules() *shepherd.UserRules {
 		return &shepherd.UserRules{SensitiveActions: []string{}}
 	}
 	return pp.shepherdGate.GetUserRules()
+}
+
+// UpdateUserRules hot-updates instance-level Shepherd rules for the active proxy.
+func (pp *ProxyProtection) UpdateUserRules(sensitiveActions []string) {
+	if pp == nil || pp.shepherdGate == nil {
+		return
+	}
+	pp.shepherdGate.UpdateUserRules(sensitiveActions)
+	pp.sendTerminalLog(fmt.Sprintf("Shepherd user rules updated: %d rule(s)", len(sensitiveActions)))
+	logging.Info("[ProxyProtection] Shepherd user rules updated: asset=%s id=%s count=%d",
+		pp.assetName, pp.assetID, len(sensitiveActions))
 }
 
 // updateBotForwardingProvider hot-swaps the proxy's forwarding provider

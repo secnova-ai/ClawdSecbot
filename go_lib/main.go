@@ -44,6 +44,7 @@ import (
 
 	"go_lib/chatmodel-routing/adapter"
 	"go_lib/core"
+	"go_lib/core/api"
 	"go_lib/core/callback_bridge"
 	"go_lib/core/proxy"
 	"go_lib/core/sandbox"
@@ -59,6 +60,7 @@ import (
 func init() {
 	resetSignals()
 	startPprofIfNeeded()
+	configureRealtimeExportHooks()
 }
 
 func startPprofIfNeeded() {
@@ -318,6 +320,11 @@ func ClearProtectionStatisticsFFI(assetIDC *C.char) *C.char {
 //export GetShepherdSensitiveActionsFFI
 func GetShepherdSensitiveActionsFFI(assetIDC *C.char) *C.char {
 	return jsonToCString(service.GetShepherdSensitiveActions(C.GoString(assetIDC)))
+}
+
+//export GetShepherdSensitiveActionsByAssetFFI
+func GetShepherdSensitiveActionsByAssetFFI(assetNameC, assetIDC *C.char) *C.char {
+	return jsonToCString(service.GetShepherdSensitiveActions(C.GoString(assetNameC), C.GoString(assetIDC)))
 }
 
 //export SaveShepherdSensitiveActionsFFI
@@ -750,6 +757,84 @@ var (
 	versionCheckServiceMu sync.Mutex
 )
 
+// API Server 全局实例
+var (
+	apiServer     *api.APIServer
+	apiServerLock sync.Mutex
+)
+
+func configureRealtimeExportHooks() {
+	proxy.SetAuditLogCallback(func(log proxy.AuditLog) {
+		appendAuditLogToExport(log)
+	})
+
+	shepherd.GetSecurityEventBuffer().SetExportCallback(func(event shepherd.SecurityEvent) {
+		appendSecurityEventToExport(event)
+	})
+}
+
+func appendAuditLogToExport(log proxy.AuditLog) {
+	apiServerLock.Lock()
+	server := apiServer
+	apiServerLock.Unlock()
+	if server == nil {
+		return
+	}
+
+	toolCalls := make([]api.ToolCall, 0, len(log.ToolCalls))
+	for _, tc := range log.ToolCalls {
+		toolCalls = append(toolCalls, api.ToolCall{
+			Tool:       tc.Name,
+			Parameters: tc.Arguments,
+			Result:     tc.Result,
+		})
+	}
+
+	entry := &api.AuditLogEntry{
+		BotID:         log.AssetID,
+		LogID:         log.ID,
+		LogTimestamp:  log.Timestamp,
+		RequestID:     log.RequestID,
+		Model:         log.Model,
+		Action:        log.Action,
+		RiskLevel:     log.RiskLevel,
+		RiskCauses:    log.RiskReason,
+		DurationMs:    int(log.Duration),
+		TokenCount:    log.TotalTokens,
+		UserRequest:   log.RequestContent,
+		ToolCallCount: len(log.ToolCalls),
+		ToolCalls:     toolCalls,
+	}
+
+	if err := server.AppendAuditLog(entry); err != nil {
+		fmt.Fprintf(os.Stderr, "[export] append audit log failed: %v\n", err)
+	}
+}
+
+func appendSecurityEventToExport(event shepherd.SecurityEvent) {
+	apiServerLock.Lock()
+	server := apiServer
+	apiServerLock.Unlock()
+	if server == nil {
+		return
+	}
+
+	entry := &api.SecurityEventEntry{
+		BotID:      event.BotID,
+		EventID:    event.ID,
+		Timestamp:  event.Timestamp,
+		EventType:  event.EventType,
+		ActionDesc: event.ActionDesc,
+		RiskType:   event.RiskType,
+		Detail:     event.Detail,
+		Source:     event.Source,
+	}
+
+	if err := server.AppendSecurityEvent(entry); err != nil {
+		fmt.Fprintf(os.Stderr, "[export] append security event failed: %v\n", err)
+	}
+}
+
 //export RegisterMessageCallback
 func RegisterMessageCallback(callback C.DartCallback) *C.char {
 	callbackBridgeMu.Lock()
@@ -890,6 +975,83 @@ func UpdateVersionCheckLanguageFFI(langC *C.char) *C.char {
 
 	lang := C.GoString(langC)
 	versionCheckService.SetLanguage(lang)
+
+	return jsonToCString(map[string]interface{}{"success": true})
+}
+
+// ==================== API Server FFI ====================
+
+//export StartAPIServerFFI
+func StartAPIServerFFI(configJSON *C.char) *C.char {
+	apiServerLock.Lock()
+	defer apiServerLock.Unlock()
+
+	// 检查是否已有 apiServer 在运行
+	if apiServer != nil && apiServer.IsRunning() {
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   "API server is already running",
+		})
+	}
+
+	// 解析配置
+	var config struct {
+		Port int `json:"port"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(configJSON)), &config); err != nil {
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("invalid config: %v", err),
+		})
+	}
+
+	// 使用默认端口 23481
+	port := config.Port
+	if port == 0 {
+		port = 23481
+	}
+
+	// 创建并启动 API Server
+	apiServer = api.NewAPIServer()
+	if err := apiServer.Start(port); err != nil {
+		apiServer = nil
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return jsonToCString(map[string]interface{}{
+		"success": true,
+		"port":    apiServer.Port(),
+		"token":   apiServer.Token(),
+		"url":     fmt.Sprintf("http://127.0.0.1:%d", apiServer.Port()),
+	})
+}
+
+//export StopAPIServerFFI
+func StopAPIServerFFI() *C.char {
+	apiServerLock.Lock()
+	defer apiServerLock.Unlock()
+
+	// 检查是否有 apiServer 在运行
+	if apiServer == nil || !apiServer.IsRunning() {
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   "API server is not running",
+		})
+	}
+
+	// 停止 API Server
+	if err := apiServer.Stop(); err != nil {
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	// 置空引用
+	apiServer = nil
 
 	return jsonToCString(map[string]interface{}{"success": true})
 }

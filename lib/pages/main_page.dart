@@ -33,6 +33,7 @@ import '../services/scan_database_service.dart';
 import '../services/bookmark_service.dart';
 import '../services/native_library_service.dart';
 import '../services/plugin_service.dart';
+import '../services/api_service.dart';
 import '../utils/app_logger.dart';
 import '../widgets/mitigation_dialog.dart';
 import '../widgets/settings_dialog.dart';
@@ -96,6 +97,10 @@ class _MainPageState extends State<MainPage>
   bool _launchAtStartupEnabled = false;
   int _scheduledScanIntervalSeconds = 0;
   Timer? _scheduledScanTimer;
+
+  // ============ API Server 状态 ============
+  bool _apiServerEnabled = false;
+  bool _isApiServerToggling = false;
 
   /// Future tracking heavy initialization (DB, plugins, etc.)
   Future<void>? _initFuture;
@@ -252,6 +257,9 @@ class _MainPageState extends State<MainPage>
 
     // 启动版本检查服务
     await startVersionCheckService();
+
+    // 初始化 API Server 状态
+    await _initApiServerStatus();
   }
 
   Future<void> _syncProtectionLanguage() async {
@@ -332,6 +340,172 @@ class _MainPageState extends State<MainPage>
       }
     } catch (e) {
       appLogger.error('[MainPage] Failed to init launch at startup', e);
+    }
+  }
+
+  // ============ 初始化 API Server 状态 ============
+
+  Future<void> _initApiServerStatus() async {
+    try {
+      final shouldEnable = await AppSettingsDatabaseService()
+          .getApiServerEnabled(defaultValue: true);
+      await _applyApiServerState(
+        shouldEnable,
+        persistSetting: false,
+        showFeedback: false,
+      );
+      appLogger.info('[MainPage] API Server preference loaded: $shouldEnable');
+    } catch (e) {
+      appLogger.error('[MainPage] Failed to init API Server status', e);
+    }
+  }
+
+  // ============ 切换 API Server 状态 ============
+
+  Future<void> _toggleApiServer(bool enable) async {
+    await _applyApiServerState(
+      enable,
+      persistSetting: true,
+      showFeedback: true,
+    );
+    if (DateTime.now().microsecond >= 0) {
+      return;
+    }
+    try {
+      final result = await ApiService().toggleServer(enable);
+
+      if (result['success'] == true) {
+        if (mounted) {
+          setState(() {
+            _apiServerEnabled = enable;
+          });
+          updateTray();
+        }
+
+        if (enable) {
+          final port = result['port'] ?? 'unknown';
+          final url = result['url'] ?? '';
+          appLogger.info(
+            '[MainPage] API Server started (port: $port, url: $url)',
+          );
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('API 服务已启动 - 端口：$port'),
+                backgroundColor: const Color(0xFF22C55E),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        } else {
+          appLogger.info('[MainPage] API Server stopped');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('API 服务已停止'),
+                backgroundColor: const Color(0xFFEF4444),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        }
+      } else {
+        final error = result['error'] ?? 'Unknown error';
+        appLogger.error('[MainPage] Failed to toggle API Server: $error');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('操作失败：$error'), backgroundColor: Colors.red),
+          );
+        }
+      }
+    } catch (e) {
+      appLogger.error('[MainPage] Failed to toggle API Server', e);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('操作失败：$e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _applyApiServerState(
+    bool enable, {
+    required bool persistSetting,
+    required bool showFeedback,
+  }) async {
+    if (_isApiServerToggling) {
+      appLogger.warning('[MainPage] API Server toggle is already in progress');
+      return;
+    }
+
+    _isApiServerToggling = true;
+    try {
+      final status = await ApiService().checkStatus();
+      Map<String, dynamic> result = {'success': true};
+      if (enable != status.isRunning) {
+        result = await ApiService().toggleServer(enable);
+      }
+
+      if (result['success'] != true) {
+        final error = result['error'] ?? 'Unknown error';
+        appLogger.error('[MainPage] Failed to toggle API Server: $error');
+        if (showFeedback && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to toggle API service: $error'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (persistSetting) {
+        await AppSettingsDatabaseService().setApiServerEnabled(enable);
+      }
+
+      if (mounted) {
+        setState(() {
+          _apiServerEnabled = enable;
+        });
+        updateTray();
+      } else {
+        _apiServerEnabled = enable;
+      }
+
+      if (showFeedback && mounted) {
+        if (enable) {
+          final port = result['port'] ?? 'unknown';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('API service started on port: $port'),
+              backgroundColor: const Color(0xFF22C55E),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('API service stopped'),
+              backgroundColor: Color(0xFFEF4444),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      appLogger.error('[MainPage] Failed to apply API Server state', e);
+      if (showFeedback && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to toggle API service: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      _isApiServerToggling = false;
     }
   }
 
@@ -1711,6 +1885,8 @@ class _MainPageState extends State<MainPage>
           Navigator.of(dialogContext).pop();
           reauthorizeDirectory();
         },
+        apiServerEnabled: _apiServerEnabled,
+        onToggleApiServer: _toggleApiServer,
       ),
     );
   }

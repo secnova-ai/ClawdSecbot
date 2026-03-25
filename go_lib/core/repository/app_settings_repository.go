@@ -104,4 +104,5 @@ func (r *AppSettingsRepository) DeleteSetting(key string) error {
 const (
 	SettingKeyLanguage      = "language"
 	SettingKeyIsFirstLaunch = "is_first_launch"
+	SettingKeyAPIServer     = "api_server_enabled"
 )

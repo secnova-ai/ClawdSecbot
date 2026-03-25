@@ -127,6 +127,7 @@ func restartWithSandbox(req *GatewayRestartRequest, binaryPath, homeDir string) 
 	sandbox.StartHookLogWatcherByKey(instanceKey, logPath, func(event sandbox.HookLogEvent) {
 		eventType, actionDesc, riskType, source := sandbox.MapHookEventToSecurityEvent(event)
 		GetSecurityEventBuffer().AddSecurityEvent(SecurityEvent{
+			BotID:      req.AssetID,
 			EventType:  eventType,
 			ActionDesc: actionDesc,
 			RiskType:   riskType,

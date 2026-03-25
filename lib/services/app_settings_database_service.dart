@@ -24,6 +24,8 @@ class AppSettingsDatabaseService {
 
   AppSettingsDatabaseService._internal();
 
+  static const String _apiServerEnabledKey = 'api_server_enabled';
+
   ffi.DynamicLibrary? get _dylib => NativeLibraryService().dylib;
   FreeStringDart? get _freeString => NativeLibraryService().freeString;
 
@@ -215,5 +217,24 @@ class AppSettingsDatabaseService {
     }
 
     return await saveSetting(scheduledScanIntervalKey, seconds.toString());
+  }
+
+  /// 设置 API 服务开关状态。
+  Future<bool> setApiServerEnabled(bool enabled) async {
+    return await saveSetting(_apiServerEnabledKey, enabled ? 'true' : 'false');
+  }
+
+  /// 获取 API 服务开关状态，默认开启。
+  ///
+  /// 当首次启动未写入配置时，会自动写入默认值，保证后续读取一致。
+  Future<bool> getApiServerEnabled({bool defaultValue = true}) async {
+    final value = await getSetting(_apiServerEnabledKey);
+    if (value.isEmpty) {
+      await setApiServerEnabled(defaultValue);
+      return defaultValue;
+    }
+
+    final normalized = value.trim().toLowerCase();
+    return normalized == 'true' || normalized == '1';
   }
 }

@@ -142,7 +142,11 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
 
   /// 按资产类型对原始消息内容做预处理，提取实际展示文本。
   /// 不同资产的消息格式差异在此集中处理，避免侵入通用逻辑。
-  String _preprocessMessageForAsset(String content, String assetName, String role) {
+  String _preprocessMessageForAsset(
+    String content,
+    String assetName,
+    String role,
+  ) {
     final lowerAsset = assetName.toLowerCase();
 
     if (lowerAsset.contains('dintalclaw')) {
@@ -191,10 +195,7 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
   static final _workingMemoryTrailingRe = RegExp(
     r'###\s*\[WORKING MEMORY\][\s\S]*$',
   );
-  static final _systemLineRe = RegExp(
-    r'^[ \t]*\[System\].*$',
-    multiLine: true,
-  );
+  static final _systemLineRe = RegExp(r'^[ \t]*\[System\].*$', multiLine: true);
   static final _protocolViolationLineRe = RegExp(
     r'^[ \t]*PROTOCOL_VIOLATION.*$',
     multiLine: true,
@@ -278,22 +279,23 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
     return result.trim();
   }
 
-
   /// 将 Markdown 风格的列表内容（- **Field**: Value）解析为结构化字段列表
   List<({String field, String value})> _parseStructuredFields(String content) {
     final fields = <({String field, String value})>[];
     final lines = content.split('\n');
     for (final line in lines) {
-      final match = RegExp(r'^[-*]\s+\*\*(.+?)\*\*\s*[:：]\s*(.+)$').firstMatch(
-        line.trim(),
-      );
+      final match = RegExp(
+        r'^[-*]\s+\*\*(.+?)\*\*\s*[:：]\s*(.+)$',
+      ).firstMatch(line.trim());
       if (match != null) {
-        fields.add((field: match.group(1)!.trim(), value: match.group(2)!.trim()));
+        fields.add((
+          field: match.group(1)!.trim(),
+          value: match.group(2)!.trim(),
+        ));
       }
     }
     return fields;
   }
-
 
   bool _isZh(AppLocalizations l10n) => l10n.localeName.startsWith('zh');
 
@@ -358,7 +360,6 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
         return key;
     }
   }
-
 
   Widget _buildSectionTitle(
     String title, {
@@ -493,76 +494,93 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
       onDoubleTap: widget.onToggleExpand,
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            const Icon(LucideIcons.terminal, color: Color(0xFF6366F1), size: 16),
-            const SizedBox(width: 8),
-            Text(
-              l10n.analysisLogs,
-              style: AppFonts.inter(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                LucideIcons.terminal,
+                color: Color(0xFF6366F1),
+                size: 16,
               ),
-            ),
-            const Spacer(),
-            _buildViewToggle(l10n),
-            const SizedBox(width: 8),
-            if (widget.onToggleExpand != null)
+              const SizedBox(width: 8),
+              Text(
+                l10n.analysisLogs,
+                style: AppFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 12),
+              _buildViewToggle(l10n),
+              const SizedBox(width: 8),
+              if (widget.onToggleExpand != null)
+                IconButton(
+                  icon: Icon(
+                    widget.isExpanded
+                        ? LucideIcons.minimize2
+                        : LucideIcons.maximize2,
+                    size: 14,
+                  ),
+                  color: Colors.white54,
+                  tooltip: widget.isExpanded ? 'Restore' : 'Expand',
+                  onPressed: widget.onToggleExpand,
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
+                  padding: EdgeInsets.zero,
+                  iconSize: 14,
+                ),
               IconButton(
-                icon: Icon(
-                  widget.isExpanded
-                      ? LucideIcons.minimize2
-                      : LucideIcons.maximize2,
-                  size: 14,
-                ),
+                icon: const Icon(LucideIcons.copy, size: 16),
+                color: _selectedIndices.isNotEmpty
+                    ? Colors.white54
+                    : Colors.white24,
+                tooltip: _cardText(l10n, 'copySelected'),
+                onPressed: _selectedIndices.isNotEmpty
+                    ? () {
+                        final text = _joinSelectedLines();
+                        widget.onCopyText(text, l10n);
+                      }
+                    : null,
+              ),
+              IconButton(
+                icon: const Icon(LucideIcons.copy, size: 16),
                 color: Colors.white54,
-                tooltip: widget.isExpanded ? 'Restore' : 'Expand',
-                onPressed: widget.onToggleExpand,
-                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                padding: EdgeInsets.zero,
-                iconSize: 14,
+                tooltip: _cardText(l10n, 'copyAll'),
+                onPressed: () {
+                  final allText = widget.logs.map((e) => e.text).join('\n');
+                  widget.onCopyText(allText, l10n);
+                },
               ),
-            IconButton(
-              icon: const Icon(LucideIcons.copy, size: 16),
-              color: _selectedIndices.isNotEmpty
-                  ? Colors.white54
-                  : Colors.white24,
-              tooltip: _cardText(l10n, 'copySelected'),
-              onPressed: _selectedIndices.isNotEmpty
-                  ? () {
-                      final text = _joinSelectedLines();
-                      widget.onCopyText(text, l10n);
-                    }
-                  : null,
-            ),
-            IconButton(
-              icon: const Icon(LucideIcons.copy, size: 16),
-              color: Colors.white54,
-              tooltip: _cardText(l10n, 'copyAll'),
-              onPressed: () {
-                final allText = widget.logs.map((e) => e.text).join('\n');
-                widget.onCopyText(allText, l10n);
-              },
-            ),
-            MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: GestureDetector(
-                onTap: widget.onClearLogs,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    l10n.clear,
-                    style: AppFonts.inter(fontSize: 11, color: Colors.white54),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: widget.onClearLogs,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      l10n.clear,
+                      style: AppFonts.inter(
+                        fontSize: 11,
+                        color: Colors.white54,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -699,10 +717,12 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
           .where((tc) => tc.source == 'response')
           .toList();
       final latestHistoryResults = group.toolCalls
-          .where((tc) =>
-              tc.source == 'history' &&
-              tc.latestRound &&
-              tc.result.isNotEmpty)
+          .where(
+            (tc) =>
+                tc.source == 'history' &&
+                tc.latestRound &&
+                tc.result.isNotEmpty,
+          )
           .toList();
 
       // DinTalClaw 使用内嵌工具协议，工具调用 ID 在多轮消息中更容易出现同形态序列。
@@ -935,7 +955,11 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
   }
 
   /// 构建分组请求卡片 (TruthRecord 快照)
-  Widget _buildGroupedCard(TruthRecordModel group, AppLocalizations l10n, [_ToolDedupContext? toolDedup]) {
+  Widget _buildGroupedCard(
+    TruthRecordModel group,
+    AppLocalizations l10n, [
+    _ToolDedupContext? toolDedup,
+  ]) {
     final subtitleModel = group.model.isNotEmpty
         ? group.model
         : (widget.currentBotModelName.isNotEmpty
@@ -960,15 +984,13 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
         : '';
 
     // === 对话摘要：展示 user/assistant/tool 的有效文本 ===
-    var displayMessages = group.messages
-        .where((m) {
-          final role = m.role.toLowerCase();
-          if (role == 'system') return false;
-          if (role == 'tool' && m.content.trim().isEmpty) return false;
-          if (role == 'assistant' && m.content.trim().isEmpty) return false;
-          return true;
-        })
-        .toList();
+    var displayMessages = group.messages.where((m) {
+      final role = m.role.toLowerCase();
+      if (role == 'system') return false;
+      if (role == 'tool' && m.content.trim().isEmpty) return false;
+      if (role == 'assistant' && m.content.trim().isEmpty) return false;
+      return true;
+    }).toList();
     final lastUserIdx = displayMessages.lastIndexWhere(
       (m) => m.role.toLowerCase() == 'user',
     );
@@ -987,12 +1009,23 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
 
     final assetName = group.assetName;
 
-    final summaryItems = <({String role, String content, List<({String field, String value})> fields})>[];
+    final summaryItems =
+        <
+          ({
+            String role,
+            String content,
+            List<({String field, String value})> fields,
+          })
+        >[];
     for (final message in visibleMessages) {
       final rawContent = message.content.replaceAll(RegExp(r'^\[.*?\]\s*'), '');
       final role = message.role.toLowerCase();
       // 资产特有预处理（DinTalClaw 提取段落标记、其他资产可扩展）
-      final preprocessed = _preprocessMessageForAsset(rawContent, assetName, role);
+      final preprocessed = _preprocessMessageForAsset(
+        rawContent,
+        assetName,
+        role,
+      );
 
       if (role == 'user') {
         final stripped = _stripMetaTags(preprocessed);
@@ -1007,24 +1040,40 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
         final fields = _parseStructuredFields(sanitized);
         final displayText = summaryText ?? sanitized;
         final bodyWithoutFields = fields.isNotEmpty
-            ? sanitized.split('\n').where((line) {
-                return !RegExp(r'^[-*]\s+\*\*.+?\*\*\s*[:：]').hasMatch(
-                  line.trim(),
-                );
-              }).join('\n').trim()
+            ? sanitized
+                  .split('\n')
+                  .where((line) {
+                    return !RegExp(
+                      r'^[-*]\s+\*\*.+?\*\*\s*[:：]',
+                    ).hasMatch(line.trim());
+                  })
+                  .join('\n')
+                  .trim()
             : '';
         final finalContent = summaryText != null && bodyWithoutFields.isNotEmpty
             ? '$displayText\n$bodyWithoutFields'
             : displayText;
         if (finalContent.trim().isNotEmpty) {
-          summaryItems.add((role: 'assistant', content: finalContent, fields: fields));
+          summaryItems.add((
+            role: 'assistant',
+            content: finalContent,
+            fields: fields,
+          ));
         }
       } else if (role == 'tool') {
         final cleaned = _sanitizeCardContent(rawContent).trim();
-        summaryItems.add((role: 'tool_result', content: cleaned, fields: const []));
+        summaryItems.add((
+          role: 'tool_result',
+          content: cleaned,
+          fields: const [],
+        ));
       } else {
         final cleaned = _sanitizeCardContent(rawContent).trim();
-        summaryItems.add((role: message.role, content: cleaned, fields: const []));
+        summaryItems.add((
+          role: message.role,
+          content: cleaned,
+          fields: const [],
+        ));
       }
     }
 
@@ -1037,12 +1086,18 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
               item.content.trim().isNotEmpty,
         )) {
       final fields = _parseStructuredFields(contentText);
-      summaryItems.add((role: 'assistant', content: contentText, fields: fields));
+      summaryItems.add((
+        role: 'assistant',
+        content: contentText,
+        fields: fields,
+      ));
     }
 
     // 有工具调用时在摘要中插入 tool_request 条目（排除内嵌协议的合成条目，它们仅在工具区展示）
     if (responseToolCalls.isNotEmpty) {
-      final standardToolCalls = responseToolCalls.where((tc) => !tc.id.startsWith('inline_')).toList();
+      final standardToolCalls = responseToolCalls
+          .where((tc) => !tc.id.startsWith('inline_'))
+          .toList();
       if (standardToolCalls.isNotEmpty) {
         final toolEntries = standardToolCalls.map((tc) {
           final argsSummary = tc.arguments.isNotEmpty
@@ -1051,7 +1106,11 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
           final display = argsSummary.isNotEmpty
               ? '${tc.name}: $argsSummary'
               : tc.name;
-          return (role: 'tool_request', content: display, fields: const <({String field, String value})>[]);
+          return (
+            role: 'tool_request',
+            content: display,
+            fields: const <({String field, String value})>[],
+          );
         }).toList();
         summaryItems.addAll(toolEntries);
       }
@@ -1070,14 +1129,19 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
         .toList();
     // 工具结果：来自 bot 发送的最新一轮工具执行结果（source=history, latest_round=true）
     final latestHistoryResults = group.toolCalls
-        .where((tc) => tc.source == 'history' && tc.latestRound && tc.result.isNotEmpty)
+        .where(
+          (tc) =>
+              tc.source == 'history' && tc.latestRound && tc.result.isNotEmpty,
+        )
         .toList();
     // 中部工具结果经跨卡去重：空 ID 始终展示，非空 ID 仅在首次出现时展示
     final dedupedResults = toolDedup != null
         ? latestHistoryResults
-            .where((tc) =>
-                tc.id.isEmpty || toolDedup.visibleResultIds.contains(tc.id))
-            .toList()
+              .where(
+                (tc) =>
+                    tc.id.isEmpty || toolDedup.visibleResultIds.contains(tc.id),
+              )
+              .toList()
         : latestHistoryResults;
     final toolResults = dedupedResults
         .map((tc) => '${tc.name}: ${_sanitizeCardContent(tc.result)}')
@@ -1361,9 +1425,7 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
       return ('BLOCKED', const Color(0xFFEF4444));
     }
     final ds = group.decisionStatus.trim();
-    if (ds.isNotEmpty &&
-        !_isNormalDecision(ds) &&
-        ds != 'QUOTA_EXCEEDED') {
+    if (ds.isNotEmpty && !_isNormalDecision(ds) && ds != 'QUOTA_EXCEEDED') {
       return (ds.toUpperCase(), const Color(0xFFF59E0B));
     }
     final phase = group.phase.trim().toLowerCase();
@@ -1374,7 +1436,9 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
       return ('STOPPED', const Color(0xFF94A3B8));
     }
     // 仅当本轮有新的 response 工具调用时才显示 TOOL_CALLING
-    final hasResponseToolCalls = group.toolCalls.any((tc) => tc.source == 'response');
+    final hasResponseToolCalls = group.toolCalls.any(
+      (tc) => tc.source == 'response',
+    );
     if (hasResponseToolCalls) {
       return ('TOOL_CALLING', const Color(0xFFEC4899));
     }

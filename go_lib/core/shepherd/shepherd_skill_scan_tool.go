@@ -147,6 +147,7 @@ func (t *scanSkillSecurityTool) InvokableRun(ctx context.Context, argumentsInJSO
 	record := &repository.SkillScanRecord{
 		SkillName: skillName,
 		SkillHash: hash,
+		SkillPath: skillPath,
 		Safe:      analysisResult.Safe,
 		RiskLevel: analysisResult.RiskLevel,
 		Issues:    issues,

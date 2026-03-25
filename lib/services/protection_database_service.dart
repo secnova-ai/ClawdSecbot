@@ -285,6 +285,13 @@ class ProtectionDatabaseService {
     return data.cast<String>();
   }
 
+  Future<List<String>> getShepherdSensitiveActionsByAsset(
+    String assetName, [
+    String assetID = '',
+  ]) async {
+    return getShepherdSensitiveActions(assetName, assetID);
+  }
+
   Future<void> saveShepherdSensitiveActions(
     String assetName,
     String assetID,

@@ -220,7 +220,7 @@ func TestShepherdRules_SaveAndGet(t *testing.T) {
 	repo := NewProtectionRepository(db)
 
 	// 初始为空
-	actions, found, err := repo.GetShepherdSensitiveActions("openclaw:test-1")
+	actions, found, err := repo.GetShepherdSensitiveActions("openclaw", "bot-1")
 	if err != nil {
 		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
 	}
@@ -232,13 +232,13 @@ func TestShepherdRules_SaveAndGet(t *testing.T) {
 	}
 
 	// 保存
-	err = repo.SaveShepherdSensitiveActions("openclaw", "openclaw:test-1", []string{"action1", "action2"})
+	err = repo.SaveShepherdSensitiveActions("openclaw", "bot-1", []string{"action1", "action2"})
 	if err != nil {
 		t.Fatalf("SaveShepherdSensitiveActions failed: %v", err)
 	}
 
 	// 获取
-	actions, found, err = repo.GetShepherdSensitiveActions("openclaw:test-1")
+	actions, found, err = repo.GetShepherdSensitiveActions("openclaw", "bot-1")
 	if err != nil {
 		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
 	}
@@ -253,11 +253,11 @@ func TestShepherdRules_SaveAndGet(t *testing.T) {
 	}
 
 	// 保存另一个资产的规则，不影响第一个
-	err = repo.SaveShepherdSensitiveActions("other_bot", "other:test-2", []string{"action3"})
+	err = repo.SaveShepherdSensitiveActions("other_bot", "bot-9", []string{"action3"})
 	if err != nil {
 		t.Fatalf("SaveShepherdSensitiveActions failed: %v", err)
 	}
-	actions, found, err = repo.GetShepherdSensitiveActions("openclaw:test-1")
+	actions, found, err = repo.GetShepherdSensitiveActions("openclaw", "bot-1")
 	if err != nil {
 		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
 	}
@@ -266,6 +266,31 @@ func TestShepherdRules_SaveAndGet(t *testing.T) {
 	}
 	if len(actions) != 2 {
 		t.Fatalf("Expected 2 actions for openclaw, got %d", len(actions))
+	}
+
+	err = repo.SaveShepherdSensitiveActions("openclaw", "bot-2", []string{"action-x"})
+	if err != nil {
+		t.Fatalf("SaveShepherdSensitiveActions failed: %v", err)
+	}
+	actions, found, err = repo.GetShepherdSensitiveActions("openclaw", "bot-2")
+	if err != nil {
+		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+	}
+	if !found {
+		t.Fatalf("Expected found=true for bot-2")
+	}
+	if len(actions) != 1 || actions[0] != "action-x" {
+		t.Fatalf("Expected isolated rules for bot-2, got %v", actions)
+	}
+	actions, found, err = repo.GetShepherdSensitiveActions("openclaw", "bot-1")
+	if err != nil {
+		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+	}
+	if !found {
+		t.Fatalf("Expected found=true for bot-1")
+	}
+	if len(actions) != 2 || actions[0] != "action1" || actions[1] != "action2" {
+		t.Fatalf("Expected bot-1 rules unchanged, got %v", actions)
 	}
 }
 

@@ -39,9 +39,10 @@ type AuditToolCall struct {
 
 // AuditLogBuffer stores audit logs before they are persisted
 type AuditLogBuffer struct {
-	mu     sync.Mutex
-	logs   []AuditLog
-	maxLen int
+	mu       sync.Mutex
+	logs     []AuditLog
+	maxLen   int
+	callback func(log AuditLog)
 }
 
 var (
@@ -64,8 +65,6 @@ func generateAuditLogID() string {
 // AddAuditLog adds an audit log entry to the buffer
 func (b *AuditLogBuffer) AddAuditLog(log AuditLog) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	if log.ID == "" {
 		log.ID = generateAuditLogID()
 	}
@@ -79,6 +78,19 @@ func (b *AuditLogBuffer) AddAuditLog(log AuditLog) {
 	if len(b.logs) > b.maxLen {
 		b.logs = b.logs[len(b.logs)-b.maxLen:]
 	}
+	cb := b.callback
+	b.mu.Unlock()
+
+	if cb != nil {
+		cb(log)
+	}
+}
+
+// SetAuditLogCallback sets a callback that is triggered for each newly added audit log.
+func SetAuditLogCallback(cb func(log AuditLog)) {
+	auditLogBuffer.mu.Lock()
+	defer auditLogBuffer.mu.Unlock()
+	auditLogBuffer.callback = cb
 }
 
 // UpdateAuditLogTokens updates token usage for an existing audit log by RequestID

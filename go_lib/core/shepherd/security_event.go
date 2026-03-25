@@ -13,6 +13,7 @@ import (
 // SecurityEvent represents a security event recorded by ReAct Agent or heuristic detection.
 type SecurityEvent struct {
 	ID         string `json:"id"`
+	BotID      string `json:"bot_id,omitempty"`
 	Timestamp  string `json:"timestamp"`
 	EventType  string `json:"event_type"`  // tool_execution | blocked | other
 	ActionDesc string `json:"action_desc"` // Action description (LLM generated)
@@ -33,6 +34,7 @@ type SecurityEventBuffer struct {
 	events   []SecurityEvent
 	maxLen   int
 	callback SecurityEventCallback
+	exportCb SecurityEventCallback
 }
 
 var (
@@ -53,6 +55,13 @@ func GetSecurityEventBuffer() *SecurityEventBuffer {
 func (b *SecurityEventBuffer) SetCallback(cb SecurityEventCallback) {
 	b.mu.Lock()
 	b.callback = cb
+	b.mu.Unlock()
+}
+
+// SetExportCallback sets callback for export pipeline writes.
+func (b *SecurityEventBuffer) SetExportCallback(cb SecurityEventCallback) {
+	b.mu.Lock()
+	b.exportCb = cb
 	b.mu.Unlock()
 }
 
@@ -78,6 +87,7 @@ func (b *SecurityEventBuffer) AddSecurityEvent(event SecurityEvent) {
 		b.events = b.events[len(b.events)-b.maxLen:]
 	}
 	cb := b.callback
+	exportCb := b.exportCb
 	b.mu.Unlock()
 
 	// Persist to SQLite
@@ -101,6 +111,9 @@ func (b *SecurityEventBuffer) AddSecurityEvent(event SecurityEvent) {
 	// Push via callback
 	if cb != nil {
 		cb(event)
+	}
+	if exportCb != nil {
+		exportCb(event)
 	}
 }
 

@@ -254,7 +254,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
         widget.assetID,
       );
       _sensitiveActions.clear();
-      _sensitiveActions.addAll(rules['sensitiveActions']!);
+      _sensitiveActions.addAll(rules['sensitiveActions'] ?? const []);
 
       // Load bundled ReAct skills
       _bundledSkills = PluginService().listBundledReActSkills();
