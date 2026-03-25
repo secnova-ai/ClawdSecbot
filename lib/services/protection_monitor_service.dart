@@ -138,25 +138,18 @@ class ProtectionMonitorService {
   }
 
   bool _matchesCurrentAsset(SecurityEvent event) {
-    if (_assetID.isNotEmpty) {
-      return event.assetID == _assetID;
+    if (_assetID.isEmpty) {
+      return false;
     }
-    if ((_assetName ?? '').isNotEmpty) {
-      return event.assetName == _assetName;
-    }
-    return true;
+    return event.assetID == _assetID;
   }
 
   bool _matchesCurrentMetrics(Map<String, dynamic> metrics) {
     final metricAssetID = (metrics['asset_id'] ?? '').toString().trim();
-    if (_assetID.isNotEmpty) {
-      return metricAssetID == _assetID;
+    if (_assetID.isEmpty) {
+      return false;
     }
-    final metricAssetName = (metrics['asset_name'] ?? '').toString().trim();
-    if ((_assetName ?? '').isNotEmpty) {
-      return metricAssetName == _assetName;
-    }
-    return false;
+    return metricAssetID == _assetID;
   }
 
   int _deltaWithReset(int current, int previous) {
@@ -173,16 +166,23 @@ class ProtectionMonitorService {
 
   void startProxyLogPolling() {
     _proxyLogPollTimer?.cancel();
-    int syncCounter = 25;
+    // 200ms * 25 = 5s: 审计日志保持低频 DB 同步，减少写放大。
+    int auditSyncCounter = 25;
+    // 200ms * 5 = 1s: 安全事件提升为近实时刷新。
+    int securityEventSyncCounter = 5;
     _proxyLogPollTimer = Timer.periodic(const Duration(milliseconds: 200), (
       timer,
     ) {
       if (_proxySessionID != null && _isProxyRunning) {
         _pollProxyLogs(_proxySessionID!);
-        syncCounter++;
-        if (syncCounter >= 25) {
-          syncCounter = 0;
+        auditSyncCounter++;
+        if (auditSyncCounter >= 25) {
+          auditSyncCounter = 0;
           syncPendingAuditLogs();
+        }
+        securityEventSyncCounter++;
+        if (securityEventSyncCounter >= 5) {
+          securityEventSyncCounter = 0;
           syncPendingSecurityEvents();
         }
       }
@@ -822,10 +822,7 @@ class ProtectionMonitorService {
     }
   }
 
-  void clearAuditLogsBufferWithFilter({
-    String? assetName,
-    String? assetID,
-  }) {
+  void clearAuditLogsBufferWithFilter({String? assetName, String? assetID}) {
     final hasAssetFilter =
         (assetName != null && assetName.isNotEmpty) ||
         (assetID != null && assetID.isNotEmpty);
@@ -836,10 +833,11 @@ class ProtectionMonitorService {
 
     try {
       final dylib = _getDylib();
-      final clearLogs = dylib.lookupFunction<
-        ClearAuditLogsWithFilterC,
-        ClearAuditLogsWithFilterDart
-      >('ClearAuditLogsWithFilter');
+      final clearLogs = dylib
+          .lookupFunction<
+            ClearAuditLogsWithFilterC,
+            ClearAuditLogsWithFilterDart
+          >('ClearAuditLogsWithFilter');
       final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
         'FreeString',
       );
@@ -868,14 +866,13 @@ class ProtectionMonitorService {
     DateTime? endTime,
     String? searchQuery,
   }) async {
-    final effectiveAssetID =
-        (assetID != null && assetID.trim().isNotEmpty)
-            ? assetID.trim()
-            : (_assetID.isNotEmpty ? _assetID : null);
+    final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
+        ? assetID.trim()
+        : (_assetID.isNotEmpty ? _assetID : null);
     final effectiveAssetName =
         (assetName != null && assetName.trim().isNotEmpty)
-            ? assetName.trim()
-            : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
+        ? assetName.trim()
+        : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
 
     return await AuditLogDatabaseService().getAuditLogs(
       limit: limit,
@@ -894,14 +891,13 @@ class ProtectionMonitorService {
     String? assetName,
     String? assetID,
   }) async {
-    final effectiveAssetID =
-        (assetID != null && assetID.trim().isNotEmpty)
-            ? assetID.trim()
-            : (_assetID.isNotEmpty ? _assetID : null);
+    final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
+        ? assetID.trim()
+        : (_assetID.isNotEmpty ? _assetID : null);
     final effectiveAssetName =
         (assetName != null && assetName.trim().isNotEmpty)
-            ? assetName.trim()
-            : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
+        ? assetName.trim()
+        : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
     return await AuditLogDatabaseService().getAuditLogCount(
       riskOnly: riskOnly,
       assetName: effectiveAssetName,
@@ -913,14 +909,13 @@ class ProtectionMonitorService {
     String? assetName,
     String? assetID,
   }) async {
-    final effectiveAssetID =
-        (assetID != null && assetID.trim().isNotEmpty)
-            ? assetID.trim()
-            : (_assetID.isNotEmpty ? _assetID : null);
+    final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
+        ? assetID.trim()
+        : (_assetID.isNotEmpty ? _assetID : null);
     final effectiveAssetName =
         (assetName != null && assetName.trim().isNotEmpty)
-            ? assetName.trim()
-            : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
+        ? assetName.trim()
+        : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
     return await AuditLogDatabaseService().getAuditLogStatistics(
       assetName: effectiveAssetName,
       assetID: effectiveAssetID,
@@ -931,18 +926,14 @@ class ProtectionMonitorService {
     await AuditLogDatabaseService().clearAllAuditLogs();
   }
 
-  Future<void> clearAuditLogs({
-    String? assetName,
-    String? assetID,
-  }) async {
-    final effectiveAssetID =
-        (assetID != null && assetID.trim().isNotEmpty)
-            ? assetID.trim()
-            : (_assetID.isNotEmpty ? _assetID : null);
+  Future<void> clearAuditLogs({String? assetName, String? assetID}) async {
+    final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
+        ? assetID.trim()
+        : (_assetID.isNotEmpty ? _assetID : null);
     final effectiveAssetName =
         (assetName != null && assetName.trim().isNotEmpty)
-            ? assetName.trim()
-            : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
+        ? assetName.trim()
+        : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
     await AuditLogDatabaseService().clearAuditLogs(
       assetName: effectiveAssetName,
       assetID: effectiveAssetID,
@@ -987,10 +978,12 @@ class ProtectionMonitorService {
     int limit = 100,
     int offset = 0,
   }) async {
+    if (_assetID.isEmpty) {
+      return [];
+    }
     return await SecurityEventDatabaseService().getSecurityEvents(
       limit: limit,
       offset: offset,
-      assetName: _assetName ?? '',
       assetID: _assetID,
     );
   }
@@ -1002,10 +995,13 @@ class ProtectionMonitorService {
 
   /// 清空所有安全事件
   Future<void> clearAllSecurityEvents() async {
-    await SecurityEventDatabaseService().clearSecurityEvents(
-      assetName: _assetName ?? '',
-      assetID: _assetID,
-    );
+    if (_assetID.isEmpty) {
+      appLogger.warning(
+        '[ProtectionMonitor] Skip clear security events: missing asset_id',
+      );
+      return;
+    }
+    await SecurityEventDatabaseService().clearSecurityEvents(assetID: _assetID);
   }
 
   void dispose({bool removeInstance = true}) {

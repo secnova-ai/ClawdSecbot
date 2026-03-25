@@ -76,8 +76,8 @@ func (r *SecurityEventRepository) SaveSecurityEventsBatch(events []*SecurityEven
 	return nil
 }
 
-// GetSecurityEvents 获取安全事件列表（按时间倒序）
-func (r *SecurityEventRepository) GetSecurityEvents(limit, offset int, assetName, assetID string) ([]*SecurityEventRecord, error) {
+// GetSecurityEvents 获取安全事件列表（按时间倒序，仅按 asset_id 过滤）
+func (r *SecurityEventRepository) GetSecurityEvents(limit, offset int, assetID string) ([]*SecurityEventRecord, error) {
 	if r.db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
@@ -85,7 +85,6 @@ func (r *SecurityEventRepository) GetSecurityEvents(limit, offset int, assetName
 		limit = 100
 	}
 
-	assetName = strings.TrimSpace(assetName)
 	assetID = strings.TrimSpace(assetID)
 
 	query := `
@@ -93,13 +92,10 @@ func (r *SecurityEventRepository) GetSecurityEvents(limit, offset int, assetName
 		FROM security_events
 	`
 	args := make([]interface{}, 0, 4)
-	where := make([]string, 0, 2)
+	where := make([]string, 0, 1)
 	if assetID != "" {
 		where = append(where, "asset_id = ?")
 		args = append(args, assetID)
-	} else if assetName != "" {
-		where = append(where, "asset_name = ?")
-		args = append(args, assetName)
 	}
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
@@ -129,24 +125,20 @@ func (r *SecurityEventRepository) GetSecurityEvents(limit, offset int, assetName
 	return events, nil
 }
 
-// GetSecurityEventCount 获取安全事件数量
-func (r *SecurityEventRepository) GetSecurityEventCount(assetName, assetID string) (int, error) {
+// GetSecurityEventCount 获取安全事件数量（仅按 asset_id 过滤）
+func (r *SecurityEventRepository) GetSecurityEventCount(assetID string) (int, error) {
 	if r.db == nil {
 		return 0, fmt.Errorf("database not initialized")
 	}
-	assetName = strings.TrimSpace(assetName)
 	assetID = strings.TrimSpace(assetID)
 
 	var count int
 	query := "SELECT COUNT(*) FROM security_events"
 	args := make([]interface{}, 0, 2)
-	where := make([]string, 0, 2)
+	where := make([]string, 0, 1)
 	if assetID != "" {
 		where = append(where, "asset_id = ?")
 		args = append(args, assetID)
-	} else if assetName != "" {
-		where = append(where, "asset_name = ?")
-		args = append(args, assetName)
 	}
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
@@ -176,23 +168,19 @@ func (r *SecurityEventRepository) CleanOldSecurityEvents(keepDays int) error {
 	return nil
 }
 
-// ClearAllSecurityEvents 清空安全事件（可按资产过滤）
-func (r *SecurityEventRepository) ClearAllSecurityEvents(assetName, assetID string) error {
+// ClearAllSecurityEvents 清空安全事件（仅按 asset_id 过滤）
+func (r *SecurityEventRepository) ClearAllSecurityEvents(assetID string) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	assetName = strings.TrimSpace(assetName)
 	assetID = strings.TrimSpace(assetID)
 
 	query := "DELETE FROM security_events"
 	args := make([]interface{}, 0, 2)
-	where := make([]string, 0, 2)
+	where := make([]string, 0, 1)
 	if assetID != "" {
 		where = append(where, "asset_id = ?")
 		args = append(args, assetID)
-	} else if assetName != "" {
-		where = append(where, "asset_name = ?")
-		args = append(args, assetName)
 	}
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")

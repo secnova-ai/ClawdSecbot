@@ -786,6 +786,8 @@ func RegisterMessageCallback(callback C.DartCallback) *C.char {
 			"risk_type":   event.RiskType,
 			"detail":      event.Detail,
 			"source":      event.Source,
+			"asset_name":  event.AssetName,
+			"asset_id":    event.AssetID,
 		})
 	})
 	return jsonToCString(map[string]interface{}{"success": true, "mode": "callback"})
