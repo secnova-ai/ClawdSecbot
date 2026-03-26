@@ -15,8 +15,10 @@ import (
 // HookLogEvent represents a parsed event from the hook DLL log file
 type HookLogEvent struct {
 	Timestamp string
-	Action    string // BLOCK_FILE, BLOCK_CMD, BLOCK_NET, LOG_FILE, LOG_CMD, LOG_NET, INJECT, INIT, etc.
-	Detail    string
+	Action    string // BLOCK/LOG_ONLY or legacy BLOCK_FILE/BLOCK_CMD/BLOCK_NET/...
+	Type      string // PATH-READ/CMD/NET/DNS... (new format), optional for legacy lines
+	Target    string // target path/domain/ip (new format), optional for legacy lines
+	Detail    string // legacy detail or fallback detail
 }
 
 // HookLogCallback is called when new hook log events are detected
@@ -112,6 +114,9 @@ func (w *HookLogWatcher) readNewLines() {
 // into the unified security event pipeline.
 // We keep sandbox lifecycle noise in hook log files, but not in UI/database events.
 func shouldEmitHookSecurityEvent(event HookLogEvent) bool {
+	if event.Action == "BLOCK" || event.Action == "LOG_ONLY" {
+		return true
+	}
 	switch event.Action {
 	case "INIT", "CLEANUP", "INJECT":
 		return false
@@ -120,8 +125,9 @@ func shouldEmitHookSecurityEvent(event HookLogEvent) bool {
 	}
 }
 
-// parseHookLogLine parses a line like:
-// [2026-03-18 12:00:00] BLOCK_FILE: C:\Users\secret\data.txt
+// parseHookLogLine parses two formats:
+// 1) New: [2026-03-18 12:00:00] ACTION=BLOCK TYPE=PATH-READ TARGET=C:\Users\a.txt
+// 2) Legacy: [2026-03-18 12:00:00] BLOCK_FILE: C:\Users\secret\data.txt
 func parseHookLogLine(line string) (HookLogEvent, bool) {
 	line = strings.TrimSpace(line)
 	if len(line) < 22 || line[0] != '[' {
@@ -136,6 +142,22 @@ func parseHookLogLine(line string) (HookLogEvent, bool) {
 	timestamp := line[1:closeBracket]
 	rest := strings.TrimSpace(line[closeBracket+1:])
 
+	if strings.Contains(rest, "ACTION=") {
+		action := extractKV(rest, "ACTION")
+		eventType := extractKV(rest, "TYPE")
+		target := extractKV(rest, "TARGET")
+		if action == "" {
+			return HookLogEvent{}, false
+		}
+		return HookLogEvent{
+			Timestamp: timestamp,
+			Action:    action,
+			Type:      eventType,
+			Target:    target,
+			Detail:    strings.TrimSpace(rest),
+		}, true
+	}
+
 	colonIdx := strings.Index(rest, ":")
 	if colonIdx < 0 {
 		return HookLogEvent{}, false
@@ -147,8 +169,29 @@ func parseHookLogLine(line string) (HookLogEvent, bool) {
 	return HookLogEvent{
 		Timestamp: timestamp,
 		Action:    action,
+		Type:      "",
+		Target:    "",
 		Detail:    detail,
 	}, true
+}
+
+func extractKV(s, key string) string {
+	prefix := key + "="
+	start := strings.Index(s, prefix)
+	if start < 0 {
+		return ""
+	}
+	start += len(prefix)
+	rest := s[start:]
+
+	nextKeys := []string{" ACTION=", " TYPE=", " TARGET="}
+	end := len(rest)
+	for _, marker := range nextKeys {
+		if idx := strings.Index(rest, marker); idx >= 0 && idx < end {
+			end = idx
+		}
+	}
+	return strings.TrimSpace(rest[:end])
 }
 
 // MapHookEventToSecurityEvent maps a hook log event to the standard event type/risk classification
@@ -156,6 +199,22 @@ func MapHookEventToSecurityEvent(event HookLogEvent) (eventType, actionDesc, ris
 	source = "sandbox_hook"
 
 	switch {
+	case event.Action == "BLOCK":
+		eventType = "blocked"
+		riskType = hookEventToRiskType(event.Type, event.Action)
+		if event.Target != "" {
+			actionDesc = "Sandbox blocked: " + event.Type + " " + event.Target
+		} else {
+			actionDesc = "Sandbox blocked: " + event.Detail
+		}
+	case event.Action == "LOG_ONLY":
+		eventType = "tool_execution"
+		riskType = hookEventToRiskType(event.Type, event.Action)
+		if event.Target != "" {
+			actionDesc = "Sandbox logged: " + event.Type + " " + event.Target
+		} else {
+			actionDesc = "Sandbox logged: " + event.Detail
+		}
 	case strings.HasPrefix(event.Action, "BLOCK"):
 		eventType = "blocked"
 		riskType = hookActionToRiskType(event.Action)
@@ -174,6 +233,23 @@ func MapHookEventToSecurityEvent(event HookLogEvent) (eventType, actionDesc, ris
 		actionDesc = event.Action + ": " + event.Detail
 	}
 	return
+}
+
+func hookEventToRiskType(eventType string, action string) string {
+	t := strings.ToUpper(eventType)
+	switch {
+	case strings.HasPrefix(t, "PATH-"):
+		return "unauthorized_file_access"
+	case t == "CMD":
+		return "unauthorized_command"
+	case strings.HasPrefix(t, "NET"), t == "DNS":
+		return "unauthorized_network"
+	default:
+		if action == "BLOCK" || action == "LOG_ONLY" {
+			return "unknown"
+		}
+		return "unknown"
+	}
 }
 
 func hookActionToRiskType(action string) string {

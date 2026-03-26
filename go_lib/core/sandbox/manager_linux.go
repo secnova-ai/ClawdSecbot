@@ -64,6 +64,7 @@ func (m *SandboxManager) buildSandboxCommand() (*exec.Cmd, string, error) {
 	// Build: openclaw <gatewayArgs...> with LD_PRELOAD environment variables
 	cmd := exec.Command("openclaw", m.gatewayArgs...)
 	cmd.Env = append(os.Environ(), m.gatewayEnv...)
+
 	cmd.Env = append(cmd.Env,
 		fmt.Sprintf("LD_PRELOAD=%s", m.preloadLib),
 		fmt.Sprintf("SANDBOX_POLICY_FILE=%s", policyPath),

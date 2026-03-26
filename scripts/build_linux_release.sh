@@ -251,7 +251,7 @@ update_pubspec_version() {
 
 # 构建 Linux preload 沙箱动态库并复制到用户策略目录。
 build_sandbox_preload() {
-    local sandbox_dir="$PROJECT_ROOT/sandbox"
+    local sandbox_dir="$PROJECT_ROOT/go_lib/core/sandbox/linux_hook"
     local policy_dir="$HOME/.botsec/policies"
     local preload_so="$sandbox_dir/build/libsandbox_preload.so"
 
@@ -307,7 +307,7 @@ prepare_rootfs_layout() {
 copy_application_files() {
     local bundle_dir="$PROJECT_ROOT/build/linux/$FLUTTER_ARCH/release/bundle"
     local plugins_dir="$PROJECT_ROOT/plugins"
-    local preload_so="$PROJECT_ROOT/sandbox/build/libsandbox_preload.so"
+    local preload_so="$PROJECT_ROOT/go_lib/core/sandbox/linux_hook/build/libsandbox_preload.so"
 
     [[ -d "$bundle_dir" ]] || fail "Flutter bundle not found: $bundle_dir"
     cp -a "$bundle_dir"/. "$ROOTFS_DIR/usr/lib/$PACKAGE_NAME/"

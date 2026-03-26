@@ -6,6 +6,9 @@
 #   ./scripts/run_with_pprof.sh 9090         # 使用自定义端口 9090
 #   BOTSEC_PPROF_PORT=8080 ./scripts/run_with_pprof.sh  # 通过环境变量指定端口
 #
+# Linux: 在启动 Flutter 前会 cmake 重新编译 go_lib/core/sandbox/linux_hook/preload.c，并将 libsandbox_preload.so
+# 覆盖复制到 ~/.botsec/policies/，与 scripts/build_linux_release.sh 中 build_sandbox_preload 一致。
+#
 # pprof 常用命令:
 #   go tool pprof http://127.0.0.1:6060/debug/pprof/heap          # 堆内存分析
 #   go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=30  # CPU 分析 (30秒采样)
@@ -25,18 +28,60 @@ cd "$PROJECT_ROOT"
 # 确定 pprof 端口: 命令行参数 > 环境变量 > 默认值 6060
 PPROF_PORT="${1:-${BOTSEC_PPROF_PORT:-6060}}"
 
+# sudo 执行助手: 优先无交互执行(已有缓存凭据), 否则回退到交互式 sudo
+run_with_sudo() {
+    if sudo -n true 2>/dev/null; then
+        sudo -n "$@"
+    else
+        sudo "$@"
+    fi
+}
+
 echo "============================================"
 echo "  BotSecManager — pprof 性能分析模式"
 echo "============================================"
 echo ""
 
 # Step 1: 构建 Go 插件
-echo "[1/2] 构建 Go 插件..."
+echo "[1/3] 构建 Go 插件..."
 "$PROJECT_ROOT/scripts/build_openclaw_plugin.sh"
 echo ""
 
-# Step 2: 检测操作系统并启动 Flutter 应用（带 pprof）
-echo "[2/2] 启动 Flutter 应用（pprof 端口: $PPROF_PORT）..."
+# Step 2 (Linux only): 重新编译 LD_PRELOAD 沙箱库并复制到策略目录，与 gateway 查找路径一致
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    echo "[2/3] 构建并安装 libsandbox_preload.so..."
+    SANDBOX_DIR="$PROJECT_ROOT/go_lib/core/sandbox/linux_hook"
+    POLICY_DIR="${HOME}/.botsec/policies"
+    PRELOAD_SO="$SANDBOX_DIR/build/libsandbox_preload.so"
+    SYSTEM_LIB_DIR="/usr/lib/clawdsecbot"
+    SYSTEM_PRELOAD_SO="$SYSTEM_LIB_DIR/libsandbox_preload.so"
+    if [[ -d "$SANDBOX_DIR" ]]; then
+        mkdir -p "$SANDBOX_DIR/build"
+        cmake -S "$SANDBOX_DIR" -B "$SANDBOX_DIR/build" -DCMAKE_BUILD_TYPE=Release
+        cmake --build "$SANDBOX_DIR/build" --config Release
+        if [[ -f "$PRELOAD_SO" ]]; then
+            mkdir -p "$POLICY_DIR"
+            cp -f "$PRELOAD_SO" "$POLICY_DIR/libsandbox_preload.so"
+            echo "  已安装: $POLICY_DIR/libsandbox_preload.so"
+
+            # 同步替换系统路径的预加载库, 供网关注入时直接使用
+            run_with_sudo mkdir -p "$SYSTEM_LIB_DIR"
+            run_with_sudo install -m 0755 "$PRELOAD_SO" "$SYSTEM_PRELOAD_SO"
+            echo "  已替换: $SYSTEM_PRELOAD_SO"
+        else
+            echo "  警告: 构建后未找到 $PRELOAD_SO，沙箱 LD_PRELOAD 可能仍为旧版本"
+        fi
+    else
+        echo "  警告: 未找到 $SANDBOX_DIR，跳过沙箱库构建"
+    fi
+    echo ""
+else
+    echo "[2/3] 非 Linux，跳过 libsandbox_preload.so 构建"
+    echo ""
+fi
+
+# Step 3: 检测操作系统并启动 Flutter 应用（带 pprof）
+echo "[3/3] 启动 Flutter 应用（pprof 端口: $PPROF_PORT）..."
 echo ""
 echo "  pprof 地址: http://127.0.0.1:${PPROF_PORT}/debug/pprof/"
 echo ""

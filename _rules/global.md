@@ -81,3 +81,4 @@
 - Linux：`LD_PRELOAD` + JSON policy（`SANDBOX_POLICY_FILE`）。
 - Windows：`sandbox_hook.dll` + MinHook 注入（失败必须 fail-close，不允许“伪保护”状态）。
 - 沙箱不可用时允许降级启动，但 UI/状态必须明确标识未启用沙箱防护。
+- 实现细节与代码路径见 [`_rules/config_system.md`](config_system.md)（含各平台沙箱策略与相关 Go 模块）。

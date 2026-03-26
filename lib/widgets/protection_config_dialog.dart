@@ -470,17 +470,25 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           }
           return;
         }
-        final botSaved = await botFormState.saveConfig(deferProxyRestart: true);
-        if (!botSaved && mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text(l10n.modelConfigSaveFailed)));
-          if (botTabIndex != null) {
-            _tabController.animateTo(botTabIndex);
+        if (!botFormState.hasConfigChanged) {
+          appLogger.info(
+            '[ProtectionConfig] Bot model unchanged, skip bot model save.',
+          );
+        } else {
+          final botSaved = await botFormState.saveConfig(
+            deferProxyRestart: true,
+          );
+          if (!botSaved && mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(l10n.modelConfigSaveFailed)));
+            if (botTabIndex != null) {
+              _tabController.animateTo(botTabIndex);
+            }
+            return;
           }
-          return;
+          botModelSaved = true;
         }
-        botModelSaved = true;
       }
 
       // When opening protection (not edit mode), set enabled=true
