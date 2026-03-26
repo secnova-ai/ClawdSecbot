@@ -13,6 +13,7 @@ class SettingsDialog extends StatefulWidget {
   final VoidCallback onToggleLaunchAtStartup;
   final VoidCallback onClearData;
   final VoidCallback onRestoreConfig;
+  final VoidCallback onShowAbout;
   final VoidCallback onReauthorizeDirectory;
 
   const SettingsDialog({
@@ -21,6 +22,7 @@ class SettingsDialog extends StatefulWidget {
     required this.onToggleLaunchAtStartup,
     required this.onClearData,
     required this.onRestoreConfig,
+    required this.onShowAbout,
     required this.onReauthorizeDirectory,
   });
 
@@ -123,6 +125,7 @@ class _SettingsDialogState extends State<SettingsDialog>
                     onToggleLaunchAtStartup: _handleToggleLaunchAtStartup,
                     onClearData: widget.onClearData,
                     onRestoreConfig: widget.onRestoreConfig,
+                    onShowAbout: widget.onShowAbout,
                     onReauthorizeDirectory: widget.onReauthorizeDirectory,
                   ),
                 ],

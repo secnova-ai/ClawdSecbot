@@ -314,6 +314,42 @@ abstract class AppLocalizations {
   /// **'切换语言'**
   String get switchLanguage;
 
+  /// No description provided for @menuHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'帮助'**
+  String get menuHelp;
+
+  /// No description provided for @aboutApp.
+  ///
+  /// In zh, this message translates to:
+  /// **'关于 {appName}'**
+  String aboutApp(String appName);
+
+  /// No description provided for @buildNumber.
+  ///
+  /// In zh, this message translates to:
+  /// **'构建号'**
+  String get buildNumber;
+
+  /// No description provided for @currentPlatform.
+  ///
+  /// In zh, this message translates to:
+  /// **'平台'**
+  String get currentPlatform;
+
+  /// No description provided for @aboutVersionWithBuild.
+  ///
+  /// In zh, this message translates to:
+  /// **'版本 {version} ({build})'**
+  String aboutVersionWithBuild(String version, String build);
+
+  /// No description provided for @aboutCopyright.
+  ///
+  /// In zh, this message translates to:
+  /// **'Copyright © 2026 secnova.ai。保留所有权利。'**
+  String get aboutCopyright;
+
   /// No description provided for @riskNonLoopbackBinding.
   ///
   /// In zh, this message translates to:

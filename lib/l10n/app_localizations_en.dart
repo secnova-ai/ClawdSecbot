@@ -122,6 +122,29 @@ class AppLocalizationsEn extends AppLocalizations {
   String get switchLanguage => 'Switch Language';
 
   @override
+  String get menuHelp => 'Help';
+
+  @override
+  String aboutApp(String appName) {
+    return 'About $appName';
+  }
+
+  @override
+  String get buildNumber => 'Build';
+
+  @override
+  String get currentPlatform => 'Platform';
+
+  @override
+  String aboutVersionWithBuild(String version, String build) {
+    return 'Version $version ($build)';
+  }
+
+  @override
+  String get aboutCopyright =>
+      'Copyright © 2026 secnova.ai. All rights reserved.';
+
+  @override
   String get riskNonLoopbackBinding => 'Non-loopback address binding';
 
   @override
