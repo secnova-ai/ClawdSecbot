@@ -53,12 +53,37 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
 
   @override
   Future<void> onWindowClose() async {
-    await WindowAnimationHelper.hideWithAnimation();
+    await hideMainWindow();
   }
 
   /// 显示主窗口
   Future<void> showWindow() async {
+    try {
+      if (await windowManager.isMinimized()) {
+        await windowManager.restore();
+        await windowManager.focus();
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (!await windowManager.isVisible()) {
+        await WindowAnimationHelper.showWithAnimation();
+        return;
+      }
+    } catch (_) {}
     await WindowAnimationHelper.showWithAnimation();
+  }
+
+  Future<void> closeMainWindow() async {
+    await hideMainWindow();
+  }
+
+  Future<void> hideMainWindow() async {
+    await WindowAnimationHelper.hideWithAnimation();
+  }
+
+  Future<void> minimizeMainWindow() async {
+    await WindowAnimationHelper.minimizeWithAnimation();
   }
 
   // ============ 审计日志窗口方法 ============

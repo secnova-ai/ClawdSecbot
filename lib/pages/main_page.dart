@@ -44,7 +44,6 @@ import '../widgets/protection_config_dialog.dart';
 import '../widgets/scan_result_view.dart';
 import '../widgets/welcome_overlay.dart';
 import '../widgets/onboarding_completion_overlay.dart';
-import '../utils/window_animation_helper.dart';
 import '../utils/locale_utils.dart';
 import 'mixins/main_page_tray_mixin.dart';
 import 'mixins/main_page_version_mixin.dart';
@@ -2154,12 +2153,12 @@ class _MainPageState extends State<MainPage>
           const SizedBox(width: 8),
           _buildWindowButton(
             icon: LucideIcons.minus,
-            onTap: () => windowManager.minimize(),
+            onTap: () => minimizeMainWindow(),
           ),
           const SizedBox(width: 8),
           _buildWindowButton(
             icon: LucideIcons.x,
-            onTap: () => WindowAnimationHelper.hideWithAnimation(),
+            onTap: () => hideMainWindow(),
             isClose: true,
             isCloseBtn: true,
           ),

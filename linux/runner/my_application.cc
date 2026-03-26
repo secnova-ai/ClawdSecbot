@@ -168,6 +168,14 @@ static void register_plugins_for_sub_window(FlPluginRegistry* registry) {
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
 
+  GList* windows = gtk_application_get_windows(GTK_APPLICATION(application));
+  if (windows != nullptr) {
+    GtkWindow* existing_window = GTK_WINDOW(windows->data);
+    gtk_widget_show(GTK_WIDGET(existing_window));
+    gtk_window_present(existing_window);
+    return;
+  }
+
   apply_default_window_icon();
   apply_dark_headerbar_css();
 
