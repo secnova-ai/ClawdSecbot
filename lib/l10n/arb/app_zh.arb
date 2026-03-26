@@ -50,6 +50,29 @@
   "settings": "全局设置",
   "language": "语言",
   "switchLanguage": "切换语言",
+  "menuHelp": "帮助",
+  "aboutApp": "关于 {appName}",
+  "@aboutApp": {
+    "placeholders": {
+      "appName": {
+        "type": "String"
+      }
+    }
+  },
+  "buildNumber": "构建号",
+  "currentPlatform": "平台",
+  "aboutVersionWithBuild": "版本 {version} ({build})",
+  "@aboutVersionWithBuild": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      },
+      "build": {
+        "type": "String"
+      }
+    }
+  },
+  "aboutCopyright": "Copyright © 2026 secnova.ai。保留所有权利。",
 
   "riskNonLoopbackBinding": "非回环地址绑定",
   "riskNonLoopbackBindingDesc": "网关绑定到 \"{bind}\"，这允许外部访问。建议仅绑定到 127.0.0.1。",

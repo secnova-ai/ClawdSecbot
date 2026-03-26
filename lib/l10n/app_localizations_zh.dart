@@ -121,6 +121,28 @@ class AppLocalizationsZh extends AppLocalizations {
   String get switchLanguage => '切换语言';
 
   @override
+  String get menuHelp => '帮助';
+
+  @override
+  String aboutApp(String appName) {
+    return '关于 $appName';
+  }
+
+  @override
+  String get buildNumber => '构建号';
+
+  @override
+  String get currentPlatform => '平台';
+
+  @override
+  String aboutVersionWithBuild(String version, String build) {
+    return '版本 $version ($build)';
+  }
+
+  @override
+  String get aboutCopyright => 'Copyright © 2026 secnova.ai。保留所有权利。';
+
+  @override
   String get riskNonLoopbackBinding => '非回环地址绑定';
 
   @override

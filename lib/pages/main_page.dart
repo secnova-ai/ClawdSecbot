@@ -1106,6 +1106,7 @@ class _MainPageState extends State<MainPage>
           Navigator.of(dialogContext).pop();
           showRestoreConfigConfirmDialog();
         },
+        onShowAbout: showAppAboutDialog,
         onReauthorizeDirectory: () {
           Navigator.of(dialogContext).pop();
           reauthorizeDirectory();

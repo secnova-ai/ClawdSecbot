@@ -12,6 +12,7 @@ class GeneralSettingsTab extends StatelessWidget {
   final VoidCallback onToggleLaunchAtStartup;
   final VoidCallback onClearData;
   final VoidCallback onRestoreConfig;
+  final VoidCallback onShowAbout;
   final VoidCallback onReauthorizeDirectory;
 
   const GeneralSettingsTab({
@@ -20,6 +21,7 @@ class GeneralSettingsTab extends StatelessWidget {
     required this.onToggleLaunchAtStartup,
     required this.onClearData,
     required this.onRestoreConfig,
+    required this.onShowAbout,
     required this.onReauthorizeDirectory,
   });
 
@@ -59,6 +61,14 @@ class GeneralSettingsTab extends StatelessWidget {
             title: l10n.restoreConfig,
             subtitle: l10n.restoreConfigDescription,
             onTap: onRestoreConfig,
+          ),
+          const SizedBox(height: 8),
+          _buildActionTile(
+            icon: LucideIcons.info,
+            iconColor: const Color(0xFF6366F1),
+            title: l10n.aboutApp(l10n.appTitle),
+            subtitle: '${l10n.version} / ${l10n.buildNumber}',
+            onTap: onShowAbout,
           ),
           // 重新授权目录（仅 macOS App Store 版本）
           if (Platform.isMacOS && BuildConfig.requiresDirectoryAuth) ...[
