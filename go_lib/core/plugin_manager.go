@@ -397,6 +397,9 @@ func (pm *PluginManager) GetAllProtectionStatus() map[string]ProtectionStatus {
 type PluginInfo struct {
 	AssetName     string `json:"asset_name"`
 	InstanceCount int    `json:"instance_count"`
+	// RequiresBotModelConfig indicates whether protection startup must provide
+	// bot_model config for this plugin.
+	RequiresBotModelConfig bool `json:"requires_bot_model_config"`
 
 	// Canonical metadata fields from BotPlugin contract.
 	ID                 string                     `json:"id,omitempty"`
@@ -427,14 +430,15 @@ func (pm *PluginManager) GetAllPluginInfos() []PluginInfo {
 	for key, plugin := range pm.registeredPlugins {
 		manifest := plugin.GetManifest()
 		info := PluginInfo{
-			AssetName:     plugin.GetAssetName(),
-			InstanceCount: instanceCountByAsset[key],
-			ID:            strings.TrimSpace(plugin.GetID()),
-			PluginID:      strings.TrimSpace(manifest.PluginID),
-			BotType:       strings.TrimSpace(manifest.BotType),
-			DisplayName:   strings.TrimSpace(manifest.DisplayName),
-			APIVersion:    strings.TrimSpace(manifest.APIVersion),
-			Capabilities:  append([]string{}, manifest.Capabilities...),
+			AssetName:              plugin.GetAssetName(),
+			InstanceCount:          instanceCountByAsset[key],
+			RequiresBotModelConfig: plugin.RequiresBotModelConfig(),
+			ID:                     strings.TrimSpace(plugin.GetID()),
+			PluginID:               strings.TrimSpace(manifest.PluginID),
+			BotType:                strings.TrimSpace(manifest.BotType),
+			DisplayName:            strings.TrimSpace(manifest.DisplayName),
+			APIVersion:             strings.TrimSpace(manifest.APIVersion),
+			Capabilities:           append([]string{}, manifest.Capabilities...),
 			SupportedPlatforms: append([]string{},
 				manifest.SupportedPlatforms...),
 		}

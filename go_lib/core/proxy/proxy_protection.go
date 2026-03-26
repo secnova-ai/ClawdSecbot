@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -216,37 +217,140 @@ func buildReActSkillRuntimeConfig(runtime *ProtectionRuntimeConfig) *shepherd.Re
 	return &cfg
 }
 
+func resolveAssetPluginForProxy(assetName string) core.BotPlugin {
+	name := strings.TrimSpace(assetName)
+	if name == "" {
+		return nil
+	}
+	return core.GetPluginManager().GetPluginByAssetName(name)
+}
+
+func resolveForwardingTargetFromPlugin(plugin core.BotPlugin, assetID string) (*core.ProxyForwardingTarget, error) {
+	resolver, ok := plugin.(core.ProxyForwardingTargetResolver)
+	if !ok {
+		return nil, fmt.Errorf("plugin %s does not support forwarding target resolution", plugin.GetAssetName())
+	}
+	target, err := resolver.ResolveProxyForwardingTarget(strings.TrimSpace(assetID))
+	if err != nil {
+		return nil, err
+	}
+	if target == nil {
+		return nil, fmt.Errorf("plugin %s returned nil forwarding target", plugin.GetAssetName())
+	}
+	return target, nil
+}
+
+func isLoopbackHost(host string) bool {
+	h := strings.TrimSpace(strings.ToLower(host))
+	h = strings.TrimPrefix(h, "[")
+	h = strings.TrimSuffix(h, "]")
+	return h == "127.0.0.1" || h == "localhost" || h == "::1" || h == "loopback"
+}
+
+func isSelfProxyEndpoint(baseURL string, proxyPort int) bool {
+	raw := strings.TrimSpace(baseURL)
+	if raw == "" || proxyPort <= 0 {
+		return false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed == nil {
+		return false
+	}
+	if !isLoopbackHost(parsed.Hostname()) {
+		return false
+	}
+
+	port := parsed.Port()
+	if port == "" {
+		switch strings.ToLower(parsed.Scheme) {
+		case "http":
+			return proxyPort == 80
+		case "https":
+			return proxyPort == 443
+		default:
+			return false
+		}
+	}
+
+	parsedPort, err := strconv.Atoi(port)
+	if err != nil {
+		return false
+	}
+	return parsedPort == proxyPort
+}
+
 // NewProxyProtectionFromConfig creates a proxy protection instance from protection config.
 //
 // The config contains THREE separate configurations:
 //   - SecurityModel: used by ShepherdGate for risk analysis
-//   - BotModel: the LLM that openclaw uses, proxy forwards requests to this target
+//   - BotModel: optional forwarding target config (required only by plugins that
+//     depend on explicit bot model configuration)
 //   - Runtime: proxy runtime settings like audit mode and token limits
 func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan chan string) (*ProxyProtection, error) {
 	// 从配置中提取各部分
 	securityModel := protectionConfig.SecurityModel
 	botModel := protectionConfig.BotModel
 	runtime := protectionConfig.Runtime
+	assetName := strings.TrimSpace(protectionConfig.AssetName)
+	assetID := strings.TrimSpace(protectionConfig.AssetID)
 
 	// ==================== Bot 模型配置（代理转发目标） ====================
 	// 代理将 openclaw 发来的请求转发到 Bot 模型的 LLM 服务。
 	// Bot 模型与安全模型完全独立，不使用安全模型作为回退。
 
-	// 1. 验证 Bot 模型配置完整性
-	if botModel == nil {
-		return nil, fmt.Errorf("bot model config is required: proxy cannot forward without bot model configuration")
+	plugin := resolveAssetPluginForProxy(assetName)
+	requiresBotModelConfig := true
+	if plugin != nil {
+		requiresBotModelConfig = plugin.RequiresBotModelConfig()
+		logging.Info("[ProxyProtection] Asset plugin=%s, requires_bot_model_config=%v", plugin.GetAssetName(), requiresBotModelConfig)
+	} else if assetName != "" {
+		logging.Warning("[ProxyProtection] Plugin not found for asset=%s, fallback to requires_bot_model_config=true", assetName)
 	}
 
-	botCfgProvider := botModel.Provider
-	botCfgBaseURL := botModel.BaseURL
-	botCfgAPIKey := botModel.APIKey
+	// 1. Resolve forwarding target from bot model config and/or plugin resolver.
+	botCfgProvider := ""
+	botCfgBaseURL := ""
+	botCfgAPIKey := ""
+	if botModel != nil {
+		botCfgProvider = botModel.Provider
+		botCfgBaseURL = botModel.BaseURL
+		botCfgAPIKey = botModel.APIKey
+	}
+
+	// Plugins that do not require explicit bot model config must resolve
+	// forwarding target from plugin runtime config instead of DB bot_model.
+	// This avoids stale bot_model values causing proxy self-looping.
+	if !requiresBotModelConfig {
+		if plugin == nil {
+			return nil, fmt.Errorf("forwarding target is required: plugin not found for asset %s", assetName)
+		}
+		target, err := resolveForwardingTargetFromPlugin(plugin, assetID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve forwarding target for asset %s: %w", assetName, err)
+		}
+		if botModel != nil && (strings.TrimSpace(botModel.Provider) != "" || strings.TrimSpace(botModel.BaseURL) != "") {
+			logging.Warning("[ProxyProtection] Plugin %s does not require bot_model, ignoring DB bot_model forwarding target", plugin.GetAssetName())
+		}
+		botCfgProvider = target.Provider
+		botCfgBaseURL = target.BaseURL
+		if strings.TrimSpace(target.APIKey) != "" {
+			botCfgAPIKey = target.APIKey
+		}
+		logging.Info("[ProxyProtection] Forwarding target resolved from plugin config: provider=%s, base_url=%s",
+			botCfgProvider, botCfgBaseURL)
+	} else if botModel == nil {
+		return nil, fmt.Errorf("bot model config is required: proxy cannot forward without bot model configuration")
+	}
 
 	logging.Info("[ProxyProtection] 初始化 - Bot模型: Provider=%s, BaseURL=%s", botCfgProvider, botCfgBaseURL)
 
 	// 2. 确定 Bot 模型的 provider 类型
 	botProviderName := adapter.NormalizeProviderName(botCfgProvider)
 	if botProviderName == "" {
-		return nil, fmt.Errorf("bot model provider is required: please configure bot model provider before starting proxy")
+		if requiresBotModelConfig {
+			return nil, fmt.Errorf("bot model provider is required: please configure bot model provider before starting proxy")
+		}
+		return nil, fmt.Errorf("forwarding provider is required: plugin must provide valid provider or configure bot model provider")
 	}
 
 	// 3. 确定 Bot 模型的 API 基础地址
@@ -257,7 +361,10 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 		logging.Info("[ProxyProtection] Bot BaseURL 被环境变量 MODEL_PROXY_BACKEND 覆盖: %s", botBaseURL)
 	}
 	if botBaseURL == "" {
-		return nil, fmt.Errorf("bot model base URL is required: please configure bot model endpoint before starting proxy")
+		if requiresBotModelConfig {
+			return nil, fmt.Errorf("bot model base URL is required: please configure bot model endpoint before starting proxy")
+		}
+		return nil, fmt.Errorf("forwarding base URL is required: plugin must provide valid endpoint or configure bot model endpoint")
 	}
 
 	// 4. 确定 Bot 模型的 API Key
@@ -284,6 +391,16 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 		}
 	} else if port < 1 || port > 65535 {
 		return nil, fmt.Errorf("invalid proxy port: %d", port)
+	}
+
+	// Prevent self-referential forwarding loops:
+	// when upstream base_url points back to this proxy listen address,
+	// requests recurse indefinitely and flood logs.
+	if isSelfProxyEndpoint(botBaseURL, port) {
+		return nil, fmt.Errorf(
+			"forwarding base URL points to local proxy itself (%s): restore original model endpoint or reconfigure bot model",
+			botBaseURL,
+		)
 	}
 
 	// 6. Create forwarding Provider using Bot model config

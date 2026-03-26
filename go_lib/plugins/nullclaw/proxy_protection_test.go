@@ -1,11 +1,166 @@
 package nullclaw
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"go_lib/chatmodel-routing/adapter"
 	"go_lib/core/repository"
 )
+
+func TestNullclawPlugin_RequiresBotModelConfig(t *testing.T) {
+	if GetNullclawPlugin().RequiresBotModelConfig() {
+		t.Fatal("expected Nullclaw plugin to not require bot model config")
+	}
+}
+
+func TestNewProxyProtectionFromConfig_NullclawWithoutBotConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	content := `{
+  "agents": {
+    "defaults": {
+      "model": { "primary": "openrouter/anthropic/claude-sonnet-4" }
+    }
+  },
+  "models": {
+    "providers": {
+      "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key": "sk-or-test"
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write temp nullclaw config failed: %v", err)
+	}
+
+	previousPath := GetConfigPath()
+	defer SetConfigPath(previousPath)
+	SetConfigPath(tmpDir)
+
+	config := &ProtectionConfig{
+		AssetName: nullclawAssetName,
+		AssetID:   "nullclaw:test-1",
+		SecurityModel: &repository.SecurityModelConfig{
+			Provider: "openai",
+			Endpoint: "https://api.openai.com/v1",
+			APIKey:   "sk-test",
+			Model:    "gpt-4o-mini",
+		},
+		BotModel: nil, // Bot 配置缺失，nullclaw 应能从自身 config 解析
+		Runtime: &ProtectionRuntimeConfig{
+			ProxyPort: 13436,
+		},
+	}
+
+	logChan := make(chan string, 100)
+	pp, err := NewProxyProtectionFromConfig(config, logChan)
+	if err != nil {
+		t.Fatalf("expected nil error for nullclaw without bot config, got: %v", err)
+	}
+	if pp == nil {
+		t.Fatal("expected proxy protection instance, got nil")
+	}
+	if pp.GetPort() != 13436 {
+		t.Fatalf("expected proxy port 13436, got %d", pp.GetPort())
+	}
+	if got := pp.GetOriginalBaseURL(); got != "https://openrouter.ai/api/v1" {
+		t.Fatalf("expected forwarding base URL from active config, got %s", got)
+	}
+}
+
+func TestNewProxyProtectionFromConfig_NullclawIgnoresStaleBotModelTarget(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	content := `{
+  "agents": {
+    "defaults": {
+      "model": { "primary": "openrouter/anthropic/claude-sonnet-4" }
+    }
+  },
+  "models": {
+    "providers": {
+      "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key": "sk-or-test"
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write temp nullclaw config failed: %v", err)
+	}
+
+	previousPath := GetConfigPath()
+	defer SetConfigPath(previousPath)
+	SetConfigPath(tmpDir)
+
+	config := &ProtectionConfig{
+		AssetName: nullclawAssetName,
+		AssetID:   "nullclaw:test-stale-bot",
+		SecurityModel: &repository.SecurityModelConfig{
+			Provider: "openai",
+			Endpoint: "https://api.openai.com/v1",
+			APIKey:   "sk-test",
+			Model:    "gpt-4o-mini",
+		},
+		// Simulate stale DB bot_model that points to local proxy endpoint.
+		BotModel: &BotModelConfig{
+			Provider: "openai",
+			BaseURL:  "http://127.0.0.1:13436",
+			APIKey:   "sk-bot-test",
+		},
+		Runtime: &ProtectionRuntimeConfig{
+			ProxyPort: 13436,
+		},
+	}
+
+	logChan := make(chan string, 100)
+	pp, err := NewProxyProtectionFromConfig(config, logChan)
+	if err != nil {
+		t.Fatalf("expected nil error when stale bot model target exists, got: %v", err)
+	}
+	if pp == nil {
+		t.Fatal("expected proxy protection instance, got nil")
+	}
+	if got := pp.GetOriginalBaseURL(); got != "https://openrouter.ai/api/v1" {
+		t.Fatalf("expected plugin-resolved base URL, got %s", got)
+	}
+}
+
+func TestNewProxyProtectionFromConfig_DetectsSelfProxyLoop(t *testing.T) {
+	config := &ProtectionConfig{
+		AssetName: "",
+		AssetID:   "test-loop",
+		SecurityModel: &repository.SecurityModelConfig{
+			Provider: "openai",
+			Endpoint: "https://api.openai.com/v1",
+			APIKey:   "sk-test",
+			Model:    "gpt-4o-mini",
+		},
+		BotModel: &BotModelConfig{
+			Provider: "openai",
+			BaseURL:  "http://127.0.0.1:13436",
+			APIKey:   "sk-bot-test",
+		},
+		Runtime: &ProtectionRuntimeConfig{
+			ProxyPort: 13436,
+		},
+	}
+	logChan := make(chan string, 100)
+
+	_, err := NewProxyProtectionFromConfig(config, logChan)
+	if err == nil {
+		t.Fatal("expected error when forwarding base URL points to local proxy itself")
+	}
+	if !strings.Contains(err.Error(), "forwarding base URL points to local proxy itself") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
 
 // TestNewProxyProtectionFromConfig_BotConfigRequired 验证 Bot 模型配置为 nil 时返回错误
 func TestNewProxyProtectionFromConfig_BotConfigRequired(t *testing.T) {

@@ -46,6 +46,12 @@ func (p *OpenclawPlugin) GetID() string {
 	return openclawPluginID
 }
 
+// RequiresBotModelConfig reports whether Openclaw protection depends on
+// explicit bot model configuration.
+func (p *OpenclawPlugin) RequiresBotModelConfig() bool {
+	return true
+}
+
 // GetManifest returns canonical plugin manifest metadata.
 func (p *OpenclawPlugin) GetManifest() plugin_sdk.PluginManifest {
 	return plugin_sdk.PluginManifest{

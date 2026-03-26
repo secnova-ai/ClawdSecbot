@@ -31,6 +31,10 @@ func (p *testPlugin) GetAssetUISchema() *plugin_sdk.AssetUISchema {
 	return p.schema
 }
 
+func (p *testPlugin) RequiresBotModelConfig() bool {
+	return true
+}
+
 func (p *testPlugin) ScanAssets() ([]Asset, error) {
 	return p.assets, nil
 }
@@ -234,6 +238,9 @@ func TestPluginManager_GetAllPluginInfos_IncludesManifestAndSchema(t *testing.T)
 	info := infos[0]
 	if info.ID != "openclaw" {
 		t.Fatalf("expected plugin id openclaw, got %q", info.ID)
+	}
+	if !info.RequiresBotModelConfig {
+		t.Fatalf("expected requires_bot_model_config=true, got false")
 	}
 	if info.Manifest == nil || info.Manifest.PluginID != "openclaw" {
 		t.Fatalf("expected manifest plugin_id openclaw, got %#v", info.Manifest)

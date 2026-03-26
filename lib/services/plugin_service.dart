@@ -29,6 +29,8 @@ typedef SetConfigPathDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
 typedef SetAppStoreBuildC = ffi.Pointer<Utf8> Function(ffi.Int32);
 typedef SetAppStoreBuildDart = ffi.Pointer<Utf8> Function(int);
+typedef GetPluginsC = ffi.Pointer<Utf8> Function();
+typedef GetPluginsDart = ffi.Pointer<Utf8> Function();
 
 // Database FFI signatures (used by model config methods)
 typedef SaveScanResultC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
@@ -179,6 +181,50 @@ class PluginService {
     } catch (e) {
       appLogger.debug('[Plugin] SetAppStoreBuildFFI not available: $e');
     }
+  }
+
+  /// Returns whether the target plugin requires explicit bot model config.
+  ///
+  /// Fallback is `true` for safety when plugin metadata cannot be read.
+  Future<bool> requiresBotModelConfig(String assetName) async {
+    final normalizedAssetName = assetName.trim().toLowerCase();
+    if (normalizedAssetName.isEmpty) {
+      return true;
+    }
+
+    final response = await _withPlugin('GetPluginsFFI', (lib) {
+      final getPlugins = lib.lookupFunction<GetPluginsC, GetPluginsDart>(
+        'GetPluginsFFI',
+      );
+      final resultPtr = getPlugins();
+      final result = resultPtr.toDartString();
+      freeString!(resultPtr);
+      return jsonDecode(result) as Map<String, dynamic>;
+    });
+
+    if (response['success'] != true) {
+      return true;
+    }
+    final data = response['data'];
+    if (data is! List) {
+      return true;
+    }
+
+    for (final item in data.whereType<Map<String, dynamic>>()) {
+      final pluginAssetName = (item['asset_name'] as String? ?? '')
+          .trim()
+          .toLowerCase();
+      if (pluginAssetName != normalizedAssetName) {
+        continue;
+      }
+      final requires = item['requires_bot_model_config'];
+      if (requires is bool) {
+        return requires;
+      }
+      return true;
+    }
+
+    return true;
   }
 
   Future<Map<String, List<String>>> loadAndSyncShepherdRules(

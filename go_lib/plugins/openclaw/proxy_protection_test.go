@@ -7,6 +7,12 @@ import (
 	"go_lib/core/repository"
 )
 
+func TestOpenclawPlugin_RequiresBotModelConfig(t *testing.T) {
+	if !GetOpenclawPlugin().RequiresBotModelConfig() {
+		t.Fatal("expected Openclaw plugin to require bot model config")
+	}
+}
+
 // TestNewProxyProtectionFromConfig_BotConfigRequired 验证 Bot 模型配置为 nil 时返回错误
 func TestNewProxyProtectionFromConfig_BotConfigRequired(t *testing.T) {
 	config := &ProtectionConfig{

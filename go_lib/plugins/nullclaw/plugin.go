@@ -2,14 +2,15 @@ package nullclaw
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
 	"go_lib/core"
 	"go_lib/core/logging"
-	"go_lib/core/repository"
 	"go_lib/plugin_sdk"
 )
 
@@ -44,6 +45,30 @@ func (p *NullclawPlugin) GetAssetName() string {
 // GetID returns a stable plugin ID for host-side metadata aggregation.
 func (p *NullclawPlugin) GetID() string {
 	return nullclawPluginID
+}
+
+// RequiresBotModelConfig reports whether Nullclaw protection depends on
+// explicit bot model configuration.
+//
+// Nullclaw can resolve forwarding target from its own runtime config,
+// so bot model config is optional.
+func (p *NullclawPlugin) RequiresBotModelConfig() bool {
+	return false
+}
+
+// ResolveProxyForwardingTarget resolves proxy forwarding provider/base_url/api_key
+// from current Nullclaw runtime config.
+func (p *NullclawPlugin) ResolveProxyForwardingTarget(assetID string) (*core.ProxyForwardingTarget, error) {
+	_ = assetID
+	botConfig, err := resolveBotModelFromActiveConfig()
+	if err != nil {
+		return nil, err
+	}
+	return &core.ProxyForwardingTarget{
+		Provider: botConfig.Provider,
+		BaseURL:  botConfig.BaseURL,
+		APIKey:   botConfig.APIKey,
+	}, nil
 }
 
 // GetManifest returns canonical plugin manifest metadata.
@@ -301,20 +326,135 @@ func (p *NullclawPlugin) OnBeforeProxyStop(ctx *core.ProtectionContext) {
 	}
 }
 
-// parseBotModelConfig 从 repository.ProtectionConfig 解析 BotModelConfig
-func parseBotModelConfig(config *repository.ProtectionConfig) *BotModelConfig {
-	if config == nil || config.BotModelConfig == nil {
-		logging.Warning("[Nullclaw] BotModelConfig is nil")
-		return nil
+func extractProviderAPIKey(rawConfig map[string]interface{}, providerName string) string {
+	if rawConfig == nil {
+		return ""
+	}
+	modelsMap, ok := rawConfig["models"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	providersMap, ok := modelsMap["providers"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	providerMap, ok := providersMap[providerName].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	raw, ok := providerMap["api_key"]
+	if !ok {
+		return ""
+	}
+	switch value := raw.(type) {
+	case string:
+		return strings.TrimSpace(value)
+	default:
+		// Structured credentials (for example service account JSON) are
+		// intentionally ignored here because forwarding providers expect
+		// plain API keys/tokens.
+		return ""
+	}
+}
+
+func resolveBackupDir() string {
+	pm := core.GetPathManager()
+	if pm.IsInitialized() {
+		return pm.GetBackupDir()
+	}
+	homeDir, _ := os.UserHomeDir()
+	return filepath.Join(homeDir, ".botsec", "backups")
+}
+
+func isLikelyLocalProxyURL(baseURL string) bool {
+	raw := strings.TrimSpace(baseURL)
+	if raw == "" {
+		return false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed == nil {
+		return false
+	}
+
+	host := strings.TrimSpace(strings.ToLower(parsed.Hostname()))
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" && host != "loopback" {
+		return false
+	}
+
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		return false
+	}
+	// Proxy manager allocates ports in [13436, 13535].
+	return port >= 13436 && port <= 13535
+}
+
+func resolveBotModelFromConfigPath(configPath string) (*BotModelConfig, error) {
+	config, rawConfig, err := loadConfig(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("load config failed: %w", err)
+	}
+	primaryModel, err := getPrimaryModelFromConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("read primary model failed: %w", err)
+	}
+
+	providerName, baseURL, err := GetCurrentModelProvider(config, rawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("resolve current model provider failed: %w", err)
+	}
+	if strings.TrimSpace(providerName) == "" {
+		return nil, fmt.Errorf("resolved provider is empty")
+	}
+	if strings.TrimSpace(baseURL) == "" {
+		return nil, fmt.Errorf("resolved base_url is empty")
 	}
 
 	return &BotModelConfig{
-		Provider:  config.BotModelConfig.Provider,
-		BaseURL:   config.BotModelConfig.BaseURL,
-		APIKey:    config.BotModelConfig.APIKey,
-		Model:     config.BotModelConfig.Model,
-		SecretKey: config.BotModelConfig.SecretKey,
+		Provider: providerName,
+		BaseURL:  baseURL,
+		APIKey:   extractProviderAPIKey(rawConfig, providerName),
+		Model:    primaryModel,
+	}, nil
+}
+
+func resolveBotModelFromActiveConfig() (*BotModelConfig, error) {
+	configPath, err := findConfigPath()
+	if err != nil {
+		return nil, fmt.Errorf("find config path failed: %w", err)
 	}
+
+	active, err := resolveBotModelFromConfigPath(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// If active config already points to a likely local protection proxy
+	// endpoint (e.g. leftover from an unclean shutdown), prefer the initial
+	// backup to avoid proxy->proxy self-looping.
+	if isLikelyLocalProxyURL(active.BaseURL) {
+		backupDir := resolveBackupDir()
+		if hasInitialBackup(backupDir) {
+			backupPath := getInitialBackupPath(backupDir)
+			if restored, restoreErr := resolveBotModelFromConfigPath(backupPath); restoreErr == nil {
+				if !isLikelyLocalProxyURL(restored.BaseURL) {
+					logging.Warning("[Nullclaw] Active base_url looks like local proxy (%s), fallback to initial backup (%s)",
+						active.BaseURL, restored.BaseURL)
+					return restored, nil
+				}
+				logging.Warning("[Nullclaw] Initial backup base_url is also local proxy-like: %s", restored.BaseURL)
+			} else {
+				logging.Warning("[Nullclaw] Failed to resolve bot model from initial backup: %v", restoreErr)
+			}
+		} else {
+			logging.Warning("[Nullclaw] Active base_url looks like local proxy (%s) but no initial backup found", active.BaseURL)
+		}
+	}
+
+	return active, nil
 }
 
 // OnProtectionStart 实现防护启动钩子
@@ -322,24 +462,15 @@ func parseBotModelConfig(config *repository.ProtectionConfig) *BotModelConfig {
 func (p *NullclawPlugin) OnProtectionStart(ctx *core.ProtectionContext) (map[string]interface{}, error) {
 	logging.Info("[Nullclaw] OnProtectionStart: assetID=%s, proxyPort=%d", ctx.AssetID, ctx.ProxyPort)
 
-	// 从数据库读取 BotModel 配置
-	repo := repository.NewProtectionRepository(nil)
-	config, err := repo.GetProtectionConfig("Nullclaw", ctx.AssetID)
+	// Nullclaw does not require DB bot model config.
+	// Always resolve forwarding target from active runtime config.
+	botModelConfig, err := resolveBotModelFromActiveConfig()
 	if err != nil {
-		logging.Error("[Nullclaw] Failed to get protection config from DB: %v", err)
-		return nil, fmt.Errorf("failed to get protection config: %w", err)
+		logging.Error("[Nullclaw] Failed to resolve forwarding target from active config: %v", err)
+		return nil, fmt.Errorf("failed to resolve forwarding target from active config: %w", err)
 	}
-	if config == nil {
-		logging.Error("[Nullclaw] No protection config found in DB for Nullclaw/%s", ctx.AssetID)
-		return nil, fmt.Errorf("no protection config found")
-	}
-
-	// 解析 BotModel 配置
-	botModelConfig := parseBotModelConfig(config)
-	if botModelConfig == nil {
-		logging.Error("[Nullclaw] Failed to parse bot model config")
-		return nil, fmt.Errorf("failed to parse bot model config")
-	}
+	logging.Info("[Nullclaw] Using active config forwarding target: provider=%s model=%s",
+		botModelConfig.Provider, botModelConfig.Model)
 
 	// 执行 gateway 操作：更新配置 + 重启进程
 	logging.Info("[Nullclaw] Starting gateway with proxyPort=%d", ctx.ProxyPort)
