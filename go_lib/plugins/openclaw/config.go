@@ -100,6 +100,7 @@ func findConfigPath() (string, error) {
 		configFiles := []string{
 			filepath.Join(override, "openclaw.json"),
 			filepath.Join(override, "moltbot.json"),
+			filepath.Join(override, "clawdbot.json"),
 		}
 		for _, p := range configFiles {
 			if _, err := os.Stat(p); err == nil {
@@ -112,6 +113,7 @@ func findConfigPath() (string, error) {
 			configFiles := []string{
 				filepath.Join(override, "openclaw.json"),
 				filepath.Join(override, "moltbot.json"),
+				filepath.Join(override, "clawdbot.json"),
 			}
 			for _, p := range configFiles {
 				if _, err := os.Stat(p); err == nil {
@@ -130,6 +132,7 @@ func findConfigPath() (string, error) {
 	paths := []string{
 		filepath.Join(usr.HomeDir, ".openclaw", "openclaw.json"),
 		filepath.Join(usr.HomeDir, ".moltbot", "moltbot.json"),
+		filepath.Join(usr.HomeDir, ".clawdbot", "clawdbot.json"),
 		filepath.Join(usr.HomeDir, ".clawdbot", "moltbot.json"),
 	}
 

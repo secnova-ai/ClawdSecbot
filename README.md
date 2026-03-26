@@ -20,7 +20,7 @@ ClawSecbot monitors and secures local AI Bot agents (such as Openclaw) running o
 - **Asset Discovery** — Automatically scans and identifies AI Bot processes, workspaces, configurations, and ports on your system
 - **Risk Assessment** — Evaluates detected assets for security risks, including Skill/tool security analysis
 - **Protection Proxy** — Intercepts Bot-to-LLM API traffic, analyzes request/response content for dangerous operations, and alerts users before execution
-- **Sandbox Enforcement** — Confines Bot processes within OS-level sandboxes (macOS Seatbelt / Linux seccomp) with auto-recovery if sandbox is bypassed
+- **Sandbox Enforcement** — Confines Bot processes within OS-level sandboxes (macOS Seatbelt / Linux LD_PRELOAD hook / Windows MinHook) with auto-recovery if sandbox is bypassed
 - **LLM Protocol Translation** — Proxies requests in OpenAI-compatible format and translates to/from various LLM providers
 - **Audit Logging** — Records all requests, tool calls, risk detections, and token usage with full traceability
 - **Plugin Architecture** — Extensible plugin system for supporting different Bot types
@@ -86,7 +86,7 @@ ClawSecbot uses a **frontend-backend separation** architecture:
 | IPC       | FFI + JSON protocol           |
 | State     | Provider                      |
 | i18n      | Flutter Localizations         |
-| Sandbox   | macOS Seatbelt / Linux seccomp |
+| Sandbox   | macOS Seatbelt / Linux LD_PRELOAD hook / Windows MinHook |
 | LLM SDK   | Eino framework (CloudWeGo)    |
 
 ### Supported LLM Providers
@@ -234,7 +234,7 @@ The shared foundation used by all plugins:
 | `plugin.go` | `BotPlugin` interface — defines the contract for all Bot plugins, including asset discovery, risk assessment, protection control, and mitigation |
 | `plugin_manager.go` | Plugin registry with auto-registration, duplicate detection, and aggregated FFI methods |
 | `scanner/` | Asset discovery engine — scans for Bot processes, ports, and configurations |
-| `sandbox/` | OS sandbox management — generates and applies Seatbelt/seccomp policies |
+| `sandbox/` | OS sandbox management — generates and applies Seatbelt/LD_PRELOAD/Windows hook policies |
 | `repository/` | Data access layer — SQLite CRUD operations |
 | `service/` | Business logic — protection, audit, metrics, version checking |
 | `callback_bridge/` | FFI callback mechanism — Go-to-Dart event push |

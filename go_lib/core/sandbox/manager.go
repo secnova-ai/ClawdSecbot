@@ -352,7 +352,11 @@ func ParseSandboxConfigJSON(jsonStr string) (*SandboxConfig, error) {
 func GetDefaultPolicyDir() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join("/tmp", "botsec_policies")
+		wd, wdErr := os.Getwd()
+		if wdErr != nil {
+			return filepath.Join(".", ".botsec", "policies")
+		}
+		return filepath.Join(wd, ".botsec", "policies")
 	}
 
 	// Use ~/.botsec/policies (matches Dart layer SandboxService)

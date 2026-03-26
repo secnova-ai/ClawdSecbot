@@ -203,6 +203,53 @@ func TestBuildPreloadConfig_ToPolicyJSON(t *testing.T) {
 	}
 }
 
+func TestBuildPreloadConfig_GatewayPaths(t *testing.T) {
+	cfg := SandboxConfig{
+		GatewayBinaryPath: "/usr/bin/openclaw",
+		GatewayConfigPath: "/home/user/.openclaw/openclaw.json",
+	}
+	pc := buildPreloadConfig(cfg)
+
+	if pc.GatewayBinaryPath != "/usr/bin/openclaw" {
+		t.Errorf("GatewayBinaryPath = %q, want %q", pc.GatewayBinaryPath, "/usr/bin/openclaw")
+	}
+	if pc.GatewayConfigPath != "/home/user/.openclaw/openclaw.json" {
+		t.Errorf("GatewayConfigPath = %q, want %q", pc.GatewayConfigPath, "/home/user/.openclaw/openclaw.json")
+	}
+
+	data, err := pc.ToPolicyJSON()
+	if err != nil {
+		t.Fatalf("ToPolicyJSON() error: %v", err)
+	}
+	json := string(data)
+	if !containsStr(json, `"gateway_binary_path"`) {
+		t.Error("JSON should contain gateway_binary_path field")
+	}
+	if !containsStr(json, `"/usr/bin/openclaw"`) {
+		t.Error("JSON should contain gateway binary path value")
+	}
+	if !containsStr(json, `"gateway_config_path"`) {
+		t.Error("JSON should contain gateway_config_path field")
+	}
+}
+
+func TestBuildPreloadConfig_GatewayPathsOmitEmpty(t *testing.T) {
+	cfg := SandboxConfig{}
+	pc := buildPreloadConfig(cfg)
+
+	data, err := pc.ToPolicyJSON()
+	if err != nil {
+		t.Fatalf("ToPolicyJSON() error: %v", err)
+	}
+	json := string(data)
+	if containsStr(json, `"gateway_binary_path"`) {
+		t.Error("JSON should omit empty gateway_binary_path")
+	}
+	if containsStr(json, `"gateway_config_path"`) {
+		t.Error("JSON should omit empty gateway_config_path")
+	}
+}
+
 // --- 测试辅助函数 ---
 
 func stringSliceEqual(a, b []string) bool {

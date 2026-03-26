@@ -44,6 +44,7 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
   final TextEditingController _modelController = TextEditingController();
   final TextEditingController _secretKeyController = TextEditingController();
   String _selectedType = 'openai';
+  String _savedConfigSignature = '';
 
   /// Dynamically loaded providers from Go layer.
   List<ProviderInfo> _providers = [];
@@ -134,6 +135,31 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
     return type;
   }
 
+  /// 构建当前表单配置对象，用于统一比较和保存逻辑。
+  BotModelConfig _buildCurrentConfig() {
+    final resolvedType = _resolveProviderType(_selectedType);
+    return BotModelConfig(
+      assetName: widget.assetName,
+      assetID: widget.assetID,
+      provider: resolvedType,
+      baseUrl: _endpointController.text.trim(),
+      apiKey: _apiKeyController.text.trim(),
+      model: _modelController.text.trim(),
+      secretKey: _secretKeyController.text.trim(),
+    );
+  }
+
+  /// 生成配置签名，用于判断配置是否发生变化。
+  String _buildConfigSignature(BotModelConfig config) {
+    return [
+      config.provider.trim(),
+      config.baseUrl.trim(),
+      config.apiKey.trim(),
+      config.model.trim(),
+      config.secretKey.trim(),
+    ].join('|');
+  }
+
   /// Loads current configuration into the form.
   Future<void> _loadConfig() async {
     try {
@@ -145,10 +171,12 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
           _apiKeyController.text = config.apiKey;
           _modelController.text = config.model;
           _secretKeyController.text = config.secretKey;
+          _savedConfigSignature = _buildConfigSignature(config);
           _loading = false;
         });
       } else {
         setState(() {
+          _savedConfigSignature = _buildConfigSignature(_buildCurrentConfig());
           _loading = false;
         });
       }
@@ -171,16 +199,18 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
       _error = null;
     });
 
-    final resolvedType = _resolveProviderType(_selectedType);
-    final config = BotModelConfig(
-      assetName: widget.assetName,
-      assetID: widget.assetID,
-      provider: resolvedType,
-      baseUrl: _endpointController.text.trim(),
-      apiKey: _apiKeyController.text.trim(),
-      model: _modelController.text.trim(),
-      secretKey: _secretKeyController.text.trim(),
-    );
+    final config = _buildCurrentConfig();
+
+    if (!hasConfigChanged && hasRequiredConfig) {
+      setState(() {
+        _saving = false;
+        _testing = false;
+      });
+      appLogger.info(
+        '[BotModelConfigForm] Config unchanged, skip connectivity test and save.',
+      );
+      return true;
+    }
 
     if (!config.isValid) {
       setState(() {
@@ -210,6 +240,7 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
 
       final success = await _service.saveConfig(config);
       if (success) {
+        _savedConfigSignature = _buildConfigSignature(config);
         // Bot 模型保存后，如果代理正在运行且未延迟重启，需要完整重启
         if (!deferProxyRestart) {
           final protectionService = ProtectionService();
@@ -281,6 +312,12 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
     return resolvedType.isNotEmpty &&
         _endpointController.text.trim().isNotEmpty &&
         _modelController.text.trim().isNotEmpty;
+  }
+
+  /// 返回当前表单配置是否与已保存配置不同。
+  bool get hasConfigChanged {
+    final current = _buildConfigSignature(_buildCurrentConfig());
+    return current != _savedConfigSignature;
   }
 
   @override
