@@ -190,11 +190,7 @@ func extractIssueStrings(issues []skillscan.SkillSecurityIssue) []string {
 	}
 	result := make([]string, 0, len(issues))
 	for _, issue := range issues {
-		desc := fmt.Sprintf("[%s][%s] %s", issue.Severity, issue.Type, issue.Description)
-		if issue.File != "" {
-			desc = fmt.Sprintf("[%s][%s][%s] %s", issue.Severity, issue.Type, issue.File, issue.Description)
-		}
-		result = append(result, desc)
+		result = append(result, skillscan.SerializeSkillIssue(issue))
 	}
 	return result
 }
@@ -227,7 +223,11 @@ func convertIssuesToRisks(issues []string) []skillScanRiskItemJSON {
 			Severity:    "unknown",
 			Type:        "unknown",
 		}
-		if len(issue) > 4 && issue[0] == '[' {
+		if err := json.Unmarshal([]byte(issue), &riskItem); err == nil {
+			if riskItem.Description == "" {
+				riskItem.Description = issue
+			}
+		} else if len(issue) > 4 && issue[0] == '[' {
 			riskItem = parseIssueString(issue)
 		}
 		result = append(result, riskItem)

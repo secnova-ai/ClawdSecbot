@@ -403,20 +403,18 @@ func TestScan_AuthRequired(t *testing.T) {
 
 // ========== Protection Policy Tests ==========
 
-func TestGetProtectionPolicy_MissingBotId(t *testing.T) {
+func TestGetProtectionPolicy_EmptyBodyUsesAllBots(t *testing.T) {
 	server := NewAPIServer()
 	server.token = "test-token"
 	handler := server.setupRoutes()
 
-	// Test with empty botId path parameter
-	req := newAuthRequest("GET", "/api/v1/protection/policy/", "test-token", nil)
+	req := newAuthRequest("GET", "/api/v1/protection/policy", "test-token", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
-	// Empty botId in path should return 404 (route not matched)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("Expected 404 for empty botId, got %d", rec.Code)
+	if rec.Code == http.StatusBadRequest {
+		t.Errorf("Expected empty body to be accepted as all bots, got %d", rec.Code)
 	}
 }
 
@@ -424,7 +422,7 @@ func TestSetProtectionPolicy_InvalidJSON(t *testing.T) {
 	_, ts, token := setupTestServer(t)
 	defer ts.Close()
 
-	req, err := http.NewRequest("PUT", ts.URL+"/api/v1/protection/policy/test-bot", strings.NewReader("invalid json"))
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1/protection/policy", strings.NewReader("invalid json"))
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -453,7 +451,7 @@ func TestSetProtectionPolicy_InvalidProtectionMode(t *testing.T) {
 	defer ts.Close()
 
 	body := `{"protection": "invalid_mode"}`
-	req, err := http.NewRequest("PUT", ts.URL+"/api/v1/protection/policy/test-bot", strings.NewReader(body))
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1/protection/policy", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -485,8 +483,8 @@ func TestSetProtectionPolicy_ValidModes(t *testing.T) {
 			_, ts, token := setupTestServer(t)
 			defer ts.Close()
 
-			body := `{"protection": "` + mode + `"}`
-			req, err := http.NewRequest("PUT", ts.URL+"/api/v1/protection/policy/test-bot", strings.NewReader(body))
+			body := `{"botId":["test-bot"],"protection":"` + mode + `"}`
+			req, err := http.NewRequest("POST", ts.URL+"/api/v1/protection/policy", strings.NewReader(body))
 			if err != nil {
 				t.Fatalf("Failed to create request: %v", err)
 			}
@@ -519,7 +517,7 @@ func TestProtectionPolicy_WrongMethod(t *testing.T) {
 		name   string
 		method string
 	}{
-		{"POST instead of GET", "POST"},
+		{"PUT instead of POST", "PUT"},
 		{"DELETE", "DELETE"},
 	}
 
@@ -527,7 +525,7 @@ func TestProtectionPolicy_WrongMethod(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			req, err := http.NewRequest(tc.method, ts.URL+"/api/v1/protection/policy/test-bot", nil)
+			req, err := http.NewRequest(tc.method, ts.URL+"/api/v1/protection/policy", nil)
 			if err != nil {
 				t.Fatalf("Failed to create request: %v", err)
 			}
@@ -539,7 +537,7 @@ func TestProtectionPolicy_WrongMethod(t *testing.T) {
 			}
 			defer resp.Body.Close()
 
-			// POST and DELETE are not allowed, should get 404 or 405
+			// Unsupported methods should get 404 or 405
 			if resp.StatusCode != http.StatusMethodNotAllowed && resp.StatusCode != http.StatusNotFound {
 				t.Errorf("Expected 404 or 405 for %s, got %d", tc.method, resp.StatusCode)
 			}
@@ -847,6 +845,23 @@ func TestToSkillIssue_ParsesStructuredJSON(t *testing.T) {
 	if issue.Type != "prompt_injection" {
 		t.Fatalf("Type = %q, want %q", issue.Type, "prompt_injection")
 	}
+	if issue.Desc == "" {
+		t.Fatalf("Desc should not be empty")
+	}
+	if issue.Evidence == "" {
+		t.Fatalf("Evidence should not be empty")
+	}
+}
+
+func TestToSkillIssue_ParsesDescriptionField(t *testing.T) {
+	raw := `{"type":"prompt_injection","description":"Skill 包含可注入模板","evidence":"prompt = f'Execute {user_input}'"}`
+	issue := toSkillIssue(raw)
+	if issue.Type != "prompt_injection" {
+		t.Fatalf("Type = %q, want %q", issue.Type, "prompt_injection")
+	}
+	if issue.Desc != "Skill 包含可注入模板" {
+		t.Fatalf("Desc = %q, want %q", issue.Desc, "Skill 包含可注入模板")
+	}
 	if issue.Evidence == "" {
 		t.Fatalf("Evidence should not be empty")
 	}
@@ -931,17 +946,17 @@ func TestProtectionPolicyRequest_Parsing(t *testing.T) {
 	}{
 		{
 			name:    "valid minimal",
-			json:    `{"botId": "test", "protection": "enabled"}`,
+			json:    `{"botId":["test"],"protection":"enabled"}`,
 			wantErr: false,
 		},
 		{
 			name:    "valid with tokenLimit",
-			json:    `{"botId": "test", "protection": "enabled", "tokenLimit": {"session": 1000, "daily": 10000}}`,
+			json:    `{"botId":["test"],"protection":"enabled","tokenLimit":{"session":1000,"daily":10000}}`,
 			wantErr: false,
 		},
 		{
 			name:    "valid with all fields",
-			json:    `{"botId": "test", "protection": "bypass", "userRules": ["rule1"], "tokenLimit": {"session": 100, "daily": 1000}, "botModel": {"provider": "openai", "id": "gpt-4", "url": "https://api.openai.com"}}`,
+			json:    `{"botId":["test"],"protection":"bypass","userRules":["rule1"],"tokenLimit":{"session":100,"daily":1000},"botModel":{"provider":"openai","id":"gpt-4","url":"https://api.openai.com"}}`,
 			wantErr: false,
 		},
 		{
@@ -964,7 +979,7 @@ func TestProtectionPolicyRequest_Parsing(t *testing.T) {
 
 func TestProtectionPolicyRequest_Parsing_OpenAndModelKey(t *testing.T) {
 	jsonBody := `{
-		"botId": "test",
+		"botId": ["test"],
 		"protection": "enabled",
 		"permission": {
 			"open": true,
@@ -985,35 +1000,11 @@ func TestProtectionPolicyRequest_Parsing_OpenAndModelKey(t *testing.T) {
 	if req.Permission == nil || req.Permission.Open == nil || !*req.Permission.Open {
 		t.Fatalf("permission.open should be true")
 	}
+	if len(req.BotID) != 1 || req.BotID[0] != "test" {
+		t.Fatalf("botId should be parsed as array")
+	}
 	if req.BotModel == nil || req.BotModel.Key != "sk-test" {
 		t.Fatalf("botModel.key should be parsed")
-	}
-}
-
-func TestSetProtectionPolicy_BotIDMismatch(t *testing.T) {
-	_, ts, token := setupTestServer(t)
-	defer ts.Close()
-
-	body := `{"botId":"another-bot","protection":"enabled"}`
-	req, err := http.NewRequest("PUT", ts.URL+"/api/v1/protection/policy/test-bot", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("Request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	assertStatusCode(t, resp.StatusCode, http.StatusBadRequest)
-	apiResp := parseAPIResponse(t, resp.Body)
-	assertErrorCode(t, apiResp, CodeInvalidParam)
-	if !strings.Contains(apiResp.Message, "botId in body must match URL path") {
-		t.Fatalf("unexpected error message: %s", apiResp.Message)
 	}
 }
 
@@ -1449,6 +1440,15 @@ func TestHandler_StatusHasExportFocus(t *testing.T) {
 	}
 }
 
+func TestIsSkillContentRisk(t *testing.T) {
+	if !isSkillContentRisk(core.Risk{ID: "riskSkillSecurityIssue"}) {
+		t.Fatal("riskSkillSecurityIssue should be treated as skill content risk")
+	}
+	if isSkillContentRisk(core.Risk{ID: "riskNoAuth"}) {
+		t.Fatal("non-skill risk should not be treated as skill content risk")
+	}
+}
+
 // ========== Concurrent Access Tests ==========
 
 func TestAPIServer_ConcurrentTokenAccess(t *testing.T) {
@@ -1512,22 +1512,21 @@ func TestWriteJSON_ValidData(t *testing.T) {
 
 // ========== Path Value Tests ==========
 
-func TestProtectionPolicy_PathValue(t *testing.T) {
+func TestProtectionPolicy_RequestBodyRoute(t *testing.T) {
 	server := NewAPIServer()
 	server.token = "test-token"
 	handler := server.setupRoutes()
 
-	// Test with valid botId
-	req := newAuthRequest("GET", "/api/v1/protection/policy/my-bot-123", "test-token", nil)
+	req := newAuthRequest("GET", "/api/v1/protection/policy", "test-token", bytes.NewBufferString(`{"botId":["my-bot-123"]}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
-	// The response may be an error (404 not found for config), but should not be 400 for botId
+	// The response may be 404 when config does not exist, but should not be 400 for request parsing
 	if rec.Code == http.StatusBadRequest {
 		body := rec.Body.String()
-		if strings.Contains(body, "botId is required") {
-			t.Error("Valid botId should not trigger 'botId is required' error")
+		if strings.Contains(body, "invalid JSON") {
+			t.Error("Valid body should not trigger JSON parsing error")
 		}
 	}
 }
@@ -1540,8 +1539,8 @@ func TestSetProtectionPolicy_BodyReading(t *testing.T) {
 	handler := server.setupRoutes()
 
 	// Test with valid JSON body
-	body := bytes.NewBufferString(`{"protection": "enabled"}`)
-	req := newAuthRequest("PUT", "/api/v1/protection/policy/test-bot", "test-token", body)
+	body := bytes.NewBufferString(`{"botId":["test-bot"],"protection":"enabled"}`)
+	req := newAuthRequest("POST", "/api/v1/protection/policy", "test-token", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 

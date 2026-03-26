@@ -1,24 +1,28 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:lucide_icons/lucide_icons.dart';
+
+import '../config/build_config.dart';
 import '../l10n/app_localizations.dart';
 import '../models/risk_model.dart';
-import '../config/build_config.dart';
 import 'plugin_service.dart';
 import 'scan_database_service.dart';
 
 class BotScanner {
   final StreamController<String> _logController =
       StreamController<String>.broadcast();
-  Stream<String> get logStream => _logController.stream;
   final PluginService _pluginService = PluginService();
+
   AppLocalizations? _l10n;
+
+  Stream<String> get logStream => _logController.stream;
 
   void _log(String message) {
     _logController.add(message);
   }
 
-  /// 设置本地化对象，用于生成中文等本地化文本
+  /// Sets localization for scan-time risk copy.
   void setLocalization(AppLocalizations l10n) {
     _l10n = l10n;
   }
@@ -27,13 +31,11 @@ class BotScanner {
     _log('Starting security scan using plugins...');
     await Future.delayed(const Duration(milliseconds: 300));
 
-    // 1. Load Plugins and Scan (Identify + AssessRisks)
     _log('Loading plugins and scanning...');
-
-    ScanResult pluginResult = await _pluginService.scan();
+    final pluginResult = await _pluginService.scan();
 
     _log('Found ${pluginResult.assets.length} assets.');
-    for (var asset in pluginResult.assets) {
+    for (final asset in pluginResult.assets) {
       _log('Identified asset: ${asset.name} (${asset.type})');
     }
 
@@ -46,16 +48,15 @@ class BotScanner {
     _log('Risk assessment completed via plugins.');
     _log('Found ${pluginResult.risks.length} potential issues.');
 
-    // 2. Add System Level Checks (e.g. Scanner running as root)
-    List<RiskInfo> finalRisks = List.from(pluginResult.risks);
-    _checkSystemRisks(finalRisks);
+    final baseRisks = List<RiskInfo>.from(pluginResult.riskInfo);
+    _checkSystemRisks(baseRisks);
 
-    // 3. Add Risky Skills from database
-    await _addRiskySkills(finalRisks);
+    final skillRisks = await _loadRiskySkills();
 
     return ScanResult(
       config: pluginResult.config,
-      risks: finalRisks,
+      riskInfo: baseRisks,
+      skillResult: skillRisks,
       configFound: pluginResult.configFound,
       configPath: pluginResult.configPath,
       assets: pluginResult.assets,
@@ -64,18 +65,12 @@ class BotScanner {
   }
 
   void _checkSystemRisks(List<RiskInfo> risks) {
-    // AppStore版本在沙盒中运行,无法执行系统命令和读取环境变量,跳过系统级检查
     if (BuildConfig.isAppStore) {
       _log('Skipping system risk checks (App Store build)');
       return;
     }
 
-    // 检查运行权限
     if (Platform.isLinux || Platform.isMacOS) {
-      // This checks if the *scanner itself* is running as root,
-      // which might be relevant if it needs to check other users' files.
-      // But usually running as root is a risk for the tool itself.
-      // We'll keep it as a general warning.
       try {
         final env = Platform.environment;
         final uidStr = env['UID'] ?? env['EUID'];
@@ -94,21 +89,21 @@ class BotScanner {
             );
           }
         }
-      } catch (e) {
-        // Ignore
+      } catch (_) {
+        // Ignore environment read failures here.
       }
     }
   }
 
-  Future<void> _addRiskySkills(List<RiskInfo> risks) async {
+  Future<List<RiskInfo>> _loadRiskySkills() async {
+    final risks = <RiskInfo>[];
+
     try {
       final riskySkills = await ScanDatabaseService().getRiskySkills();
-      for (var skill in riskySkills) {
+      for (final skill in riskySkills) {
         final skillName = skill['skill_name'] as String;
         final issues = skill['issues'] as List<String>;
         final issueCount = issues.length;
-
-        // 使用本地化文本（若有）
         final title = _l10n != null
             ? _l10n!.riskSkillSecurityIssue(skillName)
             : 'Risky Skill: $skillName';
@@ -125,10 +120,16 @@ class BotScanner {
         risks.add(
           RiskInfo(
             id: 'riskSkillSecurityIssue',
-            args: {'skillName': skillName, 'issueCount': issueCount},
+            args: {
+              'skillName': skillName,
+              'issueCount': issueCount,
+              'issues': issues.join('; '),
+              if ((skill['skill_path'] as String? ?? '').isNotEmpty)
+                'skillPath': skill['skill_path'] as String,
+            },
             title: title,
             description: description,
-            level: RiskLevel.high,
+            level: _parseSkillRiskLevel(skill['risk_level'] as String?),
             icon: LucideIcons.alertTriangle,
           ),
         );
@@ -136,6 +137,23 @@ class BotScanner {
       }
     } catch (e) {
       _log('Failed to check risky skills: $e');
+    }
+
+    return risks;
+  }
+
+  RiskLevel _parseSkillRiskLevel(String? level) {
+    switch (level?.toLowerCase()) {
+      case 'critical':
+        return RiskLevel.critical;
+      case 'high':
+        return RiskLevel.high;
+      case 'medium':
+        return RiskLevel.medium;
+      case 'low':
+        return RiskLevel.low;
+      default:
+        return RiskLevel.high;
     }
   }
 

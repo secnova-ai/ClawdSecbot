@@ -140,6 +140,14 @@ func TestProtectionConfig_CRUD(t *testing.T) {
 		t.Fatalf("Expected 1 enabled config, got %d", len(enabled))
 	}
 
+	allConfigs, err := repo.GetAllProtectionConfigs()
+	if err != nil {
+		t.Fatalf("GetAllProtectionConfigs failed: %v", err)
+	}
+	if len(allConfigs) != 1 {
+		t.Fatalf("Expected 1 total config, got %d", len(allConfigs))
+	}
+
 	// 禁用
 	err = repo.SetProtectionEnabled("openclaw:test-1", false)
 	if err != nil {
@@ -151,6 +159,14 @@ func TestProtectionConfig_CRUD(t *testing.T) {
 	}
 	if len(enabled) != 0 {
 		t.Fatalf("Expected 0 enabled configs, got %d", len(enabled))
+	}
+
+	allConfigs, err = repo.GetAllProtectionConfigs()
+	if err != nil {
+		t.Fatalf("GetAllProtectionConfigs failed: %v", err)
+	}
+	if len(allConfigs) != 1 {
+		t.Fatalf("Expected disabled config to remain queryable, got %d", len(allConfigs))
 	}
 
 	// 删除

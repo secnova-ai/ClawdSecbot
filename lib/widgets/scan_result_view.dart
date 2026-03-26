@@ -416,6 +416,10 @@ class ScanResultView extends StatelessWidget {
         return l10n.riskSkillsNotScanned;
       case 'openclaw_1click_rce_vulnerability':
         return l10n.riskOneClickRce;
+      case 'riskSkillSecurityIssue':
+        return l10n.riskSkillSecurityIssue(
+          risk.args?['skillName']?.toString() ?? risk.title,
+        );
       default:
         return risk.title;
     }
@@ -499,6 +503,11 @@ class ScanResultView extends StatelessWidget {
       case 'openclaw_1click_rce_vulnerability':
         return l10n.riskOneClickRceDesc(
           risk.args?['current_version']?.toString() ?? 'unknown',
+        );
+      case 'riskSkillSecurityIssue':
+        return l10n.riskSkillSecurityIssueDesc(
+          risk.args?['skillName']?.toString() ?? '',
+          risk.args?['issueCount'] as int? ?? 0,
         );
       default:
         return risk.description;

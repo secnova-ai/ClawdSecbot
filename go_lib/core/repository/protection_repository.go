@@ -282,6 +282,40 @@ func (r *ProtectionRepository) GetEnabledProtectionConfigs() ([]*ProtectionConfi
 
 // SetProtectionEnabled updates the enabled state for the specified asset instance.
 func (r *ProtectionRepository) SetProtectionEnabled(assetID string, enabled bool) error {
+// GetAllProtectionConfigs 获取所有保护配置
+func (r *ProtectionRepository) GetAllProtectionConfigs() ([]*ProtectionConfig, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	rows, err := r.db.Query(`SELECT asset_name, asset_id, enabled, audit_only, sandbox_enabled,
+		gateway_binary_path, gateway_config_path, custom_security_prompt,
+		single_session_token_limit, daily_token_limit,
+		path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at
+		FROM protection_config`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query protection configs: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []*ProtectionConfig
+	for rows.Next() {
+		config, err := scanProtectionConfigFromRows(rows)
+		if err != nil {
+			logging.Warning("Failed to scan protection config row: %v", err)
+			continue
+		}
+		configs = append(configs, config)
+	}
+
+	if configs == nil {
+		configs = []*ProtectionConfig{}
+	}
+
+	logging.Info("Protection configs count: %d", len(configs))
+	return configs, nil
+}
+
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}

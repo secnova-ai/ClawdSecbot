@@ -375,6 +375,10 @@ func (s *ExportServiceImpl) collectRiskInfo(assets []core.Asset) []RiskInfo {
 	}
 
 	for _, risk := range scanData.Risks {
+		if isSkillContentRisk(risk) {
+			continue
+		}
+
 		info := RiskInfo{
 			Name:   risk.Title,
 			Level:  risk.Level,
@@ -699,18 +703,23 @@ func toSkillIssue(raw string) SkillIssue {
 	}
 
 	var structured struct {
-		Type     string `json:"type"`
-		Desc     string `json:"desc"`
-		Evidence string `json:"evidence"`
+		Type        string `json:"type"`
+		Desc        string `json:"desc"`
+		Description string `json:"description"`
+		Evidence    string `json:"evidence"`
 	}
 	if err := json.Unmarshal([]byte(raw), &structured); err == nil {
-		if structured.Type != "" || structured.Desc != "" || structured.Evidence != "" {
+		desc := strings.TrimSpace(structured.Desc)
+		if desc == "" {
+			desc = strings.TrimSpace(structured.Description)
+		}
+		if structured.Type != "" || desc != "" || structured.Evidence != "" {
 			if structured.Type == "" {
 				structured.Type = "security_risk"
 			}
 			return SkillIssue{
 				Type:     structured.Type,
-				Desc:     structured.Desc,
+				Desc:     desc,
 				Evidence: structured.Evidence,
 			}
 		}
@@ -721,6 +730,10 @@ func toSkillIssue(raw string) SkillIssue {
 		Desc:     raw,
 		Evidence: "",
 	}
+}
+
+func isSkillContentRisk(risk core.Risk) bool {
+	return strings.EqualFold(strings.TrimSpace(risk.ID), "riskSkillSecurityIssue")
 }
 
 // ========== Data Types for Export ==========

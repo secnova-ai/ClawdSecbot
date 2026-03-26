@@ -345,7 +345,7 @@ func DeleteSkillInternal(skillPath string) string {
 func convertSkillIssuesToStrings(issues []SkillSecurityIssue) []string {
 	result := make([]string, len(issues))
 	for i, issue := range issues {
-		result[i] = fmt.Sprintf("[%s] %s in %s: %s", issue.Severity, issue.Type, issue.File, issue.Description)
+		result[i] = SerializeSkillIssue(issue)
 	}
 	return result
 }
@@ -531,7 +531,7 @@ func (bs *BatchScanSession) run(config *repository.SecurityModelConfig) {
 		var riskLevel string
 		if result != nil {
 			for _, issue := range result.Issues {
-				issues = append(issues, fmt.Sprintf("%s: %s", issue.Type, issue.Description))
+				issues = append(issues, SerializeSkillIssue(issue))
 			}
 			riskLevel = result.RiskLevel
 		}

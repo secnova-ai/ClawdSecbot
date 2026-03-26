@@ -987,7 +987,9 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
     var displayMessages = group.messages.where((m) {
       final role = m.role.toLowerCase();
       if (role == 'system') return false;
-      if (role == 'tool' && m.content.trim().isEmpty) return false;
+      if (role == 'tool' || role == 'tool_request' || role == 'tool_result') {
+        return false;
+      }
       if (role == 'assistant' && m.content.trim().isEmpty) return false;
       return true;
     }).toList();
@@ -1060,13 +1062,6 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
             fields: fields,
           ));
         }
-      } else if (role == 'tool') {
-        final cleaned = _sanitizeCardContent(rawContent).trim();
-        summaryItems.add((
-          role: 'tool_result',
-          content: cleaned,
-          fields: const [],
-        ));
       } else {
         final cleaned = _sanitizeCardContent(rawContent).trim();
         summaryItems.add((
@@ -1093,35 +1088,6 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
       ));
     }
 
-    // 有工具调用时在摘要中插入 tool_request 条目（排除内嵌协议的合成条目，它们仅在工具区展示）
-    if (responseToolCalls.isNotEmpty) {
-      final standardToolCalls = responseToolCalls
-          .where((tc) => !tc.id.startsWith('inline_'))
-          .toList();
-      if (standardToolCalls.isNotEmpty) {
-        final toolEntries = standardToolCalls.map((tc) {
-          final argsSummary = tc.arguments.isNotEmpty
-              ? _sanitizeCardContent(tc.arguments)
-              : '';
-          final display = argsSummary.isNotEmpty
-              ? '${tc.name}: $argsSummary'
-              : tc.name;
-          return (
-            role: 'tool_request',
-            content: display,
-            fields: const <({String field, String value})>[],
-          );
-        }).toList();
-        summaryItems.addAll(toolEntries);
-      }
-    }
-
-    // 资产特有过滤：DinTalClaw 等使用内嵌工具协议的资产，摘要区不展示 tool_request / tool_result
-    if (assetName.toLowerCase().contains('dintalclaw')) {
-      summaryItems.removeWhere(
-        (item) => item.role == 'tool_request' || item.role == 'tool_result',
-      );
-    }
     final toolArgs = responseToolCalls
         .where((tc) => tc.arguments.isNotEmpty)
         .map((tc) => '${tc.name}: ${_sanitizeCardContent(tc.arguments)}')

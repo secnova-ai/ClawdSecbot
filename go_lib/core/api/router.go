@@ -21,8 +21,8 @@ func (s *APIServer) setupRoutes() http.Handler {
 	mux.HandleFunc("POST /api/v1/scan", s.handleScan)
 
 	// Protection policy endpoints - manage bot protection policies
-	mux.HandleFunc("GET /api/v1/protection/policy/{botId}", s.handleGetProtectionPolicy)
-	mux.HandleFunc("PUT /api/v1/protection/policy/{botId}", s.handleSetProtectionPolicy)
+	mux.HandleFunc("GET /api/v1/protection/policy", s.handleGetProtectionPolicy)
+	mux.HandleFunc("POST /api/v1/protection/policy", s.handleSetProtectionPolicy)
 
 	// Apply middleware chain: logging -> auth -> mux
 	// Note: loggingMiddleware is outermost so it captures all requests including auth failures
