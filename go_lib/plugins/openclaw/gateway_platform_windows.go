@@ -24,6 +24,11 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 	logging.Info("[GatewayManager] === restartOpenclawGateway (Windows) called, asset=%s, assetID=%s, sandbox=%v ===",
 		req.AssetName, req.AssetID, req.SandboxEnabled)
 
+	for _, key := range buildGatewayRuntimeStateKeys(req.AssetName, req.AssetID) {
+		sandbox.StopHookLogWatcherByKey(key)
+	}
+	cleanupGatewayManagedRuntimeState(req.AssetName, req.AssetID)
+
 	var homeDir string
 	pm := core.GetPathManager()
 	if pm.IsInitialized() {

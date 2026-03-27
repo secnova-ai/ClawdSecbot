@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../utils/app_fonts.dart';
 import 'package:launch_at_startup/launch_at_startup.dart';
@@ -87,6 +88,9 @@ class _MainPageState extends State<MainPage>
   Timer? _onboardingCompletionTimer;
   AppLifecycleListener? _appExitListener;
   bool _isExitFlowInProgress = false;
+  static const MethodChannel _appExitChannel = MethodChannel(
+    'com.clawdbot.guard/app_exit',
+  );
 
   // ============ 开机启动 ============
   bool _launchAtStartupEnabled = false;
@@ -155,6 +159,7 @@ class _MainPageState extends State<MainPage>
     super.initState();
     trayManager.addListener(this);
     windowManager.addListener(this);
+    _appExitChannel.setMethodCallHandler(_handleNativeAppExitCall);
     _appExitListener = AppLifecycleListener(
       onExitRequested: _handleAppExitRequest,
     );
@@ -271,6 +276,7 @@ class _MainPageState extends State<MainPage>
 
   @override
   void dispose() {
+    _appExitChannel.setMethodCallHandler(null);
     _appExitListener?.dispose();
     trayManager.removeListener(this);
     windowManager.removeListener(this);
@@ -284,6 +290,14 @@ class _MainPageState extends State<MainPage>
     // 关闭 Go DB
     NativeLibraryService().close();
     super.dispose();
+  }
+
+  Future<dynamic> _handleNativeAppExitCall(MethodCall call) async {
+    if (call.method == 'requestAppExit') {
+      await _requestAppExit();
+      return true;
+    }
+    return null;
   }
 
   Future<AppExitResponse> _handleAppExitRequest() async {

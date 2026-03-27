@@ -298,6 +298,29 @@ func buildGatewayInstanceKey(assetName, assetID string) string {
 	return openclawAssetName
 }
 
+func buildGatewayRuntimeStateKeys(assetName, assetID string) []string {
+	keys := make([]string, 0, 2)
+	appendKey := func(key string) {
+		key = strings.TrimSpace(key)
+		if key == "" || containsString(keys, key) {
+			return
+		}
+		keys = append(keys, key)
+	}
+
+	appendKey(buildGatewayInstanceKey(assetName, assetID))
+	appendKey(assetName)
+
+	return keys
+}
+
+func cleanupGatewayManagedRuntimeState(assetName, assetID string) {
+	for _, key := range buildGatewayRuntimeStateKeys(assetName, assetID) {
+		sandbox.RemoveProcessMonitor(key)
+		sandbox.RemoveSandboxManagerByKey(key)
+	}
+}
+
 func writeIfChanged(path string, oldBytes []byte, newBytes []byte) (bool, error) {
 	if bytes.Equal(oldBytes, newBytes) {
 		return false, nil

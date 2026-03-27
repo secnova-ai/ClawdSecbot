@@ -32,6 +32,8 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 	logging.Info("[GatewayManager] === restartOpenclawGateway called, asset=%s, assetID=%s, sandbox=%v ===",
 		req.AssetName, req.AssetID, req.SandboxEnabled)
 
+	cleanupGatewayManagedRuntimeState(req.AssetName, req.AssetID)
+
 	if IsAppStoreBuild() {
 		return map[string]interface{}{
 			"success": true, "skipped": true, "message": "skipped: app store build",

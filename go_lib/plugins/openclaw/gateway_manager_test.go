@@ -1,23 +1,22 @@
 package openclaw
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
-func TestBuildGatewayInstanceKey_AssetIDFirst(t *testing.T) {
-	id := "openclaw:abc123"
-	got1 := buildGatewayInstanceKey("Openclaw", id)
-	got2 := buildGatewayInstanceKey("WrongName", id)
-
-	if got1 != id {
-		t.Fatalf("expected key=%s, got %s", id, got1)
-	}
-	if got2 != id {
-		t.Fatalf("expected key=%s when asset name mismatches, got %s", id, got2)
+func TestBuildGatewayRuntimeStateKeysPrefersAssetIDAndKeepsLegacyAssetName(t *testing.T) {
+	got := buildGatewayRuntimeStateKeys(openclawAssetName, "asset-123")
+	want := []string{"asset-123", openclawAssetName}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected runtime state keys: got %v want %v", got, want)
 	}
 }
 
-func TestBuildGatewayInstanceKey_FallbackWhenAssetIDEmpty(t *testing.T) {
-	got := buildGatewayInstanceKey("Openclaw", "")
-	if got != openclawAssetName {
-		t.Fatalf("expected fallback key=%s, got %s", openclawAssetName, got)
+func TestBuildGatewayRuntimeStateKeysDeduplicatesEmptyOrSameValues(t *testing.T) {
+	got := buildGatewayRuntimeStateKeys(openclawAssetName, openclawAssetName)
+	want := []string{openclawAssetName}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected deduplicated runtime state keys: got %v want %v", got, want)
 	}
 }
