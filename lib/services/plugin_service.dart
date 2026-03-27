@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:io';
+import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import '../models/asset_model.dart';
@@ -57,6 +58,16 @@ typedef GetRiskySkillsDart = ffi.Pointer<Utf8> Function();
 typedef ListBundledReActSkillsC = ffi.Pointer<Utf8> Function();
 typedef ListBundledReActSkillsDart = ffi.Pointer<Utf8> Function();
 
+typedef NotifyPluginAppExitC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef NotifyPluginAppExitDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+
+typedef RestoreBotDefaultStateC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef RestoreBotDefaultStateDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+
 // Model config FFI signatures
 typedef SaveSecurityModelConfigC =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
@@ -81,6 +92,60 @@ typedef DeleteBotModelConfigDart =
 
 typedef FreeStringC = ffi.Void Function(ffi.Pointer<Utf8>);
 typedef FreeStringDart = void Function(ffi.Pointer<Utf8>);
+
+class _PluginLifecycleFFI {
+  _PluginLifecycleFFI._();
+
+  static String notifyPluginAppExitInIsolate(
+    String libPath,
+    String assetName,
+    String assetID,
+  ) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final func = dylib
+        .lookupFunction<NotifyPluginAppExitC, NotifyPluginAppExitDart>(
+          'NotifyPluginAppExitFFI',
+        );
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final assetNamePtr = assetName.toNativeUtf8();
+    final assetIDPtr = assetID.toNativeUtf8();
+    final resultPtr = func(assetNamePtr, assetIDPtr);
+    malloc.free(assetNamePtr);
+    malloc.free(assetIDPtr);
+
+    final result = resultPtr.toDartString();
+    freeString(resultPtr);
+    return result;
+  }
+
+  static String restoreBotDefaultStateInIsolate(
+    String libPath,
+    String assetName,
+    String assetID,
+  ) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final func = dylib
+        .lookupFunction<RestoreBotDefaultStateC, RestoreBotDefaultStateDart>(
+          'RestoreBotDefaultStateFFI',
+        );
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final assetNamePtr = assetName.toNativeUtf8();
+    final assetIDPtr = assetID.toNativeUtf8();
+    final resultPtr = func(assetNamePtr, assetIDPtr);
+    malloc.free(assetNamePtr);
+    malloc.free(assetIDPtr);
+
+    final result = resultPtr.toDartString();
+    freeString(resultPtr);
+    return result;
+  }
+}
 
 /// 插件服务：管理插件专有的业务逻辑（扫描/识别/风险评估/模型配置等）
 ///
@@ -279,6 +344,57 @@ class PluginService {
       assetID,
       sensitiveActions,
     );
+  }
+
+  Future<Map<String, dynamic>> notifyPluginAppExit(
+    String assetName, [
+    String assetID = '',
+  ]) async {
+    final libPath = NativeLibraryService().libraryPath;
+    if (libPath == null) {
+      return {'success': false, 'error': 'Plugin library not initialized'};
+    }
+
+    try {
+      final result = await Isolate.run(() {
+        return _PluginLifecycleFFI.notifyPluginAppExitInIsolate(
+          libPath,
+          assetName,
+          assetID,
+        );
+      });
+      return jsonDecode(result) as Map<String, dynamic>;
+    } catch (e) {
+      appLogger.debug('[Plugin] NotifyPluginAppExitFFI failed: $e');
+      return {'success': false, 'error': 'NotifyPluginAppExitFFI failed: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> restoreBotDefaultState(
+    String assetName, [
+    String assetID = '',
+  ]) async {
+    final libPath = NativeLibraryService().libraryPath;
+    if (libPath == null) {
+      return {'success': false, 'error': 'Plugin library not initialized'};
+    }
+
+    try {
+      final result = await Isolate.run(() {
+        return _PluginLifecycleFFI.restoreBotDefaultStateInIsolate(
+          libPath,
+          assetName,
+          assetID,
+        );
+      });
+      return jsonDecode(result) as Map<String, dynamic>;
+    } catch (e) {
+      appLogger.debug('[Plugin] RestoreBotDefaultStateFFI failed: $e');
+      return {
+        'success': false,
+        'error': 'RestoreBotDefaultStateFFI failed: $e',
+      };
+    }
   }
 
   /// 通过FFI调用Go层保存安全模型配置

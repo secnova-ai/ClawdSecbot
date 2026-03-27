@@ -173,6 +173,50 @@ class ProtectionProxyFFI {
     return resultStr;
   }
 
+  /// 在后台 Isolate 中执行 StopProtectionProxy。
+  static String stopProtectionProxyInIsolate(String libPath) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final stopProxy = dylib
+        .lookupFunction<StopProtectionProxyC, StopProtectionProxyDart>(
+          'StopProtectionProxy',
+        );
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final resultPtr = stopProxy();
+    final resultStr = resultPtr.toDartString();
+    freeString(resultPtr);
+    return resultStr;
+  }
+
+  /// 在后台 Isolate 中执行按资产路由的 StopProtectionProxyByAsset。
+  static String stopProtectionProxyByAssetInIsolate(
+    String libPath,
+    String assetName,
+    String assetID,
+  ) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final stopProxy = dylib
+        .lookupFunction<
+          StopProtectionProxyByAssetC,
+          StopProtectionProxyByAssetDart
+        >('StopProtectionProxyByAsset');
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final assetNamePtr = assetName.toNativeUtf8();
+    final assetIDPtr = assetID.toNativeUtf8();
+    final resultPtr = stopProxy(assetNamePtr, assetIDPtr);
+    malloc.free(assetNamePtr);
+    malloc.free(assetIDPtr);
+
+    final resultStr = resultPtr.toDartString();
+    freeString(resultPtr);
+    return resultStr;
+  }
+
   /// 在后台 Isolate 中执行 SyncGatewaySandbox（网关完整重启，耗时较长）。
   /// [libPath] 为插件 dylib 路径。
   /// 返回 Go 层返回的 JSON 字符串。

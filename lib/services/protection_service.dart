@@ -417,31 +417,21 @@ class ProtectionService {
 
     appLogger.info('[Protection] Stopping proxy...');
     try {
-      final dylib = _getDylib();
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-      ffi.Pointer<Utf8> resultPtr;
-      if (_hasAssetBinding) {
-        final stopProxy = dylib
-            .lookupFunction<
-              StopProtectionProxyByAssetC,
-              StopProtectionProxyByAssetDart
-            >('StopProtectionProxyByAsset');
-        final assetNamePtr = _assetName!.toNativeUtf8();
-        final assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = stopProxy(assetNamePtr, assetIDPtr);
-        malloc.free(assetNamePtr);
-        malloc.free(assetIDPtr);
-      } else {
-        final stopProxy = dylib
-            .lookupFunction<StopProtectionProxyC, StopProtectionProxyDart>(
-              'StopProtectionProxy',
-            );
-        resultPtr = stopProxy();
+      final libPath = _getLibraryPath();
+      if (libPath == null) {
+        throw Exception('Plugin library not found');
       }
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
+
+      final resultStr = await Isolate.run(() {
+        if (_hasAssetBinding) {
+          return ProtectionProxyFFI.stopProtectionProxyByAssetInIsolate(
+            libPath,
+            _assetName!,
+            _assetID,
+          );
+        }
+        return ProtectionProxyFFI.stopProtectionProxyInIsolate(libPath);
+      });
 
       final result = jsonDecode(resultStr);
       appLogger.info('[Protection] Proxy stopped successfully');
@@ -1003,18 +993,14 @@ class ProtectionService {
 
   Future<void> clearAllAuditLogs() async => _monitor.clearAllAuditLogs();
 
-  Future<void> clearAuditLogs({
-    String? assetName,
-    String? assetID,
-  }) async => _monitor.clearAuditLogs(assetName: assetName, assetID: assetID);
+  Future<void> clearAuditLogs({String? assetName, String? assetID}) async =>
+      _monitor.clearAuditLogs(assetName: assetName, assetID: assetID);
 
-  void clearAuditLogsBufferWithFilter({
-    String? assetName,
-    String? assetID,
-  }) => _monitor.clearAuditLogsBufferWithFilter(
-    assetName: assetName,
-    assetID: assetID,
-  );
+  void clearAuditLogsBufferWithFilter({String? assetName, String? assetID}) =>
+      _monitor.clearAuditLogsBufferWithFilter(
+        assetName: assetName,
+        assetID: assetID,
+      );
 
   // === 安全事件委托 ===
 

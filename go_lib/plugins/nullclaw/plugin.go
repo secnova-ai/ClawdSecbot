@@ -1,6 +1,7 @@
 package nullclaw
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -286,6 +287,50 @@ func (p *NullclawPlugin) HasInitialBackup() string {
 // RestoreToInitialConfig implements core.GatewaySandboxCapability.
 func (p *NullclawPlugin) RestoreToInitialConfig() string {
 	return RestoreToInitialConfigInternal()
+}
+
+// OnAppExit implements core.ApplicationLifecycleCapability.
+func (p *NullclawPlugin) OnAppExit(assetID string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	assetID = strings.TrimSpace(assetID)
+	logging.Info("[Nullclaw] OnAppExit: assetID=%s", assetID)
+
+	if assetID != "" {
+		if status, ok := p.protectionStatuses[assetID]; ok {
+			status.Running = false
+			status.ProxyRunning = false
+			p.protectionStatuses[assetID] = status
+		}
+	}
+
+	payload, err := json.Marshal(map[string]interface{}{
+		"success":  true,
+		"asset_id": assetID,
+		"message":  "nullclaw exit callback completed",
+	})
+	if err != nil {
+		return `{"success":false,"error":"marshal error"}`
+	}
+	return string(payload)
+}
+
+// RestoreBotDefaultState implements core.ApplicationLifecycleCapability.
+// Nullclaw currently falls back to the existing initial-backup restoration flow.
+func (p *NullclawPlugin) RestoreBotDefaultState(assetID string) string {
+	assetID = strings.TrimSpace(assetID)
+	backupDir := ""
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		backupDir = filepath.Join(homeDir, ".botsec", "backups")
+	}
+	result := RestoreToInitialConfigByAsset(backupDir, assetID)
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return `{"success":false,"error":"marshal error"}`
+	}
+	return string(payload)
 }
 
 // OnBeforeProxyStop 实现防护停止前钩子

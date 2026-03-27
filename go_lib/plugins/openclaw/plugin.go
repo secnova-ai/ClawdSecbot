@@ -1,6 +1,7 @@
 package openclaw
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -286,6 +287,43 @@ func (p *OpenclawPlugin) RestoreToInitialConfig() string {
 	return RestoreToInitialConfigInternal()
 }
 
+// OnAppExit implements core.ApplicationLifecycleCapability.
+func (p *OpenclawPlugin) OnAppExit(assetID string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	assetID = strings.TrimSpace(assetID)
+	logging.Info("[Openclaw] OnAppExit: assetID=%s", assetID)
+
+	if assetID != "" {
+		if status, ok := p.protectionStatuses[assetID]; ok {
+			status.Running = false
+			status.ProxyRunning = false
+			p.protectionStatuses[assetID] = status
+		}
+	}
+
+	payload, err := json.Marshal(map[string]interface{}{
+		"success":  true,
+		"asset_id": assetID,
+		"message":  "openclaw exit callback completed",
+	})
+	if err != nil {
+		return `{"success":false,"error":"marshal error"}`
+	}
+	return string(payload)
+}
+
+// RestoreBotDefaultState implements core.ApplicationLifecycleCapability.
+func (p *OpenclawPlugin) RestoreBotDefaultState(assetID string) string {
+	result := RestoreBotDefaultStateByAsset(strings.TrimSpace(assetID))
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return `{"success":false,"error":"marshal error"}`
+	}
+	return string(payload)
+}
+
 // OnBeforeProxyStop 实现防护停止前钩子
 // 在代理停止前执行，恢复原始配置
 func (p *OpenclawPlugin) OnBeforeProxyStop(ctx *core.ProtectionContext) {
@@ -298,12 +336,14 @@ func (p *OpenclawPlugin) OnBeforeProxyStop(ctx *core.ProtectionContext) {
 		backupDir = filepath.Join(homeDir, ".botsec", "backups")
 	}
 
-	// 恢复原始配置
-	result := RestoreToInitialConfigByAsset(backupDir, ctx.AssetID)
+	_ = backupDir // 保留兼容路径推导，当前退出恢复不依赖初始整文件备份。
+
+	// 恢复 Bot 默认配置，仅移除注入的 clawdsecbot-* 路由项。
+	result := RestoreBotDefaultStateByAsset(ctx.AssetID)
 	if result.Success {
-		logging.Info("[Openclaw] Config restored to initial state: %s", result.Message)
+		logging.Info("[Openclaw] Bot default state restored: %s", result.Message)
 	} else {
-		logging.Warning("[Openclaw] Config restore failed: %s", result.Error)
+		logging.Warning("[Openclaw] Bot default state restore failed: %s", result.Error)
 	}
 }
 

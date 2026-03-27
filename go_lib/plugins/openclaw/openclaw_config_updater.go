@@ -13,14 +13,19 @@ import (
 	"go_lib/core/logging"
 )
 
+const clawdsecbotModelPrefix = "clawdsecbot-"
+
 // stripClawdsecbotPrefix removes clawdsecbot- prefix from a model ID.
 func stripClawdsecbotPrefix(modelID string) string {
-	const prefix = "clawdsecbot-"
 	trimmed := strings.TrimSpace(modelID)
-	if strings.HasPrefix(trimmed, prefix) {
-		return strings.TrimPrefix(trimmed, prefix)
+	if strings.HasPrefix(trimmed, clawdsecbotModelPrefix) {
+		return strings.TrimPrefix(trimmed, clawdsecbotModelPrefix)
 	}
 	return trimmed
+}
+
+func hasClawdsecbotPrefix(value string) bool {
+	return strings.HasPrefix(strings.TrimSpace(value), clawdsecbotModelPrefix)
 }
 
 // ensureMapValue ensures the value under key is a map and returns it.
@@ -334,6 +339,225 @@ func setAgentsDefaultsPrimary(rawConfig map[string]interface{}, newModel string)
 	return previousPrimary, newModel, nil
 }
 
+func readMapValue(parent map[string]interface{}, key string) (map[string]interface{}, bool) {
+	if parent == nil {
+		return nil, false
+	}
+	value, ok := parent[key].(map[string]interface{})
+	return value, ok
+}
+
+func containsString(values []string, candidate string) bool {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func lastString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(values[len(values)-1])
+}
+
+func collectModelKeys(value interface{}) []string {
+	switch typed := value.(type) {
+	case []interface{}:
+		return readStringSlice(typed)
+	case map[string]interface{}:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			clean := strings.TrimSpace(key)
+			if clean != "" {
+				keys = append(keys, clean)
+			}
+		}
+		sort.Strings(keys)
+		return keys
+	default:
+		return nil
+	}
+}
+
+func removeInjectedProviderEntries(rawConfig map[string]interface{}) []string {
+	modelsMap, ok := readMapValue(rawConfig, "models")
+	if !ok {
+		return nil
+	}
+	providersMap, ok := readMapValue(modelsMap, "providers")
+	if !ok {
+		return nil
+	}
+
+	removed := make([]string, 0)
+	for key := range providersMap {
+		if hasClawdsecbotPrefix(key) {
+			removed = append(removed, strings.TrimSpace(key))
+			delete(providersMap, key)
+		}
+	}
+	if len(removed) == 0 {
+		return nil
+	}
+
+	sort.Strings(removed)
+	modelsMap["providers"] = providersMap
+	rawConfig["models"] = modelsMap
+	return removed
+}
+
+func removeInjectedDefaultsModels(rawConfig map[string]interface{}) ([]string, []string) {
+	agentsMap, ok := readMapValue(rawConfig, "agents")
+	if !ok {
+		return nil, nil
+	}
+	defaultsMap, ok := readMapValue(agentsMap, "defaults")
+	if !ok {
+		return nil, nil
+	}
+
+	removed := make([]string, 0)
+	switch modelsValue := defaultsMap["models"].(type) {
+	case []interface{}:
+		models := readStringSlice(modelsValue)
+		remaining := make([]string, 0, len(models))
+		for _, model := range models {
+			if hasClawdsecbotPrefix(model) {
+				removed = append(removed, model)
+				continue
+			}
+			remaining = append(remaining, model)
+		}
+		if len(removed) == 0 {
+			return nil, remaining
+		}
+		defaultsMap["models"] = writeStringSlice(remaining)
+		agentsMap["defaults"] = defaultsMap
+		rawConfig["agents"] = agentsMap
+		return removed, remaining
+	case map[string]interface{}:
+		for key := range modelsValue {
+			if hasClawdsecbotPrefix(key) {
+				removed = append(removed, strings.TrimSpace(key))
+				delete(modelsValue, key)
+			}
+		}
+		remaining := collectModelKeys(modelsValue)
+		if len(removed) == 0 {
+			return nil, remaining
+		}
+		sort.Strings(removed)
+		defaultsMap["models"] = modelsValue
+		agentsMap["defaults"] = defaultsMap
+		rawConfig["agents"] = agentsMap
+		return removed, remaining
+	default:
+		return nil, nil
+	}
+}
+
+func removeInjectedFallbacks(rawConfig map[string]interface{}) ([]string, []string) {
+	agentsMap, ok := readMapValue(rawConfig, "agents")
+	if !ok {
+		return nil, nil
+	}
+	defaultsMap, ok := readMapValue(agentsMap, "defaults")
+	if !ok {
+		return nil, nil
+	}
+
+	modelMap, modelAsMap := defaultsMap["model"].(map[string]interface{})
+	targetParent := defaultsMap
+	targetKey := "fallbacks"
+	if modelAsMap {
+		targetParent = modelMap
+	}
+
+	rawFallbacks, exists := targetParent[targetKey]
+	if !exists {
+		return nil, nil
+	}
+
+	fallbacks := readStringSlice(rawFallbacks)
+	removed := make([]string, 0)
+	remaining := make([]string, 0, len(fallbacks))
+	for _, fallback := range fallbacks {
+		if hasClawdsecbotPrefix(fallback) {
+			removed = append(removed, fallback)
+			continue
+		}
+		remaining = append(remaining, fallback)
+	}
+	if len(removed) == 0 {
+		return nil, remaining
+	}
+
+	targetParent[targetKey] = writeStringSlice(remaining)
+	if modelAsMap {
+		defaultsMap["model"] = modelMap
+	} else {
+		defaultsMap = targetParent
+	}
+	agentsMap["defaults"] = defaultsMap
+	rawConfig["agents"] = agentsMap
+	return removed, remaining
+}
+
+func determineRestoredPrimaryModel(currentPrimary string, remainingModels []string, remainingFallbacks []string) string {
+	strippedPrimary := stripClawdsecbotPrefix(currentPrimary)
+	if containsString(remainingModels, strippedPrimary) {
+		return strippedPrimary
+	}
+
+	// Go map iteration does not preserve the original JSON object order. Since
+	// protection startup stores the previous primary in fallbacks, prefer the
+	// last surviving fallback before falling back to the remaining model set.
+	for i := len(remainingFallbacks) - 1; i >= 0; i-- {
+		fallback := strings.TrimSpace(remainingFallbacks[i])
+		if fallback == "" {
+			continue
+		}
+		if len(remainingModels) == 0 || containsString(remainingModels, fallback) {
+			return fallback
+		}
+	}
+
+	if len(remainingModels) > 0 {
+		return lastString(remainingModels)
+	}
+	if strippedPrimary != "" && !hasClawdsecbotPrefix(strippedPrimary) {
+		return strippedPrimary
+	}
+	return ""
+}
+
+func restoreInjectedOpenclawBotState(rawConfig map[string]interface{}, currentPrimary string) (string, []string, []string, []string, bool, error) {
+	removedProviders := removeInjectedProviderEntries(rawConfig)
+	removedModels, remainingModels := removeInjectedDefaultsModels(rawConfig)
+	removedFallbacks, remainingFallbacks := removeInjectedFallbacks(rawConfig)
+
+	targetPrimary := determineRestoredPrimaryModel(currentPrimary, remainingModels, remainingFallbacks)
+	if targetPrimary == "" {
+		return "", removedProviders, removedModels, removedFallbacks, false, fmt.Errorf("no remaining model available for primary")
+	}
+
+	if _, _, err := setAgentsDefaultsPrimary(rawConfig, targetPrimary); err != nil {
+		return "", removedProviders, removedModels, removedFallbacks, false, err
+	}
+
+	changed := len(removedProviders) > 0 || len(removedModels) > 0 || len(removedFallbacks) > 0 ||
+		strings.TrimSpace(currentPrimary) != strings.TrimSpace(targetPrimary)
+
+	return targetPrimary, removedProviders, removedModels, removedFallbacks, changed, nil
+}
+
 // buildDefaultProviderConfig constructs a provider config with defaults.
 func buildDefaultProviderConfig(providerName string, modelID string) map[string]interface{} {
 	modelID = strings.TrimSpace(modelID)
@@ -521,6 +745,116 @@ type RestoreToInitialConfigResult struct {
 	ConfigPath     string `json:"config_path,omitempty"`
 	BackupPath     string `json:"backup_path,omitempty"`
 	GatewayRestart bool   `json:"gateway_restart,omitempty"`
+}
+
+type RestoreBotDefaultStateResult struct {
+	Success          bool     `json:"success"`
+	Message          string   `json:"message,omitempty"`
+	Error            string   `json:"error,omitempty"`
+	ConfigPath       string   `json:"config_path,omitempty"`
+	PrimaryModel     string   `json:"primary_model,omitempty"`
+	RemovedProviders []string `json:"removed_providers,omitempty"`
+	RemovedModels    []string `json:"removed_models,omitempty"`
+	RemovedFallbacks []string `json:"removed_fallbacks,omitempty"`
+	Restored         bool     `json:"restored,omitempty"`
+	GatewayRestart   bool     `json:"gateway_restart,omitempty"`
+}
+
+// RestoreBotDefaultStateByAsset removes injected clawdsecbot-* model entries
+// and restores OpenClaw to a usable unprotected state without rolling the full
+// config file back to its initial backup.
+func RestoreBotDefaultStateByAsset(assetID string) RestoreBotDefaultStateResult {
+	logging.Info("[RestoreBotDefaultState] Starting targeted OpenClaw restore...")
+
+	configPath, err := findConfigPath()
+	if err != nil {
+		return RestoreBotDefaultStateResult{
+			Success: false,
+			Error:   fmt.Sprintf("config not found: %v", err),
+		}
+	}
+
+	config, rawConfig, err := loadConfig(configPath)
+	if err != nil {
+		return RestoreBotDefaultStateResult{
+			Success:    false,
+			Error:      fmt.Sprintf("load config failed: %v", err),
+			ConfigPath: configPath,
+		}
+	}
+
+	currentPrimary, err := getPrimaryModelFromConfig(config)
+	if err != nil {
+		return RestoreBotDefaultStateResult{
+			Success:    false,
+			Error:      fmt.Sprintf("read primary model failed: %v", err),
+			ConfigPath: configPath,
+		}
+	}
+
+	targetPrimary, removedProviders, removedModels, removedFallbacks, changed, err := restoreInjectedOpenclawBotState(rawConfig, currentPrimary)
+	if err != nil {
+		return RestoreBotDefaultStateResult{
+			Success:          false,
+			Error:            fmt.Sprintf("restore bot default state failed: %v", err),
+			ConfigPath:       configPath,
+			RemovedProviders: removedProviders,
+			RemovedModels:    removedModels,
+			RemovedFallbacks: removedFallbacks,
+		}
+	}
+
+	if !changed {
+		return RestoreBotDefaultStateResult{
+			Success:          true,
+			Message:          "bot config already in default state",
+			ConfigPath:       configPath,
+			PrimaryModel:     targetPrimary,
+			RemovedProviders: removedProviders,
+			RemovedModels:    removedModels,
+			RemovedFallbacks: removedFallbacks,
+			Restored:         false,
+			GatewayRestart:   false,
+		}
+	}
+
+	if err := saveConfig(configPath, rawConfig); err != nil {
+		return RestoreBotDefaultStateResult{
+			Success:          false,
+			Error:            fmt.Sprintf("save config failed: %v", err),
+			ConfigPath:       configPath,
+			PrimaryModel:     targetPrimary,
+			RemovedProviders: removedProviders,
+			RemovedModels:    removedModels,
+			RemovedFallbacks: removedFallbacks,
+		}
+	}
+
+	req := &GatewayRestartRequest{
+		AssetName:      openclawAssetName,
+		AssetID:        strings.TrimSpace(assetID),
+		SandboxEnabled: false,
+	}
+
+	gatewayResult, gatewayErr := restartOpenclawGateway(req)
+	gatewayRestart := gatewayErr == nil
+	if gatewayErr != nil {
+		logging.Warning("[RestoreBotDefaultState] Gateway restart failed: %v", gatewayErr)
+	} else {
+		logging.Info("[RestoreBotDefaultState] Gateway restarted: %v", gatewayResult)
+	}
+
+	return RestoreBotDefaultStateResult{
+		Success:          true,
+		Message:          "bot config restored to default state",
+		ConfigPath:       configPath,
+		PrimaryModel:     targetPrimary,
+		RemovedProviders: removedProviders,
+		RemovedModels:    removedModels,
+		RemovedFallbacks: removedFallbacks,
+		Restored:         true,
+		GatewayRestart:   gatewayRestart,
+	}
 }
 
 // RestoreToInitialConfig 恢复 openclaw.json 到初始配置状态并重启 gateway。

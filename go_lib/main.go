@@ -1123,4 +1123,14 @@ func RestoreToInitialConfigByAssetFFI(assetNameC *C.char) *C.char {
 	return C.CString(core.RestoreToInitialConfigByPlugin(C.GoString(assetNameC)))
 }
 
+//export NotifyPluginAppExitFFI
+func NotifyPluginAppExitFFI(assetNameC, assetIDC *C.char) *C.char {
+	return C.CString(core.NotifyAppExitByPlugin(C.GoString(assetNameC), C.GoString(assetIDC)))
+}
+
+//export RestoreBotDefaultStateFFI
+func RestoreBotDefaultStateFFI(assetNameC, assetIDC *C.char) *C.char {
+	return C.CString(core.RestoreBotDefaultStateByPlugin(C.GoString(assetNameC), C.GoString(assetIDC)))
+}
+
 func main() {}
