@@ -36,6 +36,13 @@ type GatewaySandboxCapability interface {
 	RestoreToInitialConfig() string
 }
 
+// ApplicationLifecycleCapability defines optional plugin capability for
+// application-exit orchestration and best-effort bot state restoration.
+type ApplicationLifecycleCapability interface {
+	OnAppExit(assetID string) string
+	RestoreBotDefaultState(assetID string) string
+}
+
 func capabilityError(err error) string {
 	payload, marshalErr := json.Marshal(map[string]interface{}{
 		"success": false,
@@ -287,4 +294,26 @@ func RestoreToInitialConfigByPlugin(assetName string) string {
 		return capabilityError(err)
 	}
 	return plugin.(GatewaySandboxCapability).RestoreToInitialConfig()
+}
+
+func NotifyAppExitByPlugin(assetName, assetID string) string {
+	plugin, err := resolvePluginByCapability(assetName, "application_exit", func(p BotPlugin) bool {
+		_, ok := p.(ApplicationLifecycleCapability)
+		return ok
+	})
+	if err != nil {
+		return capabilityError(err)
+	}
+	return plugin.(ApplicationLifecycleCapability).OnAppExit(strings.TrimSpace(assetID))
+}
+
+func RestoreBotDefaultStateByPlugin(assetName, assetID string) string {
+	plugin, err := resolvePluginByCapability(assetName, "restore_bot_default_state", func(p BotPlugin) bool {
+		_, ok := p.(ApplicationLifecycleCapability)
+		return ok
+	})
+	if err != nil {
+		return capabilityError(err)
+	}
+	return plugin.(ApplicationLifecycleCapability).RestoreBotDefaultState(strings.TrimSpace(assetID))
 }
