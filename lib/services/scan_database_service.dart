@@ -70,6 +70,7 @@ class ScanDatabaseService {
         'config_json': result.config != null ? jsonEncode(result.config) : null,
         'assets': result.assets.map((a) => a.toJson()).toList(),
         'risks': result.risks.map((r) => r.toJson()).toList(),
+        'created_at': result.scannedAt?.toUtc().toIso8601String(),
       });
 
       final payloadPtr = payload.toNativeUtf8();
@@ -117,6 +118,7 @@ class ScanDatabaseService {
         final configFound = data['config_found'] as bool? ?? false;
         final configPath = data['config_path'] as String?;
         final configJSON = data['config_json'] as String?;
+        final scannedAtRaw = data['created_at'] as String?;
 
         final assets =
             (data['assets'] as List?)
@@ -155,6 +157,9 @@ class ScanDatabaseService {
           configFound: configFound,
           configPath: configPath,
           assets: assets,
+          scannedAt: scannedAtRaw != null
+              ? DateTime.tryParse(scannedAtRaw)
+              : null,
         );
       }
       return null;

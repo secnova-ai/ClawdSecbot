@@ -8,6 +8,12 @@
   "startScan": "开始安全扫描",
   "scanning": "扫描中...",
   "scanComplete": "扫描完成",
+  "lastScanTime": "上次检测: {time}",
+  "@lastScanTime": {
+    "placeholders": {
+      "time": {"type": "String"}
+    }
+  },
   "rescan": "重新扫描",
   "rescanConfirmTitle": "确认重新扫描",
   "rescanConfirmMessage": "当前有 {count} 个Bot资产正在防护中。重新扫描将停止所有已开启的防护。是否继续？",

@@ -8,6 +8,12 @@
   "startScan": "Start Security Scan",
   "scanning": "Scanning...",
   "scanComplete": "Scan Complete",
+  "lastScanTime": "Last scan: {time}",
+  "@lastScanTime": {
+    "placeholders": {
+      "time": {"type": "String"}
+    }
+  },
   "rescan": "Rescan",
   "rescanConfirmTitle": "Confirm Rescan",
   "rescanConfirmMessage": "There are currently {count} Bot asset(s) under protection. Rescanning will stop all active protections. Continue?",

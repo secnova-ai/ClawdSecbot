@@ -146,6 +146,12 @@ abstract class AppLocalizations {
   /// **'扫描完成'**
   String get scanComplete;
 
+  /// No description provided for @lastScanTime.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次检测: {time}'**
+  String lastScanTime(String time);
+
   /// No description provided for @rescan.
   ///
   /// In zh, this message translates to:

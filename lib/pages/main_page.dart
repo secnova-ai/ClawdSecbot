@@ -1253,7 +1253,20 @@ class _MainPageState extends State<MainPage>
               child: Stack(
                 children: [
                   AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 400),
+                    duration: const Duration(milliseconds: 520),
+                    reverseDuration: const Duration(milliseconds: 360),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    layoutBuilder: (currentChild, previousChildren) {
+                      return Stack(
+                        alignment: Alignment.topCenter,
+                        children: [
+                          ...previousChildren,
+                          if (currentChild case final child?) child,
+                        ],
+                      );
+                    },
+                    transitionBuilder: _buildContentTransition,
                     child: _buildContent(),
                   ),
                   if (_showOnboarding)
@@ -1347,12 +1360,20 @@ class _MainPageState extends State<MainPage>
             ),
             const Spacer(),
             IconButton(
-              icon: const Icon(LucideIcons.fileSearch, size: 16, color: Colors.white70),
+              icon: const Icon(
+                LucideIcons.fileSearch,
+                size: 16,
+                color: Colors.white70,
+              ),
               tooltip: l10n.auditLog,
               onPressed: showAuditLogWindow,
             ),
             IconButton(
-              icon: const Icon(LucideIcons.cpu, size: 16, color: Colors.white70),
+              icon: const Icon(
+                LucideIcons.cpu,
+                size: 16,
+                color: Colors.white70,
+              ),
               tooltip: l10n.settings,
               onPressed: _handleSettingsTap,
             ),
@@ -1431,7 +1452,11 @@ class _MainPageState extends State<MainPage>
             ),
           ),
           IconButton(
-            icon: const Icon(LucideIcons.fileSearch, size: 16, color: Colors.white70),
+            icon: const Icon(
+              LucideIcons.fileSearch,
+              size: 16,
+              color: Colors.white70,
+            ),
             tooltip: l10n.auditLog,
             onPressed: showAuditLogWindow,
           ),
@@ -1519,6 +1544,30 @@ class _MainPageState extends State<MainPage>
       case ScanState.completed:
         return _buildCompletedState();
     }
+  }
+
+  Widget _buildContentTransition(Widget child, Animation<double> animation) {
+    final fadeAnimation = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    final slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.03),
+      end: Offset.zero,
+    ).animate(fadeAnimation);
+    final scaleAnimation = Tween<double>(
+      begin: 0.985,
+      end: 1,
+    ).animate(fadeAnimation);
+
+    return FadeTransition(
+      opacity: fadeAnimation,
+      child: SlideTransition(
+        position: slideAnimation,
+        child: ScaleTransition(scale: scaleAnimation, child: child),
+      ),
+    );
   }
 
   Widget _buildIdleState() {

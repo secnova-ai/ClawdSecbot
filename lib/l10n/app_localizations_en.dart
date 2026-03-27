@@ -34,6 +34,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get scanComplete => 'Scan Complete';
 
   @override
+  String lastScanTime(String time) {
+    return 'Last scan: $time';
+  }
+
+  @override
   String get rescan => 'Rescan';
 
   @override

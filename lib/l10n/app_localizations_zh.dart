@@ -33,6 +33,11 @@ class AppLocalizationsZh extends AppLocalizations {
   String get scanComplete => '扫描完成';
 
   @override
+  String lastScanTime(String time) {
+    return '上次检测: $time';
+  }
+
+  @override
   String get rescan => '重新扫描';
 
   @override
