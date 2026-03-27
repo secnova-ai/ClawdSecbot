@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go_lib/core/sandbox"
 )
 
 const samplePlist = `<?xml version="1.0" encoding="UTF-8"?>
@@ -129,6 +131,56 @@ func TestRemoveSandboxFromPlist_Idempotent(t *testing.T) {
 	}
 }
 
+func TestWriteGatewayPolicyFile_DetectsContentChanges(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := sandbox.SandboxConfig{
+		AssetName:         "Openclaw",
+		GatewayBinaryPath: "/usr/local/bin/openclaw",
+		GatewayConfigPath: "/tmp/openclaw.json",
+		PathPermission: sandbox.PathPermissionConfig{
+			Mode:  sandbox.ModeBlacklist,
+			Paths: []string{"/tmp/blocked-a"},
+		},
+	}
+
+	policyPath, modified, err := writeGatewayPolicyFile(tmpDir, "Openclaw", cfg)
+	if err != nil {
+		t.Fatalf("first write failed: %v", err)
+	}
+	if !modified {
+		t.Fatalf("expected first write to report modified")
+	}
+
+	policyPath2, modified, err := writeGatewayPolicyFile(tmpDir, "Openclaw", cfg)
+	if err != nil {
+		t.Fatalf("second write failed: %v", err)
+	}
+	if policyPath2 != policyPath {
+		t.Fatalf("expected stable policy path, got %s want %s", policyPath2, policyPath)
+	}
+	if modified {
+		t.Fatalf("expected second write with same config to be idempotent")
+	}
+
+	cfg.PathPermission.Paths = []string{"/tmp/blocked-b"}
+	_, modified, err = writeGatewayPolicyFile(tmpDir, "Openclaw", cfg)
+	if err != nil {
+		t.Fatalf("third write failed: %v", err)
+	}
+	if !modified {
+		t.Fatalf("expected config change to report modified")
+	}
+
+	content, err := os.ReadFile(policyPath)
+	if err != nil {
+		t.Fatalf("failed to read policy file: %v", err)
+	}
+	if !strings.Contains(string(content), "/tmp/blocked-b") {
+		t.Fatalf("expected updated blacklist path in policy file")
+	}
+}
+
 func TestRestartOpenclawGatewaySimple_BinaryNotFound(t *testing.T) {
 	// 确保 PATH 中不存在 openclaw 二进制
 	// 保存原始 PATH 并设置一个空路径
@@ -205,4 +257,3 @@ exit 0
 		t.Error("expected 'gateway start' command to be called")
 	}
 }
-

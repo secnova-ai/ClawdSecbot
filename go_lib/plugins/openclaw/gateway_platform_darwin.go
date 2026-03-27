@@ -92,7 +92,7 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 	var modified bool
 	if req.SandboxEnabled {
 		instanceKey := buildGatewayInstanceKey(req.AssetName, req.AssetID)
-		policyPath, err := writeGatewayPolicyFile(policyDir, instanceKey, sandbox.SandboxConfig{
+		policyPath, policyModified, err := writeGatewayPolicyFile(policyDir, instanceKey, sandbox.SandboxConfig{
 			AssetName:         instanceKey,
 			GatewayBinaryPath: binaryPath,
 			GatewayConfigPath: configPath,
@@ -110,8 +110,8 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 		}
 		modified = m
 
-		if modified {
-			logging.Info("[GatewayManager] Sandbox injected, reloading LaunchAgent...")
+		if modified || policyModified {
+			logging.Info("[GatewayManager] Sandbox updated (plist_modified=%v, policy_modified=%v), reloading LaunchAgent...", modified, policyModified)
 			if err := reloadLaunchAgent(plistPath, homeDir); err != nil {
 				logging.Warning("[GatewayManager] reload launchagent failed: %v", err)
 				_, _ = runOpenclawGatewayCommand(binaryPath, []string{"start"}, homeDir)
@@ -227,9 +227,9 @@ func installGatewayAndGetPlistPath(binaryPath string, homeDir string) (plistPath
 	return plistPath, output, err
 }
 
-func writeGatewayPolicyFile(policyDir string, assetName string, cfg sandbox.SandboxConfig) (string, error) {
+func writeGatewayPolicyFile(policyDir string, assetName string, cfg sandbox.SandboxConfig) (string, bool, error) {
 	if err := os.MkdirAll(policyDir, 0755); err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	fileName := "botsec_" + sanitizeFileName(assetName) + ".sb"
@@ -238,15 +238,21 @@ func writeGatewayPolicyFile(policyDir string, assetName string, cfg sandbox.Sand
 	policy := sandbox.NewSeatbeltPolicy(cfg)
 	content, err := policy.GeneratePolicy()
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
-	if err := os.WriteFile(policyPath, []byte(content), 0644); err != nil {
-		return "", err
+	oldContent, err := os.ReadFile(policyPath)
+	if err != nil && !os.IsNotExist(err) {
+		return "", false, err
 	}
 
-	logging.Info("[GatewayManager] Policy file written: %s", policyPath)
-	return policyPath, nil
+	modified, err := writeIfChanged(policyPath, oldContent, []byte(content))
+	if err != nil {
+		return "", false, err
+	}
+
+	logging.Info("[GatewayManager] Policy file ready: %s (modified=%v)", policyPath, modified)
+	return policyPath, modified, nil
 }
 
 func injectSandboxIntoPlist(plistPath string, policyPath string) (bool, error) {
