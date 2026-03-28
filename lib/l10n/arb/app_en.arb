@@ -771,6 +771,8 @@
   "auditLogToolArguments": "Arguments",
   "auditLogToolResult": "Result",
   "auditLogSensitive": "SENSITIVE",
+  "auditLogExport": "Export",
+  "auditLogExportFailed": "Export failed",
   "auditLogPageInfo": "Page {current} of {total}",
   "@auditLogPageInfo": {
     "placeholders": {

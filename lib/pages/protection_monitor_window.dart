@@ -14,7 +14,7 @@ import '../l10n/app_localizations.dart';
 import '../models/protection_analysis_model.dart';
 import '../models/llm_config_model.dart';
 import '../models/protection_config_model.dart';
-import '../models/request_log_group_model.dart';
+import '../models/truth_record_model.dart';
 import '../models/security_event_model.dart';
 import '../services/protection_service.dart';
 import '../services/database_service.dart';
@@ -66,6 +66,8 @@ class _ProtectionMonitorWindowAppState
       StreamController<Map<String, dynamic>>.broadcast();
   final StreamController<List<SecurityEvent>> _relaySecurityEventController =
       StreamController<List<SecurityEvent>>.broadcast();
+  final StreamController<TruthRecordModel> _relayTruthRecordController =
+      StreamController<TruthRecordModel>.broadcast();
 
   Stream<List<String>> get relayedLogBatches => _relayLogController.stream;
   Stream<ProtectionAnalysisResult> get relayedResultStream =>
@@ -74,12 +76,15 @@ class _ProtectionMonitorWindowAppState
       _relayStatsController.stream;
   Stream<List<SecurityEvent>> get relayedSecurityEventStream =>
       _relaySecurityEventController.stream;
+  Stream<TruthRecordModel> get relayedTruthRecordStream =>
+      _relayTruthRecordController.stream;
 
   @override
   void initState() {
     super.initState();
-    _protectionService = ProtectionService.scoped(
-      'monitor_window::${widget.windowId}',
+    _protectionService = ProtectionService.forAsset(
+      widget.assetName,
+      widget.assetID,
     );
     _locale = widget.locale;
     _showWindowAfterFirstFrame();
@@ -164,6 +169,21 @@ class _ProtectionMonitorWindowAppState
               _relaySecurityEventController.add(events);
             }
           } catch (_) {}
+        } else if (call.method == 'relayTruthRecords') {
+          try {
+            final args = call.arguments;
+            final List<dynamic> list = args is String
+                ? jsonDecode(args) as List<dynamic>
+                : args as List<dynamic>;
+            for (final item in list) {
+              final record = TruthRecordModel.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              );
+              if (!_relayTruthRecordController.isClosed) {
+                _relayTruthRecordController.add(record);
+              }
+            }
+          } catch (_) {}
         }
         return null;
       });
@@ -176,6 +196,7 @@ class _ProtectionMonitorWindowAppState
     _relayResultController.close();
     _relayStatsController.close();
     _relaySecurityEventController.close();
+    _relayTruthRecordController.close();
     super.dispose();
   }
 
@@ -234,6 +255,9 @@ class _ProtectionMonitorWindowAppState
         relayedSecurityEventStream: Platform.isLinux
             ? relayedSecurityEventStream
             : null,
+        relayedTruthRecordStream: Platform.isLinux
+            ? relayedTruthRecordStream
+            : null,
       ),
     );
   }
@@ -249,6 +273,7 @@ class ProtectionMonitorPage extends StatefulWidget {
   final Stream<ProtectionAnalysisResult>? relayedResultStream;
   final Stream<Map<String, dynamic>>? relayedStatsStream;
   final Stream<List<SecurityEvent>>? relayedSecurityEventStream;
+  final Stream<TruthRecordModel>? relayedTruthRecordStream;
 
   const ProtectionMonitorPage({
     super.key,
@@ -259,6 +284,7 @@ class ProtectionMonitorPage extends StatefulWidget {
     this.relayedResultStream,
     this.relayedStatsStream,
     this.relayedSecurityEventStream,
+    this.relayedTruthRecordStream,
   });
 
   @override
@@ -274,7 +300,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
   final ScrollController _logScrollController = ScrollController();
   final ScrollController _horizontalScrollController = ScrollController();
   bool _useGroupedView = true;
-  final Map<String, RequestLogGroup> _requestGroups = {};
+  final Map<String, TruthRecordModel> _requestGroups = {};
   final List<String> _requestOrder = [];
 
   // 原始视图自动滚动状态
@@ -294,6 +320,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
   // Proxy info
   int? _proxyPort;
   String? _providerName;
+  String _currentBotModelName = '';
 
   // Statistics
   int _messageCount = 0;
@@ -330,6 +357,9 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
   DateTime? _lastMetricsReceivedAt;
   DateTime? _lastResultReceivedAt;
   bool _resumeReconnectInProgress = false;
+  DateTime? _lastBridgeReconnectTime;
+  Timer? _truthRecordCatchUpTimer;
+  Timer? _securityEventCatchUpTimer;
 
   // 防护配置
   ProtectionConfig? _protectionConfig;
@@ -341,6 +371,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
   StreamSubscription<ProtectionAnalysisResult>? _resultSubscription;
   StreamSubscription<dynamic>? _metricsSubscription;
   StreamSubscription<List<SecurityEvent>>? _securityEventSubscription;
+  StreamSubscription<TruthRecordModel>? _truthRecordSubscription;
   bool _isRelayMode = false;
 
   // 安全事件
@@ -354,7 +385,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
   @override
   int get maxLogCount => _maxLogCount;
   @override
-  Map<String, RequestLogGroup> get requestGroups => _requestGroups;
+  Map<String, TruthRecordModel> get requestGroups => _requestGroups;
   @override
   List<String> get requestOrder => _requestOrder;
   @override
@@ -401,8 +432,9 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
   @override
   void initState() {
     super.initState();
-    _protectionService = ProtectionService.scoped(
-      'monitor_window::${widget.windowId}',
+    _protectionService = ProtectionService.forAsset(
+      widget.assetName,
+      widget.assetID,
     );
     try {
       windowManager.addListener(this);
@@ -495,15 +527,21 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
     } catch (_) {}
   }
 
+  /// 窗口恢复焦点时尝试重连回调桥。
+  /// 仅在桥实际断开且冷却期（30秒）已过时才执行，避免频繁拆桥导致快照丢失。
   Future<void> _reconnectBridgeOnResume() async {
     if (_resumeReconnectInProgress) return;
+    if (_protectionService.useCallbackBridge) return;
+    final now = DateTime.now();
+    if (_lastBridgeReconnectTime != null &&
+        now.difference(_lastBridgeReconnectTime!).inSeconds < 30) {
+      return;
+    }
     _resumeReconnectInProgress = true;
+    _lastBridgeReconnectTime = now;
     try {
       if (!_protectionService.isProxyRunning) {
         return;
-      }
-      if (kDebugMode) {
-        debugPrint('[Monitor] resume reconnect: switching to polling');
       }
       _protectionService.disableCallbackBridge();
       final enabled = await _protectionService.enableCallbackBridge();
@@ -519,6 +557,71 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
     }
   }
 
+  /// 启动 TruthRecord catch-up 定时器，每 3 秒非破坏性地从 Go RecordStore 拉取全量快照。
+  /// 用于弥补回调桥偶发丢失快照的情况（如桥重建间隙）。
+  void _startTruthRecordCatchUp() {
+    _truthRecordCatchUpTimer?.cancel();
+    _truthRecordCatchUpTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _runTruthRecordCatchUp(),
+    );
+  }
+
+  void _runTruthRecordCatchUp() {
+    if (!mounted || !_protectionService.isProxyRunning) return;
+    try {
+      final snapshots = _protectionService.fetchAllTruthRecordSnapshots();
+      if (snapshots.isEmpty) return;
+      int updated = 0;
+      for (final record in snapshots) {
+        final existing = requestGroups[record.requestId];
+        if (existing == null ||
+            record.updatedAt.compareTo(existing.updatedAt) > 0) {
+          processProtectionRecord(record);
+          updated++;
+        }
+      }
+      if (updated > 0) {
+        appLogger.info(
+          '[TruthRecord] catch_up fetched=${snapshots.length} updated=$updated',
+        );
+      }
+    } catch (e) {
+      appLogger.error('[TruthRecord] catch_up error', e);
+    }
+  }
+
+  /// 启动安全事件 catch-up 定时器，每 5 秒从数据库增量拉取新事件。
+  /// 用于弥补回调桥或 FFI 轮询偶发丢失事件的情况。
+  void _startSecurityEventCatchUp() {
+    _securityEventCatchUpTimer?.cancel();
+    _securityEventCatchUpTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _runSecurityEventCatchUp(),
+    );
+  }
+
+  void _runSecurityEventCatchUp() {
+    if (!mounted) return;
+    _protectionService
+        .getSecurityEvents(limit: 200)
+        .then((dbEvents) {
+          if (!mounted || dbEvents.isEmpty) return;
+          final currentIds = _securityEvents.map((e) => e.id).toSet();
+          final newEvents =
+              dbEvents.where((e) => !currentIds.contains(e.id)).toList();
+          if (newEvents.isEmpty) return;
+          setState(() {
+            _securityEvents
+              ..clear()
+              ..addAll(dbEvents);
+          });
+        })
+        .catchError((e) {
+          appLogger.error('[Monitor] Security event catch-up error', e);
+        });
+  }
+
   // ============ 初始化和准备 ============
 
   Future<void> _prepareForInitialization() async {
@@ -526,10 +629,16 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
     _resultSubscription?.cancel();
     _metricsSubscription?.cancel();
     _securityEventSubscription?.cancel();
+    _truthRecordSubscription?.cancel();
+    _truthRecordCatchUpTimer?.cancel();
+    _securityEventCatchUpTimer?.cancel();
     _logSubscription = null;
     _resultSubscription = null;
     _metricsSubscription = null;
     _securityEventSubscription = null;
+    _truthRecordSubscription = null;
+    _truthRecordCatchUpTimer = null;
+    _securityEventCatchUpTimer = null;
 
     logUpdateTimer?.cancel();
     resultUpdateTimer?.cancel();
@@ -549,25 +658,11 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
     _lastResultReceivedAt = null;
     _lastResultReceivedAt = null;
 
-    if (_isProtectionActive) {
-      try {
-        await _protectionService.stopProtectionProxy();
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('[Protection Monitor] Stop proxy failed: $e');
-        }
-      }
-      _isProtectionActive = false;
-      _proxyPort = null;
-      _providerName = null;
-      try {
-        await ProtectionDatabaseService().clearProtectionState();
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('[Protection Monitor] Clear protection state failed: $e');
-        }
-      }
-    }
+    // 仅重置窗口本地 UI 状态,不停止共享的 proxy 实例
+    // (proxy 生命周期由 main_page 或窗口内显式操作管理)
+    _isProtectionActive = false;
+    _proxyPort = null;
+    _providerName = null;
   }
 
   /// 带节流的 API 统计更新
@@ -705,6 +800,9 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
                 _lastLogReceivedAt,
               );
               processStructuredLog(log);
+              if (shouldHideFromRawView(log)) {
+                return;
+              }
               final translatedLog = l10n != null
                   ? translateLog(log, l10n)
                   : log;
@@ -786,6 +884,15 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
           }
         });
 
+        if (widget.relayedTruthRecordStream != null) {
+          _truthRecordSubscription = widget.relayedTruthRecordStream!.listen((
+            record,
+          ) {
+            if (!mounted) return;
+            processProtectionRecord(record);
+          });
+        }
+
         if (widget.relayedSecurityEventStream != null) {
           _securityEventSubscription = widget.relayedSecurityEventStream!
               .listen((events) {
@@ -810,6 +917,9 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
             _lastLogReceivedAt,
           );
           processStructuredLog(log);
+          if (shouldHideFromRawView(log)) {
+            return;
+          }
           final translatedLog = l10n != null ? translateLog(log, l10n) : log;
           final entry = LogEntry(
             '[${_formatTime(DateTime.now())}] $translatedLog',
@@ -847,6 +957,13 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
             _updateApiMetrics();
           }
         });
+        _truthRecordSubscription = _protectionService.truthRecordStream.listen((
+          record,
+        ) {
+          if (!mounted) return;
+          processProtectionRecord(record);
+        });
+        _startTruthRecordCatchUp();
       }
 
       // 订阅安全事件流（非中继模式）
@@ -858,6 +975,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
                 _securityEvents.insertAll(0, events);
               });
             });
+        _startSecurityEventCatchUp();
       }
 
       if (mounted) {
@@ -974,6 +1092,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
         widget.assetName,
         widget.assetID,
       );
+      await _loadCurrentBotModelName();
       if (_protectionConfig != null) {
         _auditOnly = _protectionConfig!.auditOnly;
         _protectionService.setAssetName(
@@ -994,6 +1113,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
         widget.assetName,
         widget.assetID,
       );
+      await _loadCurrentBotModelName();
       if (newConfig != null) {
         final auditOnlyChanged = newConfig.auditOnly != _auditOnly;
         _protectionConfig = newConfig;
@@ -1010,6 +1130,28 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
           '[Protection Monitor] Failed to reload protection config: $e',
         );
       }
+    }
+  }
+
+  Future<void> _loadCurrentBotModelName() async {
+    try {
+      final assetID = widget.assetID.isNotEmpty
+          ? widget.assetID
+          : (_protectionConfig?.assetID ?? '');
+      final config = await ModelConfigDatabaseService().getBotModelConfig(
+        widget.assetName,
+        assetID,
+      );
+      final modelName = config?.model.trim() ?? '';
+      if (!mounted || modelName == _currentBotModelName) return;
+      setState(() {
+        _currentBotModelName = modelName;
+      });
+    } catch (e) {
+      appLogger.error(
+        '[Protection Monitor] Failed to load bot model config',
+        e,
+      );
     }
   }
 
@@ -1086,6 +1228,9 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
     _resultSubscription?.cancel();
     _metricsSubscription?.cancel();
     _securityEventSubscription?.cancel();
+    _truthRecordSubscription?.cancel();
+    _truthRecordCatchUpTimer?.cancel();
+    _securityEventCatchUpTimer?.cancel();
     logUpdateTimer?.cancel();
     resultUpdateTimer?.cancel();
     _logScrollController.dispose();
@@ -1094,24 +1239,8 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
       windowManager.removeListener(this);
     } catch (_) {}
 
-    if (_isProtectionActive) {
-      _protectionService.stopProtectionProxy().then((_) async {
-        try {
-          await ProtectionDatabaseService().clearProtectionState();
-          await ProtectionDatabaseService().setProtectionEnabled(
-            widget.assetName,
-            false,
-            widget.assetID.isNotEmpty
-                ? widget.assetID
-                : (_protectionConfig?.assetID ?? ''),
-          );
-        } catch (e) {
-          appLogger.error('[Monitor] Failed to clear protection state', e);
-        }
-      });
-    }
-
-    _protectionService.dispose();
+    // 关闭监控窗口不停止代理 — 代理生命周期由主窗口管理（启动时自动恢复、退出时统一清理）
+    _protectionService.dispose(removeInstance: false);
     super.dispose();
   }
 
@@ -1245,9 +1374,15 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
                                   useGroupedView: _useGroupedView,
                                   requestGroups: _requestGroups,
                                   requestOrder: _requestOrder,
+                                  currentBotModelName: _currentBotModelName,
                                   logScrollController: _logScrollController,
                                   horizontalScrollController:
                                       _horizontalScrollController,
+                                  defaultModelName:
+                                      _protectionConfig
+                                          ?.botModelConfig
+                                          ?.model ??
+                                      '',
                                   onViewModeChanged: (grouped) {
                                     setState(() => _useGroupedView = grouped);
                                   },

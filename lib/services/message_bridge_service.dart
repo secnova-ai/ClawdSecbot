@@ -29,7 +29,14 @@ typedef FreeStringC = ffi.Void Function(ffi.Pointer<Utf8>);
 typedef FreeStringDart = void Function(ffi.Pointer<Utf8>);
 
 /// 消息类型
-enum BridgeMessageType { log, metrics, status, versionUpdate, securityEvent }
+enum BridgeMessageType {
+  log,
+  metrics,
+  status,
+  versionUpdate,
+  securityEvent,
+  truthRecord,
+}
 
 /// 桥接消息结构
 class BridgeMessage {
@@ -69,6 +76,8 @@ class BridgeMessage {
         return BridgeMessageType.versionUpdate;
       case 'security_event':
         return BridgeMessageType.securityEvent;
+      case 'truth_record':
+        return BridgeMessageType.truthRecord;
       default:
         return BridgeMessageType.log;
     }
@@ -123,6 +132,11 @@ class MessageBridgeService {
   /// 安全事件流（过滤安全事件消息）
   Stream<Map<String, dynamic>> get securityEventStream => messageStream
       .where((msg) => msg.type == BridgeMessageType.securityEvent)
+      .map((msg) => msg.payload);
+
+  /// TruthRecord 快照流（分组卡片事实来源）
+  Stream<Map<String, dynamic>> get truthRecordStream => messageStream
+      .where((msg) => msg.type == BridgeMessageType.truthRecord)
       .map((msg) => msg.payload);
 
   /// 错误流

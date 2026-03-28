@@ -309,7 +309,7 @@ func hasAnySkill(root string) bool {
 // ==================== Core analysis flow ====================
 
 // Analyze performs risk analysis on tool_calls and their execution results.
-func (a *ToolCallReActAnalyzer) Analyze(ctx context.Context, contextMessages []ConversationMessage, toolCalls []ToolCallInfo, toolResults []ToolResultInfo, rules *UserRules, lastUserMessage string) (*ReactRiskDecision, error) {
+func (a *ToolCallReActAnalyzer) Analyze(ctx context.Context, contextMessages []ConversationMessage, toolCalls []ToolCallInfo, toolResults []ToolResultInfo, rules *UserRules, lastUserMessage string, requestID ...string) (*ReactRiskDecision, error) {
 	if len(toolCalls) == 0 && len(toolResults) == 0 {
 		return &ReactRiskDecision{
 			Allowed:    true,
@@ -317,6 +317,11 @@ func (a *ToolCallReActAnalyzer) Analyze(ctx context.Context, contextMessages []C
 			RiskLevel:  "low",
 			Confidence: 100,
 		}, nil
+	}
+
+	reqID := ""
+	if len(requestID) > 0 {
+		reqID = requestID[0]
 	}
 
 	session := a.sessions.Create(contextMessages, toolCalls, toolResults, lastUserMessage)
@@ -343,6 +348,7 @@ func (a *ToolCallReActAnalyzer) Analyze(ctx context.Context, contextMessages []C
 			Source:     "heuristic",
 			AssetName:  a.assetName,
 			AssetID:    a.assetID,
+			RequestID:  reqID,
 		})
 
 		return heuristic, nil
@@ -368,7 +374,7 @@ func (a *ToolCallReActAnalyzer) Analyze(ctx context.Context, contextMessages []C
 		NewGuardSearchContextTool(a.sessions),
 		NewGuardRecentMessagesTool(a.sessions),
 		NewGuardRecentToolCallsTool(a.sessions),
-		NewRecordSecurityEventTool(assetName, assetID),
+		NewRecordSecurityEventTool(assetName, assetID, reqID),
 		newScanSkillSecurityTool(modelConfig),
 	}
 

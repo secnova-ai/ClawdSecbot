@@ -1298,6 +1298,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get auditLogSensitive => '敏感';
 
   @override
+  String get auditLogExport => '导出';
+
+  @override
+  String get auditLogExportFailed => '导出失败';
+
+  @override
   String auditLogPageInfo(int current, int total) {
     return '第 $current 页，共 $total 页';
   }

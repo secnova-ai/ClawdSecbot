@@ -42,11 +42,11 @@ type Logger struct {
 
 var (
 	defaultLogger      *Logger
-	historyLogger     *Logger
+	historyLogger      *Logger
 	shepherdGateLogger *Logger
-	loggerMu          sync.RWMutex
-	historyMu         sync.RWMutex
-	shepherdGateMu    sync.RWMutex
+	loggerMu           sync.RWMutex
+	historyMu          sync.RWMutex
+	shepherdGateMu     sync.RWMutex
 )
 
 // InitLogger initializes the global logger with the given log directory

@@ -46,6 +46,8 @@ class AuditLogDatabaseService {
         'completion_tokens': log.completionTokens ?? 0,
         'total_tokens': log.totalTokens ?? 0,
         'duration_ms': log.durationMs,
+        'messages': jsonEncode(log.messages.map((m) => m.toJson()).toList()),
+        'message_count': log.messageCount,
       }),
     );
 
@@ -81,6 +83,10 @@ class AuditLogDatabaseService {
             'completion_tokens': log.completionTokens ?? 0,
             'total_tokens': log.totalTokens ?? 0,
             'duration_ms': log.durationMs,
+            'messages': jsonEncode(
+              log.messages.map((m) => m.toJson()).toList(),
+            ),
+            'message_count': log.messageCount,
           },
         )
         .toList();
@@ -140,6 +146,18 @@ class AuditLogDatabaseService {
         }
       }
 
+      List<AuditMessage> messages = [];
+      final messagesStr = row['messages'] as String?;
+      if (messagesStr != null && messagesStr.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(messagesStr) as List<dynamic>;
+          messages = decoded
+              .whereType<Map>()
+              .map((e) => AuditMessage.fromJson(Map<String, dynamic>.from(e)))
+              .toList();
+        } catch (_) {}
+      }
+
       return AuditLog(
         id: row['id'] as String? ?? '',
         timestamp: DateTime.parse(row['timestamp'] as String),
@@ -159,6 +177,8 @@ class AuditLogDatabaseService {
         completionTokens: row['completion_tokens'] as int?,
         totalTokens: row['total_tokens'] as int?,
         durationMs: row['duration_ms'] as int? ?? 0,
+        messages: messages,
+        messageCount: row['message_count'] as int? ?? 0,
       );
     }).toList();
   }

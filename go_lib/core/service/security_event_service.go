@@ -83,3 +83,14 @@ func ClearSecurityEvents(filterJSON string) map[string]interface{} {
 func ClearAllSecurityEvents() map[string]interface{} {
 	return ClearSecurityEvents(`{}`)
 }
+
+// GetSecurityEventsByRequestID 按 request_id 查询关联的安全事件
+func GetSecurityEventsByRequestID(requestID string) map[string]interface{} {
+	repo := repository.NewSecurityEventRepository(nil)
+	events, err := repo.GetSecurityEventsByRequestID(requestID)
+	if err != nil {
+		logging.Error("Failed to get security events by request_id: %v", err)
+		return errorResult(err)
+	}
+	return successDataResult(events)
+}

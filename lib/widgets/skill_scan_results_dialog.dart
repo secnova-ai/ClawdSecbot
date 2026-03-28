@@ -121,7 +121,7 @@ class _SkillScanResultsDialogState extends State<SkillScanResultsDialog> {
 
     return ListView.separated(
       itemCount: records.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) =>
           _buildSkillCard(records[index], index, l10n),
     );

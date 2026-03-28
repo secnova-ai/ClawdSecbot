@@ -1,15 +1,20 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import '../utils/app_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
 import '../l10n/app_localizations.dart';
 import '../models/audit_log_model.dart';
+import '../models/security_event_model.dart';
 import '../services/audit_log_database_service.dart';
+import '../services/security_event_database_service.dart';
 import '../services/protection_service.dart';
+import '../utils/audit_log_export_helper.dart';
 import '../utils/window_animation_helper.dart';
 import '../widgets/hide_window_shortcut.dart';
 
@@ -118,6 +123,8 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
   final ProtectionService _agentService = ProtectionService();
   final AuditLogDatabaseService _auditLogDatabaseService =
       AuditLogDatabaseService();
+  final SecurityEventDatabaseService _securityEventDatabaseService =
+      SecurityEventDatabaseService();
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
@@ -129,6 +136,7 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
   final int _pageSize = 50;
   Timer? _refreshTimer;
   AuditLog? _selectedLog;
+  List<SecurityEvent> _relatedEvents = [];
   Map<String, dynamic> _statistics = {};
   bool _isMaximized = false;
   List<_AuditAssetFilterTab> _assetTabs = const [
@@ -393,6 +401,23 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
         ],
       ),
     );
+  }
+
+  /// 选中一条审计日志，同时按 request_id 加载关联安全事件
+  void _selectLog(AuditLog? log) {
+    setState(() {
+      _selectedLog = log;
+      _relatedEvents = [];
+    });
+    if (log != null && log.requestId.isNotEmpty) {
+      _securityEventDatabaseService
+          .getSecurityEventsByRequestID(log.requestId)
+          .then((events) {
+        if (mounted && _selectedLog?.requestId == log.requestId) {
+          setState(() => _relatedEvents = events);
+        }
+      });
+    }
   }
 
   void _copyText(String text) {
@@ -774,7 +799,7 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
         final isSelected = _selectedLog?.id == log.id;
 
         return GestureDetector(
-          onTap: () => setState(() => _selectedLog = log),
+          onTap: () => _selectLog(log),
           child: Container(
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.all(12),
@@ -914,12 +939,92 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
     );
   }
 
+  String _buildRawSectionText(AuditLog log) {
+    if (log.messages.isEmpty) return log.requestContent;
+    return _buildRawMessagesWithToolFallback(log).map((item) {
+      return '[${item.roleLabel}]\n${item.content}';
+    }).join('\n\n');
+  }
+
+  String _buildActionSectionText(AuditLog log) => log.toolCalls.map((tc) =>
+      'Tool: ${tc.name}${tc.isSensitive ? " [SENSITIVE]" : ""}${tc.arguments.isNotEmpty ? "\nArguments: ${tc.arguments}" : ""}',
+  ).join('\n\n');
+
+  String _buildEventSectionText(List<SecurityEvent> events) => events.map((e) {
+    final parts = ['[${e.eventType}] ${e.actionDesc}'];
+    if (e.riskType.isNotEmpty) parts.add('Risk: ${e.riskType}');
+    if (e.detail.isNotEmpty) parts.add('Detail: ${e.detail}');
+    parts.add('Source: ${e.source}  Time: ${e.timestamp.toIso8601String()}');
+    return parts.join('\n');
+  }).join('\n\n');
+
+  Future<void> _exportLogDetail() async {
+    final log = _selectedLog;
+    if (log == null) return;
+    final l10n = AppLocalizations.of(context);
+    try {
+      final savePath = await FilePicker.platform.saveFile(
+        dialogTitle: _isZh ? '选择导出位置' : 'Choose export location',
+        fileName:
+            'audit_log_${log.id}_${DateTime.now().millisecondsSinceEpoch}.md',
+        type: FileType.custom,
+        allowedExtensions: const ['md'],
+      );
+      if (savePath == null || savePath.trim().isEmpty) return;
+
+      final markdownContent = buildAuditLogMarkdownContent(
+        isZh: _isZh,
+        log: log,
+        relatedEvents: _relatedEvents,
+        rawText: _buildRawSectionText(log),
+        actionText: _buildActionSectionText(log),
+        eventText: _buildEventSectionText(_relatedEvents),
+      );
+      final file = File(savePath);
+      await file.writeAsString(markdownContent, encoding: utf8);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(_isZh ? '已导出到 ${file.path}' : 'Exported to ${file.path}'),
+        duration: const Duration(seconds: 4),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(l10n?.auditLogExportFailed ?? 'Export failed: $e'),
+        duration: const Duration(seconds: 3),
+      ));
+    }
+  }
+
+  List<_RawMessageItem> _buildRawMessagesWithToolFallback(AuditLog log) {
+    int toolIndex = 0;
+    return log.messages.map((msg) {
+      final roleLabel = msg.role.isNotEmpty
+          ? '${msg.role[0].toUpperCase()}${msg.role.substring(1)}'
+          : 'Unknown';
+      var content = msg.content.trim();
+      if (msg.role.toLowerCase() == 'assistant' && content.isEmpty) {
+        if (toolIndex < log.toolCalls.length) {
+          final tc = log.toolCalls[toolIndex];
+          final args = tc.arguments.trim().isNotEmpty ? tc.arguments : '{}';
+          content = _isZh
+              ? '请求工具: ${tc.name}\n参数:\n$args'
+              : 'Tool request: ${tc.name}\nArguments:\n$args';
+        } else {
+          content = _isZh ? '(空内容)' : '(empty content)';
+        }
+        toolIndex++;
+      }
+      return _RawMessageItem(roleLabel: roleLabel, content: content);
+    }).toList();
+  }
+
   Widget _buildLogDetail() {
     final l10n = AppLocalizations.of(context);
     final log = _selectedLog!;
 
     return Container(
-      margin: const EdgeInsets.all(12),
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(12),
@@ -928,7 +1033,6 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -947,15 +1051,22 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
                   ),
                 ),
                 const Spacer(),
+                Tooltip(
+                  message: l10n?.auditLogExport ?? 'Export',
+                  child: IconButton(
+                    icon: const Icon(LucideIcons.download, size: 16),
+                    color: Colors.white54,
+                    onPressed: _exportLogDetail,
+                  ),
+                ),
                 IconButton(
                   icon: const Icon(LucideIcons.x, size: 16),
                   color: Colors.white54,
-                  onPressed: () => setState(() => _selectedLog = null),
+                  onPressed: () => _selectLog(null),
                 ),
               ],
             ),
           ),
-          // Content
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
@@ -996,56 +1107,101 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
                       l10n?.auditLogTokens ?? 'Tokens',
                       '${log.totalTokens}',
                     ),
+
                   const SizedBox(height: 16),
                   _buildSectionTitleWithCopy(
-                    l10n?.auditLogRequestContent ?? 'User Request',
-                    log.requestContent,
+                    _isZh
+                        ? '原始${log.messages.isNotEmpty ? " (${log.messages.length})" : ""}'
+                        : 'Raw${log.messages.isNotEmpty ? " (${log.messages.length})" : ""}',
+                    _buildRawSectionText(log),
                   ),
-                  _buildCodeBlock(log.requestContent),
+                  if (log.messages.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    ..._buildRawMessagesWithToolFallback(log).map((item) {
+                      return _buildConversationMessage(
+                        item.roleLabel,
+                        item.content,
+                      );
+                    }),
+                  ] else ...[
+                    _buildCodeBlock(log.requestContent),
+                  ],
+
                   if (log.toolCalls.isNotEmpty) ...[
                     const SizedBox(height: 16),
-                    _buildSectionTitle(
-                      '${l10n?.auditLogToolCalls ?? "Tool Calls"} (${log.toolCalls.length})',
+                    _buildSectionTitleWithCopy(
+                      _isZh
+                          ? '动作 (${log.toolCalls.length})'
+                          : 'Actions (${log.toolCalls.length})',
+                      _buildActionSectionText(log),
                     ),
                     ...log.toolCalls.map((tc) => _buildToolCallItem(tc)),
                   ],
-                  if (log.outputContent != null &&
-                      log.outputContent!.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    _buildSectionTitleWithCopy(
-                      l10n?.auditLogOutputContent ?? 'Final Response',
-                      log.outputContent!,
+
+                  const SizedBox(height: 16),
+                  _buildSectionTitleWithCopy(
+                    _isZh
+                        ? '事件${_relatedEvents.isNotEmpty ? " (${_relatedEvents.length})" : ""}'
+                        : 'Events${_relatedEvents.isNotEmpty ? " (${_relatedEvents.length})" : ""}',
+                    _relatedEvents.isNotEmpty
+                        ? _buildEventSectionText(_relatedEvents)
+                        : '',
+                  ),
+                  if (_relatedEvents.isNotEmpty)
+                    ..._relatedEvents.map((evt) => _buildSecurityEventCard(evt))
+                  else
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        _isZh ? '暂无关联安全事件' : 'No related security events',
+                        style: AppFonts.inter(fontSize: 12, color: Colors.white38),
+                      ),
                     ),
-                    _buildCodeBlock(log.outputContent!),
-                  ],
-                  if (log.toolCalls.any(
-                    (tc) => tc.result != null && tc.result!.isNotEmpty,
-                  )) ...[
-                    const SizedBox(height: 16),
-                    ...log.toolCalls
-                        .where(
-                          (tc) => tc.result != null && tc.result!.isNotEmpty,
-                        )
-                        .map((tc) {
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildSectionTitleWithCopy(
-                                'Tool Output (${tc.name})',
-                                tc.result!,
-                              ),
-                              _buildCodeBlock(tc.result!),
-                              const SizedBox(height: 16),
-                            ],
-                          );
-                        }),
-                  ],
                 ],
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  /// 构建单个安全事件卡片
+  Widget _buildSecurityEventCard(SecurityEvent evt) {
+    final blocked = evt.isBlocked;
+    final accent = blocked ? Colors.red : Colors.amber;
+    final typeLabel = switch (evt.eventType) { 'blocked' => 'BLOCKED', 'tool_execution' => 'TOOL', _ => evt.eventType.toUpperCase() };
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: blocked ? 0.1 : 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: accent.withValues(alpha: 0.3)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(blocked ? LucideIcons.shieldAlert : LucideIcons.alertTriangle, size: 14, color: accent),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(color: accent.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(4)),
+            child: Text(typeLabel, style: AppFonts.firaCode(fontSize: 9, fontWeight: FontWeight.w600, color: accent)),
+          ),
+          if (evt.riskType.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Flexible(child: Text(evt.riskType, style: AppFonts.firaCode(fontSize: 10, color: Colors.white54), overflow: TextOverflow.ellipsis)),
+          ],
+          const Spacer(),
+          Text(evt.source, style: AppFonts.firaCode(fontSize: 9, color: Colors.white38)),
+        ]),
+        const SizedBox(height: 6),
+        SelectableText(evt.actionDesc, style: AppFonts.inter(fontSize: 11, color: Colors.white70)),
+        if (evt.detail.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          SelectableText(evt.detail, style: AppFonts.firaCode(fontSize: 10, color: Colors.white38)),
+        ],
+      ]),
     );
   }
 
@@ -1087,20 +1243,6 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
     );
   }
 
-  Widget _buildSectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        title,
-        style: AppFonts.inter(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: const Color(0xFF6366F1),
-        ),
-      ),
-    );
-  }
-
   Widget _buildSectionTitleWithCopy(String title, String copyText) {
     final l10n = AppLocalizations.of(context);
     return Padding(
@@ -1138,6 +1280,54 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
       child: SelectableText(
         content,
         style: AppFonts.firaCode(fontSize: 11, color: Colors.white70),
+      ),
+    );
+  }
+
+  bool get _isZh =>
+      (AppLocalizations.of(context)?.localeName ?? '').startsWith('zh');
+
+  /// 构建单条对话消息展示（审计详情中的完整对话区）
+  Widget _buildConversationMessage(String roleLabel, String content) {
+    final Color roleColor;
+    switch (roleLabel.toLowerCase()) {
+      case 'user':
+        roleColor = const Color(0xFF22C55E);
+        break;
+      case 'assistant':
+        roleColor = const Color(0xFF6366F1);
+        break;
+      case 'tool':
+        roleColor = const Color(0xFFEC4899);
+        break;
+      default:
+        roleColor = Colors.white70;
+    }
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: roleColor.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            roleLabel,
+            style: AppFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: roleColor,
+            ),
+          ),
+          const SizedBox(height: 4),
+          SelectableText(
+            content,
+            style: AppFonts.firaCode(fontSize: 11, color: Colors.white70),
+          ),
+        ],
       ),
     );
   }
@@ -1300,4 +1490,11 @@ class _AuditAssetFilterTab {
     required this.assetName,
     required this.assetID,
   });
+}
+
+class _RawMessageItem {
+  final String roleLabel;
+  final String content;
+
+  const _RawMessageItem({required this.roleLabel, required this.content});
 }

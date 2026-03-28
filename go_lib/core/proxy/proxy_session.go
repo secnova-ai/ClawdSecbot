@@ -668,6 +668,7 @@ func GetProtectionProxyLogsInternal(sessionID string) string {
 	logs := session.getAndClearLogs()
 	result := collectProxyStatistics(session.Proxy)
 	result["logs"] = logs
+	result["request_views"] = session.Proxy.GetPendingTruthRecords()
 	return toJSONString(result)
 }
 
@@ -690,6 +691,7 @@ func WaitForProtectionLogsInternal(sessionID string, timeoutMs int) string {
 
 		result := collectProxyStatistics(session.Proxy)
 		result["logs"] = logs
+		result["request_views"] = session.Proxy.GetPendingTruthRecords()
 		result["timeout"] = false
 		return toJSONString(result)
 	}
@@ -719,6 +721,7 @@ func WaitForProtectionLogsInternal(sessionID string, timeoutMs int) string {
 
 	result := collectProxyStatistics(session.Proxy)
 	result["logs"] = logs
+	result["request_views"] = session.Proxy.GetPendingTruthRecords()
 	result["timeout"] = timedOut
 	return toJSONString(result)
 }

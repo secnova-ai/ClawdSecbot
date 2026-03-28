@@ -396,8 +396,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                     );
                     if (success) {
                       try {
-                        final protectionService = ProtectionService();
-                        protectionService.setAssetName(
+                        final protectionService = ProtectionService.forAsset(
                           widget.assetName,
                           _config.assetID,
                         );
@@ -596,8 +595,10 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
 
         // 3. 如果防护从禁用变为启用，启动代理
         if (!wasEnabled && shouldEnable) {
-          final protectionService = ProtectionService();
-          protectionService.setAssetName(widget.assetName, newConfig.assetID);
+          final protectionService = ProtectionService.forAsset(
+            widget.assetName,
+            newConfig.assetID,
+          );
           try {
             final result = await protectionService.startProtectionProxy(
               securityModelConfig,
@@ -619,8 +620,10 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           }
         } else {
           // 4. 推送审计模式和 Token 限额到运行中的代理
-          final protectionService = ProtectionService();
-          protectionService.setAssetName(widget.assetName, newConfig.assetID);
+          final protectionService = ProtectionService.forAsset(
+            widget.assetName,
+            newConfig.assetID,
+          );
           await protectionService.setAuditOnly(_auditOnly);
           await protectionService.pushTokenLimitsToProxy(
             assetName: widget.assetName,
@@ -643,7 +646,10 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
 
         // 5. Bot 模型变更后，触发完整重启（此时防护配置已保存到 DB，gateway 重启可读到最新配置）
         if (botModelSaved) {
-          final protectionService = ProtectionService();
+          final protectionService = ProtectionService.forAsset(
+            widget.assetName,
+            newConfig.assetID,
+          );
           if (protectionService.isProxyRunning) {
             try {
               final result = await protectionService
@@ -2016,165 +2022,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
         key: _botModelFormKey,
         assetName: widget.assetName,
         assetID: _config.assetID.isNotEmpty ? _config.assetID : widget.assetID,
-      ),
-    );
-  }
-
-  Widget _buildListEditSection({
-    required String title,
-    required String desc,
-    required IconData icon,
-    required List<String> items,
-    required TextEditingController inputController,
-    required String inputHint,
-    required VoidCallback onAdd,
-    required Function(int) onRemove,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: const Color(0xFF6366F1), size: 16),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: AppFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                    Text(
-                      desc,
-                      style: AppFonts.inter(
-                        fontSize: 11,
-                        color: Colors.white54,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // Input
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.1),
-                    ),
-                  ),
-                  child: TextField(
-                    controller: inputController,
-                    style: AppFonts.firaCode(fontSize: 12, color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: inputHint,
-                      hintStyle: AppFonts.inter(
-                        fontSize: 11,
-                        color: Colors.white38,
-                      ),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 10,
-                      ),
-                    ),
-                    onSubmitted: (_) => onAdd(),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: onAdd,
-                  child: Container(
-                    height: 36,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF6366F1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Icon(
-                      LucideIcons.plus,
-                      size: 16,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          // Items
-          if (items.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: items.asMap().entries.map((entry) {
-                return Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEF4444).withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(
-                      color: const Color(0xFFEF4444).withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          entry.value,
-                          style: AppFonts.firaCode(
-                            fontSize: 11,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: GestureDetector(
-                          onTap: () => onRemove(entry.key),
-                          child: const Icon(
-                            LucideIcons.x,
-                            size: 12,
-                            color: Colors.white54,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
-          ],
-        ],
       ),
     );
   }

@@ -243,7 +243,10 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
         _savedConfigSignature = _buildConfigSignature(config);
         // Bot 模型保存后，如果代理正在运行且未延迟重启，需要完整重启
         if (!deferProxyRestart) {
-          final protectionService = ProtectionService();
+          final protectionService = ProtectionService.forAsset(
+            widget.assetName,
+            widget.assetID,
+          );
           if (protectionService.isProxyRunning) {
             try {
               final securityModelConfig = await ModelConfigDatabaseService()

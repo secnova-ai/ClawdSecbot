@@ -192,6 +192,7 @@ mixin MainPageDataMixin on State<MainPage> {
     // 先检查是否存在初始备份
     final service = ProtectionService();
     final hasBackup = await service.hasInitialBackup();
+    if (!mounted) return;
 
     if (!hasBackup) {
       if (mounted) {
@@ -208,7 +209,7 @@ mixin MainPageDataMixin on State<MainPage> {
 
     final result = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
@@ -242,14 +243,14 @@ mixin MainPageDataMixin on State<MainPage> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.of(ctx).pop(false),
             child: Text(
               l10n.cancel,
               style: AppFonts.inter(color: Colors.white54),
             ),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () => Navigator.of(ctx).pop(true),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFEAB308),
               shape: RoundedRectangleBorder(
@@ -296,6 +297,7 @@ mixin MainPageDataMixin on State<MainPage> {
 
         // 关闭所有监控窗口
         await closeAllMonitorWindows();
+        if (!mounted) return;
 
         // 重置 UI 状态
         setState(() {

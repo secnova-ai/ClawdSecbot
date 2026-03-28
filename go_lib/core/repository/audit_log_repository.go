@@ -29,6 +29,8 @@ type AuditLog struct {
 	CompletionTokens int    `json:"completion_tokens,omitempty"`
 	TotalTokens      int    `json:"total_tokens,omitempty"`
 	DurationMs       int    `json:"duration_ms"`
+	Messages         string `json:"messages,omitempty"`      // JSON array of {index, role, content}
+	MessageCount     int    `json:"message_count,omitempty"` // total message count in request
 }
 
 // AuditLogFilter 审计日志查询过滤条件
@@ -84,12 +86,14 @@ func (r *AuditLogRepository) SaveAuditLog(log *AuditLog) error {
 		INSERT OR REPLACE INTO audit_logs 
 		(id, timestamp, request_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
 		 has_risk, risk_level, risk_reason, confidence, action,
-		 prompt_tokens, completion_tokens, total_tokens, duration_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 prompt_tokens, completion_tokens, total_tokens, duration_ms,
+		 messages, message_count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, log.ID, log.Timestamp, log.RequestID, strings.TrimSpace(log.AssetName), strings.TrimSpace(log.AssetID), log.Model,
 		log.RequestContent, log.ToolCalls, log.OutputContent,
 		hasRisk, log.RiskLevel, log.RiskReason, log.Confidence, log.Action,
-		log.PromptTokens, log.CompletionTokens, log.TotalTokens, log.DurationMs)
+		log.PromptTokens, log.CompletionTokens, log.TotalTokens, log.DurationMs,
+		log.Messages, log.MessageCount)
 	if err != nil {
 		return fmt.Errorf("failed to save audit log: %w", err)
 	}
@@ -116,8 +120,9 @@ func (r *AuditLogRepository) SaveAuditLogsBatch(logs []*AuditLog) error {
 		INSERT OR REPLACE INTO audit_logs 
 		(id, timestamp, request_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
 		 has_risk, risk_level, risk_reason, confidence, action,
-		 prompt_tokens, completion_tokens, total_tokens, duration_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 prompt_tokens, completion_tokens, total_tokens, duration_ms,
+		 messages, message_count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -132,7 +137,8 @@ func (r *AuditLogRepository) SaveAuditLogsBatch(logs []*AuditLog) error {
 		_, err := stmt.Exec(log.ID, log.Timestamp, log.RequestID, strings.TrimSpace(log.AssetName), strings.TrimSpace(log.AssetID), log.Model,
 			log.RequestContent, log.ToolCalls, log.OutputContent,
 			hasRisk, log.RiskLevel, log.RiskReason, log.Confidence, log.Action,
-			log.PromptTokens, log.CompletionTokens, log.TotalTokens, log.DurationMs)
+			log.PromptTokens, log.CompletionTokens, log.TotalTokens, log.DurationMs,
+			log.Messages, log.MessageCount)
 		if err != nil {
 			logging.Warning("Failed to save audit log %s: %v", log.ID, err)
 		}
@@ -195,7 +201,8 @@ func (r *AuditLogRepository) GetAuditLogs(filter *AuditLogFilter) ([]*AuditLog, 
 	query := fmt.Sprintf(`
 		SELECT id, timestamp, request_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
 			has_risk, risk_level, risk_reason, confidence, action,
-			prompt_tokens, completion_tokens, total_tokens, duration_ms
+			prompt_tokens, completion_tokens, total_tokens, duration_ms,
+			messages, message_count
 		FROM audit_logs %s ORDER BY timestamp DESC LIMIT ? OFFSET ?
 	`, whereClause)
 
@@ -416,11 +423,14 @@ func scanAuditLog(rows *sql.Rows) (*AuditLog, error) {
 	var model, requestContent, toolCalls, outputContent sql.NullString
 	var riskLevel, riskReason, action sql.NullString
 	var confidence, promptTokens, completionTokens, totalTokens sql.NullInt64
+	var messages sql.NullString
+	var messageCount sql.NullInt64
 
 	err := rows.Scan(&log.ID, &log.Timestamp, &log.RequestID, &assetName, &assetID,
 		&model, &requestContent, &toolCalls, &outputContent,
 		&hasRisk, &riskLevel, &riskReason, &confidence, &action,
-		&promptTokens, &completionTokens, &totalTokens, &log.DurationMs)
+		&promptTokens, &completionTokens, &totalTokens, &log.DurationMs,
+		&messages, &messageCount)
 	if err != nil {
 		return nil, err
 	}
@@ -449,6 +459,10 @@ func scanAuditLog(rows *sql.Rows) (*AuditLog, error) {
 	}
 	if totalTokens.Valid {
 		log.TotalTokens = int(totalTokens.Int64)
+	}
+	log.Messages = messages.String
+	if messageCount.Valid {
+		log.MessageCount = int(messageCount.Int64)
 	}
 
 	return &log, nil

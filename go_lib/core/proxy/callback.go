@@ -36,3 +36,10 @@ func sendMetricsToCallback(metrics map[string]interface{}) {
 		bridge.SendMetrics(metrics)
 	}
 }
+
+func sendTruthRecordToCallback(record map[string]interface{}) {
+	bridge := getCallbackBridge()
+	if bridge != nil && bridge.IsRunning() {
+		bridge.SendTruthRecord(record)
+	}
+}

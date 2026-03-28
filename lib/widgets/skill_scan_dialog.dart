@@ -432,7 +432,7 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
 
     return ListView.separated(
       itemCount: cards.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
       itemBuilder: (context, index) => cards[index]
           .animate()
           .fadeIn(duration: 300.ms, delay: (index * 50).ms)

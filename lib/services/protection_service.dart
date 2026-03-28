@@ -7,6 +7,7 @@ import '../models/llm_config_model.dart';
 import '../models/audit_log_model.dart';
 import '../models/protection_analysis_model.dart';
 import '../models/protection_config_model.dart';
+import '../models/truth_record_model.dart';
 import '../models/security_event_model.dart';
 import '../utils/locale_utils.dart';
 import 'model_config_database_service.dart';
@@ -84,6 +85,7 @@ class ProtectionService {
   Stream<ApiMetrics> get metricsStream => _monitor.metricsStream;
   Stream<List<SecurityEvent>> get securityEventStream =>
       _monitor.securityEventStream;
+  Stream<TruthRecordModel> get truthRecordStream => _monitor.truthRecordStream;
 
   // === 统计透传 ===
   bool get isAnalyzing => _monitor.isAnalyzing;
@@ -940,6 +942,10 @@ class ProtectionService {
       _instances.remove(_instanceKey);
     }
   }
+
+  /// 非破坏性获取所有 TruthRecord 最新快照（catch-up 补漏用）。
+  List<TruthRecordModel> fetchAllTruthRecordSnapshots() =>
+      _monitor.fetchAllTruthRecordSnapshots();
 
   AuditLogQueryResult getAuditLogsFromBuffer({
     int limit = 100,

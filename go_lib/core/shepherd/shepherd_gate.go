@@ -287,7 +287,7 @@ func extractUsage(extra map[string]interface{}, defaultPromptTokens, defaultComp
 }
 
 // CheckToolCall performs the security check
-func (sg *ShepherdGate) CheckToolCall(ctx context.Context, contextMessages []ConversationMessage, toolCalls []ToolCallInfo, toolResults []ToolResultInfo, lastUserMessage string) (*ShepherdDecision, error) {
+func (sg *ShepherdGate) CheckToolCall(ctx context.Context, contextMessages []ConversationMessage, toolCalls []ToolCallInfo, toolResults []ToolResultInfo, lastUserMessage string, requestID ...string) (*ShepherdDecision, error) {
 	rules := sg.GetUserRules()
 
 	sg.mu.RLock()
@@ -317,7 +317,11 @@ func (sg *ShepherdGate) CheckToolCall(ctx context.Context, contextMessages []Con
 	}
 
 	reactAnalyzer.SetLanguage(lang)
-	reactDecision, reactErr := reactAnalyzer.Analyze(ctx, contextMessages, toolCalls, toolResults, rules, lastUserMessage)
+	reqID := ""
+	if len(requestID) > 0 {
+		reqID = requestID[0]
+	}
+	reactDecision, reactErr := reactAnalyzer.Analyze(ctx, contextMessages, toolCalls, toolResults, rules, lastUserMessage, reqID)
 	if reactErr != nil {
 		logging.ShepherdGateError("[ShepherdGate][CheckToolCall][-] ReAct analyzer failed: %v, fail-open", reactErr)
 		allowed := true

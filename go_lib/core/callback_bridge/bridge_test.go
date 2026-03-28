@@ -17,6 +17,7 @@ func newTestBridge(callback CallbackFunc) *Bridge {
 		logChan:           make(chan string, 1000),
 		metricsChan:       make(chan map[string]interface{}, 100),
 		securityEventChan: make(chan map[string]interface{}, 100),
+		truthRecordChan:   make(chan map[string]interface{}, 100),
 		ctx:               ctx,
 		cancel:            cancel,
 		running:           true,
@@ -159,5 +160,41 @@ func TestSecurityEventChannelFull(t *testing.T) {
 		// 未阻塞
 	case <-time.After(2 * time.Second):
 		t.Fatal("SendSecurityEvent blocked when channel is full")
+	}
+}
+
+func TestSendTruthRecordDelivery(t *testing.T) {
+	var mu sync.Mutex
+	var received []Message
+
+	bridge := newTestBridge(func(msg string) {
+		var m Message
+		if err := json.Unmarshal([]byte(msg), &m); err == nil {
+			mu.Lock()
+			received = append(received, m)
+			mu.Unlock()
+		}
+	})
+	defer bridge.Close()
+
+	bridge.SendTruthRecord(map[string]interface{}{
+		"request_id": "req_test_1",
+		"phase":      "completed",
+		"asset_id":   "asset-1",
+	})
+
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(received) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(received))
+	}
+	if received[0].Type != MessageTypeTruthRecord {
+		t.Fatalf("expected type %q, got %q", MessageTypeTruthRecord, received[0].Type)
+	}
+	if received[0].Payload["request_id"] != "req_test_1" {
+		t.Fatalf("unexpected request id: %v", received[0].Payload["request_id"])
 	}
 }
