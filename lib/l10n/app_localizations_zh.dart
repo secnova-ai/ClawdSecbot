@@ -33,6 +33,11 @@ class AppLocalizationsZh extends AppLocalizations {
   String get scanComplete => '扫描完成';
 
   @override
+  String lastScanTime(String time) {
+    return '上次检测: $time';
+  }
+
+  @override
   String get rescan => '重新扫描';
 
   @override
@@ -119,6 +124,28 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get switchLanguage => '切换语言';
+
+  @override
+  String get menuHelp => '帮助';
+
+  @override
+  String aboutApp(String appName) {
+    return '关于 $appName';
+  }
+
+  @override
+  String get buildNumber => '构建号';
+
+  @override
+  String get currentPlatform => '平台';
+
+  @override
+  String aboutVersionWithBuild(String version, String build) {
+    return '版本 $version ($build)';
+  }
+
+  @override
+  String get aboutCopyright => 'Copyright © 2026 secnova.ai。保留所有权利。';
 
   @override
   String get riskNonLoopbackBinding => '非回环地址绑定';
@@ -1681,6 +1708,50 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get generalSettings => '通用设置';
+
+  @override
+  String get scheduledScanSetting => '定时扫描设置';
+
+  @override
+  String get scheduledScanDescription => '按设定间隔自动执行安全扫描';
+
+  @override
+  String get scheduledScanOff => '关闭';
+
+  @override
+  String get scheduledScanCustom => '自定义';
+
+  @override
+  String get scheduledScanCustomHint => '请输入正整数并选择时间单位';
+
+  @override
+  String get scheduledScanCustomValueHint => '输入数值';
+
+  @override
+  String get scheduledScanInvalidCustomValue => '请输入大于 0 的数字';
+
+  @override
+  String get scheduledScanOption60Seconds => '60秒';
+
+  @override
+  String get scheduledScanOption5Minutes => '5分钟';
+
+  @override
+  String get scheduledScanOption1Hour => '1小时';
+
+  @override
+  String get scheduledScanUnitSeconds => '秒';
+
+  @override
+  String get scheduledScanUnitMinutes => '分钟';
+
+  @override
+  String get scheduledScanUnitHours => '小时';
+
+  @override
+  String scheduledScanEvery(int value, String unit) {
+    return '每 $value $unit';
+  }
 
   @override
   String get dataManagement => '数据管理';

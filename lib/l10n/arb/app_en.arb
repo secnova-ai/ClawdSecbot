@@ -8,6 +8,12 @@
   "startScan": "Start Security Scan",
   "scanning": "Scanning...",
   "scanComplete": "Scan Complete",
+  "lastScanTime": "Last scan: {time}",
+  "@lastScanTime": {
+    "placeholders": {
+      "time": {"type": "String"}
+    }
+  },
   "rescan": "Rescan",
   "rescanConfirmTitle": "Confirm Rescan",
   "rescanConfirmMessage": "There are currently {count} Bot asset(s) under protection. Rescanning will stop all active protections. Continue?",
@@ -43,6 +49,29 @@
   "settings": "Global Settings",
   "language": "Language",
   "switchLanguage": "Switch Language",
+  "menuHelp": "Help",
+  "aboutApp": "About {appName}",
+  "@aboutApp": {
+    "placeholders": {
+      "appName": {
+        "type": "String"
+      }
+    }
+  },
+  "buildNumber": "Build",
+  "currentPlatform": "Platform",
+  "aboutVersionWithBuild": "Version {version} ({build})",
+  "@aboutVersionWithBuild": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      },
+      "build": {
+        "type": "String"
+      }
+    }
+  },
+  "aboutCopyright": "Copyright © 2026 secnova.ai. All rights reserved.",
 
   "riskNonLoopbackBinding": "Non-loopback address binding",
   "riskNonLoopbackBindingDesc": "Gateway is bound to \"{bind}\", which allows external access. Consider binding to 127.0.0.1 only.",
@@ -924,6 +953,26 @@
   "restoreConfigDescription": "Restore to state before first launch",
   "restoringConfig": "Restoring configuration...",
   "generalSettings": "General",
+  "scheduledScanSetting": "Scheduled Scan",
+  "scheduledScanDescription": "Automatically run security scans at the selected interval",
+  "scheduledScanOff": "Off",
+  "scheduledScanCustom": "Custom",
+  "scheduledScanCustomHint": "Enter a positive interval and choose its unit",
+  "scheduledScanCustomValueHint": "Enter value",
+  "scheduledScanInvalidCustomValue": "Please enter a number greater than 0",
+  "scheduledScanOption60Seconds": "Every 60 seconds",
+  "scheduledScanOption5Minutes": "Every 5 minutes",
+  "scheduledScanOption1Hour": "Every 1 hour",
+  "scheduledScanUnitSeconds": "seconds",
+  "scheduledScanUnitMinutes": "minutes",
+  "scheduledScanUnitHours": "hours",
+  "scheduledScanEvery": "Every {value} {unit}",
+  "@scheduledScanEvery": {
+    "placeholders": {
+      "value": {"type": "int"},
+      "unit": {"type": "String"}
+    }
+  },
   "dataManagement": "Data Management",
   "clearDataDescription": "Clear logs, statistics and analysis data",
   "permissionsSection": "Permissions",

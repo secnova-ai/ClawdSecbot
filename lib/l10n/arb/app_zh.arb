@@ -8,6 +8,12 @@
   "startScan": "开始安全扫描",
   "scanning": "扫描中...",
   "scanComplete": "扫描完成",
+  "lastScanTime": "上次检测: {time}",
+  "@lastScanTime": {
+    "placeholders": {
+      "time": {"type": "String"}
+    }
+  },
   "rescan": "重新扫描",
   "rescanConfirmTitle": "确认重新扫描",
   "rescanConfirmMessage": "当前有 {count} 个Bot资产正在防护中。重新扫描将停止所有已开启的防护。是否继续？",
@@ -50,6 +56,29 @@
   "settings": "全局设置",
   "language": "语言",
   "switchLanguage": "切换语言",
+  "menuHelp": "帮助",
+  "aboutApp": "关于 {appName}",
+  "@aboutApp": {
+    "placeholders": {
+      "appName": {
+        "type": "String"
+      }
+    }
+  },
+  "buildNumber": "构建号",
+  "currentPlatform": "平台",
+  "aboutVersionWithBuild": "版本 {version} ({build})",
+  "@aboutVersionWithBuild": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      },
+      "build": {
+        "type": "String"
+      }
+    }
+  },
+  "aboutCopyright": "Copyright © 2026 secnova.ai。保留所有权利。",
 
   "riskNonLoopbackBinding": "非回环地址绑定",
   "riskNonLoopbackBindingDesc": "网关绑定到 \"{bind}\"，这允许外部访问。建议仅绑定到 127.0.0.1。",
@@ -971,6 +1000,26 @@
   "restoreConfigDescription": "恢复到首次启动前的状态",
   "restoringConfig": "正在恢复配置...",
   "generalSettings": "通用设置",
+  "scheduledScanSetting": "定时扫描设置",
+  "scheduledScanDescription": "按设定间隔自动执行安全扫描",
+  "scheduledScanOff": "关闭",
+  "scheduledScanCustom": "自定义",
+  "scheduledScanCustomHint": "请输入正整数并选择时间单位",
+  "scheduledScanCustomValueHint": "输入数值",
+  "scheduledScanInvalidCustomValue": "请输入大于 0 的数字",
+  "scheduledScanOption60Seconds": "60秒",
+  "scheduledScanOption5Minutes": "5分钟",
+  "scheduledScanOption1Hour": "1小时",
+  "scheduledScanUnitSeconds": "秒",
+  "scheduledScanUnitMinutes": "分钟",
+  "scheduledScanUnitHours": "小时",
+  "scheduledScanEvery": "每 {value} {unit}",
+  "@scheduledScanEvery": {
+    "placeholders": {
+      "value": {"type": "int"},
+      "unit": {"type": "String"}
+    }
+  },
   "dataManagement": "数据管理",
   "clearDataDescription": "清除日志、统计和分析数据",
   "permissionsSection": "权限",

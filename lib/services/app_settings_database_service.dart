@@ -15,6 +15,8 @@ typedef _NoArgDart = ffi.Pointer<Utf8> Function();
 ///
 /// 封装 SaveAppSettingFFI 和 GetAppSettingFFI 调用，提供应用设置的读写接口。
 class AppSettingsDatabaseService {
+  static const String scheduledScanIntervalKey =
+      'scheduled_scan_interval_seconds';
   static final AppSettingsDatabaseService _instance =
       AppSettingsDatabaseService._internal();
 
@@ -179,5 +181,39 @@ class AppSettingsDatabaseService {
   /// 设置 is_first_launch = "false"
   Future<bool> setFirstLaunchCompleted() async {
     return await saveSetting('is_first_launch', 'false');
+  }
+
+  /// Get scheduled scan interval in seconds.
+  ///
+  /// Returns 0 when the setting is missing, invalid, or disabled.
+  Future<int> getScheduledScanIntervalSeconds() async {
+    final value = await getSetting(scheduledScanIntervalKey);
+    if (value.isEmpty) {
+      return 0;
+    }
+
+    final seconds = int.tryParse(value);
+    if (seconds == null || seconds < 0) {
+      appLogger.warning(
+        '[AppSettingsDB] Invalid scheduled scan interval value: $value',
+      );
+      return 0;
+    }
+
+    return seconds;
+  }
+
+  /// Persist scheduled scan interval in seconds.
+  ///
+  /// 0 disables scheduled scan.
+  Future<bool> setScheduledScanIntervalSeconds(int seconds) async {
+    if (seconds < 0) {
+      appLogger.error(
+        '[AppSettingsDB] Refusing to save negative scheduled scan interval: $seconds',
+      );
+      return false;
+    }
+
+    return await saveSetting(scheduledScanIntervalKey, seconds.toString());
   }
 }

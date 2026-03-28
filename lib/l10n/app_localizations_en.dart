@@ -34,6 +34,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get scanComplete => 'Scan Complete';
 
   @override
+  String lastScanTime(String time) {
+    return 'Last scan: $time';
+  }
+
+  @override
   String get rescan => 'Rescan';
 
   @override
@@ -120,6 +125,29 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get switchLanguage => 'Switch Language';
+
+  @override
+  String get menuHelp => 'Help';
+
+  @override
+  String aboutApp(String appName) {
+    return 'About $appName';
+  }
+
+  @override
+  String get buildNumber => 'Build';
+
+  @override
+  String get currentPlatform => 'Platform';
+
+  @override
+  String aboutVersionWithBuild(String version, String build) {
+    return 'Version $version ($build)';
+  }
+
+  @override
+  String get aboutCopyright =>
+      'Copyright © 2026 secnova.ai. All rights reserved.';
 
   @override
   String get riskNonLoopbackBinding => 'Non-loopback address binding';
@@ -1747,6 +1775,53 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get generalSettings => 'General';
+
+  @override
+  String get scheduledScanSetting => 'Scheduled Scan';
+
+  @override
+  String get scheduledScanDescription =>
+      'Automatically run security scans at the selected interval';
+
+  @override
+  String get scheduledScanOff => 'Off';
+
+  @override
+  String get scheduledScanCustom => 'Custom';
+
+  @override
+  String get scheduledScanCustomHint =>
+      'Enter a positive interval and choose its unit';
+
+  @override
+  String get scheduledScanCustomValueHint => 'Enter value';
+
+  @override
+  String get scheduledScanInvalidCustomValue =>
+      'Please enter a number greater than 0';
+
+  @override
+  String get scheduledScanOption60Seconds => 'Every 60 seconds';
+
+  @override
+  String get scheduledScanOption5Minutes => 'Every 5 minutes';
+
+  @override
+  String get scheduledScanOption1Hour => 'Every 1 hour';
+
+  @override
+  String get scheduledScanUnitSeconds => 'seconds';
+
+  @override
+  String get scheduledScanUnitMinutes => 'minutes';
+
+  @override
+  String get scheduledScanUnitHours => 'hours';
+
+  @override
+  String scheduledScanEvery(int value, String unit) {
+    return 'Every $value $unit';
+  }
 
   @override
   String get dataManagement => 'Data Management';

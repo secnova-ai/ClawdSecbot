@@ -146,6 +146,12 @@ abstract class AppLocalizations {
   /// **'扫描完成'**
   String get scanComplete;
 
+  /// No description provided for @lastScanTime.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次检测: {time}'**
+  String lastScanTime(String time);
+
   /// No description provided for @rescan.
   ///
   /// In zh, this message translates to:
@@ -313,6 +319,42 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'切换语言'**
   String get switchLanguage;
+
+  /// No description provided for @menuHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'帮助'**
+  String get menuHelp;
+
+  /// No description provided for @aboutApp.
+  ///
+  /// In zh, this message translates to:
+  /// **'关于 {appName}'**
+  String aboutApp(String appName);
+
+  /// No description provided for @buildNumber.
+  ///
+  /// In zh, this message translates to:
+  /// **'构建号'**
+  String get buildNumber;
+
+  /// No description provided for @currentPlatform.
+  ///
+  /// In zh, this message translates to:
+  /// **'平台'**
+  String get currentPlatform;
+
+  /// No description provided for @aboutVersionWithBuild.
+  ///
+  /// In zh, this message translates to:
+  /// **'版本 {version} ({build})'**
+  String aboutVersionWithBuild(String version, String build);
+
+  /// No description provided for @aboutCopyright.
+  ///
+  /// In zh, this message translates to:
+  /// **'Copyright © 2026 secnova.ai。保留所有权利。'**
+  String get aboutCopyright;
 
   /// No description provided for @riskNonLoopbackBinding.
   ///
@@ -3063,6 +3105,90 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'通用设置'**
   String get generalSettings;
+
+  /// No description provided for @scheduledScanSetting.
+  ///
+  /// In zh, this message translates to:
+  /// **'定时扫描设置'**
+  String get scheduledScanSetting;
+
+  /// No description provided for @scheduledScanDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'按设定间隔自动执行安全扫描'**
+  String get scheduledScanDescription;
+
+  /// No description provided for @scheduledScanOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭'**
+  String get scheduledScanOff;
+
+  /// No description provided for @scheduledScanCustom.
+  ///
+  /// In zh, this message translates to:
+  /// **'自定义'**
+  String get scheduledScanCustom;
+
+  /// No description provided for @scheduledScanCustomHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'请输入正整数并选择时间单位'**
+  String get scheduledScanCustomHint;
+
+  /// No description provided for @scheduledScanCustomValueHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入数值'**
+  String get scheduledScanCustomValueHint;
+
+  /// No description provided for @scheduledScanInvalidCustomValue.
+  ///
+  /// In zh, this message translates to:
+  /// **'请输入大于 0 的数字'**
+  String get scheduledScanInvalidCustomValue;
+
+  /// No description provided for @scheduledScanOption60Seconds.
+  ///
+  /// In zh, this message translates to:
+  /// **'60秒'**
+  String get scheduledScanOption60Seconds;
+
+  /// No description provided for @scheduledScanOption5Minutes.
+  ///
+  /// In zh, this message translates to:
+  /// **'5分钟'**
+  String get scheduledScanOption5Minutes;
+
+  /// No description provided for @scheduledScanOption1Hour.
+  ///
+  /// In zh, this message translates to:
+  /// **'1小时'**
+  String get scheduledScanOption1Hour;
+
+  /// No description provided for @scheduledScanUnitSeconds.
+  ///
+  /// In zh, this message translates to:
+  /// **'秒'**
+  String get scheduledScanUnitSeconds;
+
+  /// No description provided for @scheduledScanUnitMinutes.
+  ///
+  /// In zh, this message translates to:
+  /// **'分钟'**
+  String get scheduledScanUnitMinutes;
+
+  /// No description provided for @scheduledScanUnitHours.
+  ///
+  /// In zh, this message translates to:
+  /// **'小时'**
+  String get scheduledScanUnitHours;
+
+  /// No description provided for @scheduledScanEvery.
+  ///
+  /// In zh, this message translates to:
+  /// **'每 {value} {unit}'**
+  String scheduledScanEvery(int value, String unit);
 
   /// No description provided for @dataManagement.
   ///

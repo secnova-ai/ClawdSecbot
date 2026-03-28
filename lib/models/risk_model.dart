@@ -251,6 +251,7 @@ class ScanResult {
   final bool configFound;
   final String? configPath;
   final List<Asset> assets;
+  final DateTime? scannedAt;
 
   ScanResult({
     this.config,
@@ -258,6 +259,7 @@ class ScanResult {
     required this.configFound,
     this.configPath,
     this.assets = const [],
+    this.scannedAt,
   });
 
   Map<String, dynamic> toJson() {
@@ -267,6 +269,7 @@ class ScanResult {
       'config_found': configFound,
       'config_path': configPath,
       'assets': assets.map((a) => a.toJson()).toList(),
+      'scanned_at': scannedAt?.toIso8601String(),
     };
   }
 
@@ -277,6 +280,9 @@ class ScanResult {
       configFound: json['config_found'],
       configPath: json['config_path'],
       assets: (json['assets'] as List).map((a) => Asset.fromJson(a)).toList(),
+      scannedAt: json['scanned_at'] != null
+          ? DateTime.parse(json['scanned_at'] as String)
+          : null,
     );
   }
 }

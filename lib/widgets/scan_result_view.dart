@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -38,6 +39,7 @@ class ScanResultView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final scannedAtText = _formatScannedAt(result.scannedAt, l10n);
 
     return SingleChildScrollView(
       key: const ValueKey('completed'),
@@ -47,9 +49,10 @@ class ScanResultView extends StatelessWidget {
         children: [
           // 扫描完成标题
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   color: const Color(0xFF22C55E).withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(8),
@@ -57,17 +60,32 @@ class ScanResultView extends StatelessWidget {
                 child: const Icon(
                   LucideIcons.checkCircle,
                   color: Color(0xFF22C55E),
-                  size: 20,
+                  size: 24,
                 ),
               ),
               const SizedBox(width: 12),
-              Text(
-                l10n.scanComplete,
-                style: AppFonts.inter(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.scanComplete,
+                    style: AppFonts.inter(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                  if (scannedAtText != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      l10n.lastScanTime(scannedAtText),
+                      style: AppFonts.inter(
+                        fontSize: 11,
+                        color: Colors.white38,
+                      ),
+                    ),
+                  ],
+                ],
               ),
               const Spacer(),
               MouseRegion(
@@ -192,6 +210,15 @@ class ScanResultView extends StatelessWidget {
         ],
       ),
     ).animate().fadeIn(duration: 400.ms);
+  }
+
+  String? _formatScannedAt(DateTime? scannedAt, AppLocalizations l10n) {
+    if (scannedAt == null) return null;
+    final localTime = scannedAt.toLocal();
+    final pattern = l10n.localeName.toLowerCase().startsWith('zh')
+        ? 'yyyy-MM-dd HH:mm:ss'
+        : 'yyyy-MM-dd HH:mm:ss';
+    return DateFormat(pattern).format(localTime);
   }
 
   Widget _buildSectionTitle(String title, IconData icon) {
@@ -561,7 +588,7 @@ class _AssetCard extends StatefulWidget {
   final bool isProtected;
   final bool isRestoringProtection;
   final void Function(Asset asset, {required bool isEditMode})
-      onShowProtectionConfig;
+  onShowProtectionConfig;
   final void Function(Asset asset) onShowProtectionMonitor;
 
   const _AssetCard({
@@ -598,8 +625,9 @@ class _AssetCardState extends State<_AssetCard> {
   Color get _currentIconColor => Color(_iconColor ?? 0xFF6366F1);
 
   Future<void> _loadSavedIcon() async {
-    final saved = await AppSettingsDatabaseService()
-        .getSetting('asset_icon_${widget.asset.id}');
+    final saved = await AppSettingsDatabaseService().getSetting(
+      'asset_icon_${widget.asset.id}',
+    );
     if (saved.isNotEmpty && mounted) {
       try {
         final data = jsonDecode(saved) as Map<String, dynamic>;
@@ -614,10 +642,8 @@ class _AssetCardState extends State<_AssetCard> {
   Future<void> _showIconPicker() async {
     final result = await showDialog<BotIconSelection>(
       context: context,
-      builder: (_) => BotIconPickerDialog(
-        currentIcon: _iconName,
-        currentColor: _iconColor,
-      ),
+      builder: (_) =>
+          BotIconPickerDialog(currentIcon: _iconName, currentColor: _iconColor),
     );
     if (result != null && mounted) {
       setState(() {
@@ -1054,7 +1080,7 @@ class _AssetCardState extends State<_AssetCard> {
               onTap: isLoading
                   ? null
                   : () =>
-                      widget.onShowProtectionConfig(asset, isEditMode: true),
+                        widget.onShowProtectionConfig(asset, isEditMode: true),
               child: Opacity(
                 opacity: isLoading ? 0.4 : 1.0,
                 child: Container(
@@ -1098,8 +1124,7 @@ class _AssetCardState extends State<_AssetCard> {
       return MouseRegion(
         cursor: SystemMouseCursors.click,
         child: GestureDetector(
-          onTap: () =>
-              widget.onShowProtectionConfig(asset, isEditMode: false),
+          onTap: () => widget.onShowProtectionConfig(asset, isEditMode: false),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(

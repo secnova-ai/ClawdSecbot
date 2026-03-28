@@ -94,6 +94,8 @@ class _MainPageState extends State<MainPage>
 
   // ============ 开机启动 ============
   bool _launchAtStartupEnabled = false;
+  int _scheduledScanIntervalSeconds = 0;
+  Timer? _scheduledScanTimer;
 
   /// Future tracking heavy initialization (DB, plugins, etc.)
   Future<void>? _initFuture;
@@ -243,6 +245,8 @@ class _MainPageState extends State<MainPage>
       appLogger.info('[MainPage] No saved scan result found');
     }
 
+    await _restoreScheduledScanSettings();
+
     // 从数据库恢复已启用的防护状态
     await _restoreProtectionStates();
 
@@ -282,6 +286,7 @@ class _MainPageState extends State<MainPage>
     windowManager.removeListener(this);
     _logSubscription?.cancel();
     _onboardingCompletionTimer?.cancel();
+    _scheduledScanTimer?.cancel();
     disposeVersionMixin();
     stopVersionCheckService();
     _scanner.dispose();
@@ -360,6 +365,81 @@ class _MainPageState extends State<MainPage>
   }
 
   // ============ 防护状态恢复 ============
+
+  Future<void> _restoreScheduledScanSettings() async {
+    try {
+      final seconds = await AppSettingsDatabaseService()
+          .getScheduledScanIntervalSeconds();
+      if (mounted) {
+        setState(() {
+          _scheduledScanIntervalSeconds = seconds;
+        });
+      } else {
+        _scheduledScanIntervalSeconds = seconds;
+      }
+      _configureScheduledScanTimer();
+      appLogger.info(
+        '[MainPage] Restored scheduled scan interval: $_scheduledScanIntervalSeconds seconds',
+      );
+    } catch (e) {
+      appLogger.error(
+        '[MainPage] Failed to restore scheduled scan settings',
+        e,
+      );
+    }
+  }
+
+  Future<void> _updateScheduledScanInterval(int seconds) async {
+    final success = await AppSettingsDatabaseService()
+        .setScheduledScanIntervalSeconds(seconds);
+    if (!success) {
+      appLogger.error(
+        '[MainPage] Failed to save scheduled scan interval: $seconds',
+      );
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _scheduledScanIntervalSeconds = seconds;
+      });
+    } else {
+      _scheduledScanIntervalSeconds = seconds;
+    }
+
+    _configureScheduledScanTimer();
+    appLogger.info(
+      '[MainPage] Scheduled scan interval updated: $_scheduledScanIntervalSeconds seconds',
+    );
+  }
+
+  Future<void> _saveGeneralSettings({
+    required bool launchAtStartupEnabled,
+    required int scheduledScanIntervalSeconds,
+  }) async {
+    if (launchAtStartupEnabled != _launchAtStartupEnabled) {
+      await toggleLaunchAtStartup();
+    }
+    if (scheduledScanIntervalSeconds != _scheduledScanIntervalSeconds) {
+      await _updateScheduledScanInterval(scheduledScanIntervalSeconds);
+    }
+  }
+
+  void _configureScheduledScanTimer() {
+    _scheduledScanTimer?.cancel();
+    _scheduledScanTimer = null;
+
+    if (_scheduledScanIntervalSeconds <= 0) {
+      appLogger.info('[MainPage] Scheduled scan disabled');
+      return;
+    }
+
+    final interval = Duration(seconds: _scheduledScanIntervalSeconds);
+    _scheduledScanTimer = Timer.periodic(interval, (_) {
+      _startScan(triggeredByScheduler: true);
+    });
+    appLogger.info('[MainPage] Scheduled scan enabled: every $interval');
+  }
 
   Future<void> _restoreProtectionStates() async {
     try {
@@ -949,13 +1029,28 @@ class _MainPageState extends State<MainPage>
 
   // ============ 扫描功能 ============
 
-  Future<void> _startScan() async {
+  Future<void> _startScan({bool triggeredByScheduler = false}) async {
+    if (_scanState == ScanState.scanning) {
+      if (triggeredByScheduler) {
+        appLogger.info(
+          '[MainPage] Scheduled scan skipped because another scan is running',
+        );
+      }
+      return;
+    }
+
     if (Platform.isMacOS &&
         BuildConfig.requiresDirectoryAuth &&
         !_hasConfigAccess) {
       final authorized = await _showConfigAccessDialog();
       if (!authorized) return;
     }
+
+    if (!mounted) {
+      return;
+    }
+
+    final l10n = AppLocalizations.of(context)!;
 
     setState(() {
       _scanState = ScanState.scanning;
@@ -965,7 +1060,11 @@ class _MainPageState extends State<MainPage>
 
     await windowManager.setSize(AppConstants.windowSize);
 
+    await _logSubscription?.cancel();
     _logSubscription = _scanner.logStream.listen((log) {
+      if (!mounted) {
+        return;
+      }
       setState(() {
         _logs.add(log);
       });
@@ -973,24 +1072,37 @@ class _MainPageState extends State<MainPage>
 
     // 设置本地化，确保风险标题显示中文
     if (!mounted) return;
-    _scanner.setLocalization(AppLocalizations.of(context)!);
-
-    final result = await _scanner.scan();
+    _scanner.setLocalization(l10n);
 
     try {
-      await ScanDatabaseService().saveScanResult(result);
+      final result = await _scanner.scan();
+
+      try {
+        await ScanDatabaseService().saveScanResult(result);
+      } catch (e) {
+        appLogger.error('[MainPage] Failed to save scan result', e);
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _scanState = ScanState.completed;
+        _result = result;
+      });
     } catch (e) {
-      appLogger.error('[MainPage] Failed to save scan result', e);
+      appLogger.error('[MainPage] Scan failed', e);
+      if (mounted) {
+        setState(() {
+          _scanState = ScanState.idle;
+        });
+      }
+    } finally {
+      await _logSubscription?.cancel();
+      _logSubscription = null;
+      await windowManager.setSize(AppConstants.windowSize);
     }
-
-    _logSubscription?.cancel();
-
-    setState(() {
-      _scanState = ScanState.completed;
-      _result = result;
-    });
-
-    await windowManager.setSize(AppConstants.windowSize);
   }
 
   Future<bool> _showConfigAccessDialog() async {
@@ -1376,7 +1488,8 @@ class _MainPageState extends State<MainPage>
       context: context,
       builder: (dialogContext) => SettingsDialog(
         launchAtStartupEnabled: _launchAtStartupEnabled,
-        onToggleLaunchAtStartup: () => toggleLaunchAtStartup(),
+        onSaveGeneralSettings: _saveGeneralSettings,
+        scheduledScanIntervalSeconds: _scheduledScanIntervalSeconds,
         onClearData: () {
           Navigator.of(dialogContext).pop();
           showClearDataConfirmDialog();
@@ -1385,6 +1498,7 @@ class _MainPageState extends State<MainPage>
           Navigator.of(dialogContext).pop();
           showRestoreConfigConfirmDialog();
         },
+        onShowAbout: showAppAboutDialog,
         onReauthorizeDirectory: () {
           Navigator.of(dialogContext).pop();
           reauthorizeDirectory();
@@ -1418,7 +1532,20 @@ class _MainPageState extends State<MainPage>
               child: Stack(
                 children: [
                   AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 400),
+                    duration: const Duration(milliseconds: 520),
+                    reverseDuration: const Duration(milliseconds: 360),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    layoutBuilder: (currentChild, previousChildren) {
+                      return Stack(
+                        alignment: Alignment.topCenter,
+                        children: [
+                          ...previousChildren,
+                          if (currentChild case final child?) child,
+                        ],
+                      );
+                    },
+                    transitionBuilder: _buildContentTransition,
                     child: _buildContent(),
                   ),
                   if (_showOnboarding)
@@ -1696,6 +1823,30 @@ class _MainPageState extends State<MainPage>
       case ScanState.completed:
         return _buildCompletedState();
     }
+  }
+
+  Widget _buildContentTransition(Widget child, Animation<double> animation) {
+    final fadeAnimation = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    final slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.03),
+      end: Offset.zero,
+    ).animate(fadeAnimation);
+    final scaleAnimation = Tween<double>(
+      begin: 0.985,
+      end: 1,
+    ).animate(fadeAnimation);
+
+    return FadeTransition(
+      opacity: fadeAnimation,
+      child: SlideTransition(
+        position: slideAnimation,
+        child: ScaleTransition(scale: scaleAnimation, child: child),
+      ),
+    );
   }
 
   Widget _buildIdleState() {

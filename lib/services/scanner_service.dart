@@ -59,6 +59,7 @@ class BotScanner {
       configFound: pluginResult.configFound,
       configPath: pluginResult.configPath,
       assets: pluginResult.assets,
+      scannedAt: DateTime.now(),
     );
   }
 
@@ -114,8 +115,8 @@ class BotScanner {
         final description = _l10n != null
             ? _l10n!.riskSkillSecurityIssueDesc(skillName, issueCount)
             : (issueCount > 0
-                ? 'Skill "$skillName" has $issueCount security issue(s): ${issues.join("; ")}'
-                : 'Skill "$skillName" was flagged as potentially risky.');
+                  ? 'Skill "$skillName" has $issueCount security issue(s): ${issues.join("; ")}'
+                  : 'Skill "$skillName" was flagged as potentially risky.');
 
         risks.add(
           RiskInfo(

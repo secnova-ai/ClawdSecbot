@@ -144,6 +144,100 @@ mixin MainPageVersionMixin on State<MainPage> {
     }
   }
 
+  Future<void> showAppAboutDialog() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    if (!mounted) return;
+
+    final l10n = AppLocalizations.of(context)!;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 104,
+              height: 104,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF23233A), Color(0xFF2B2B45)],
+                ),
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x33000000),
+                    blurRadius: 24,
+                    offset: Offset(0, 10),
+                  ),
+                ],
+                border: Border.all(
+                  color: const Color(0xFF6366F1).withValues(alpha: 0.18),
+                ),
+              ),
+              child: const Center(
+                child: Icon(
+                  LucideIcons.shield,
+                  color: Color(0xFF8B5CF6),
+                  size: 48,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              l10n.appTitle,
+              textAlign: TextAlign.center,
+              style: AppFonts.inter(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              l10n.aboutVersionWithBuild(
+                packageInfo.version,
+                packageInfo.buildNumber,
+              ),
+              textAlign: TextAlign.center,
+              style: AppFonts.inter(
+                color: Colors.white70,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 22),
+            Text(
+              l10n.aboutCopyright,
+              textAlign: TextAlign.center,
+              style: AppFonts.inter(
+                color: Colors.white54,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(
+              l10n.close,
+              style: AppFonts.inter(
+                color: const Color(0xFF818CF8),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+        actionsAlignment: MainAxisAlignment.center,
+      ),
+    );
+  }
+
   /// 显示版本更新弹窗
   void showUpdateDialog(VersionInfo info) {
     if (isUpdateDialogShown) {
