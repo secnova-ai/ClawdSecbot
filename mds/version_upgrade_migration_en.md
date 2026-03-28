@@ -53,22 +53,24 @@ This keeps the design aligned with the original requirement of checking a disk f
 
 At startup, Flutter passes these values to Go through FFI:
 
-- `db_path`
-- `version_file_path`
+- the shared app data base directory through `InitPathsFFI`
 - `current_version`
 
 The Go side then performs the following sequence:
 
 1. Open SQLite
-2. Read the disk version file
-3. Read `app_metadata.runtime_version`
-4. Parse the current running version
-5. Resolve the effective stored database version
-6. If stored version is lower than current version, run the migration chain
-7. Rebuild or verify all current-version tables
-8. Persist the current version back to:
+2. Derive the database path and version file path from `PathManager`
+3. Read the disk version file
+4. Read `app_metadata.runtime_version`
+5. Parse the current running version
+6. Resolve the effective stored database version
+7. If stored version is lower than current version, run the migration chain
+8. Rebuild or verify all current-version tables
+9. Persist the current version back to:
    - the disk version file
    - `app_metadata`
+
+Flutter does not own the database path or version file path contract anymore. It only provides the shared base directory, and core derives all runtime-owned paths from that single source of truth.
 
 ## Version Resolution Rules
 
