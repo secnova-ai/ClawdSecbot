@@ -389,4 +389,19 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
       }
     }
   }
+
+  Future<void> notifyMonitorWindowsProtectionConfigReload() async {
+    for (final controller in protectionMonitorWindows.values) {
+      try {
+        await controller.invokeMethod('reloadProtectionConfig');
+        appLogger.info(
+          '[MainPage] Sent reloadProtectionConfig to window ${controller.windowId}',
+        );
+      } catch (e) {
+        appLogger.warning(
+          '[MainPage] Failed to reload protection config for window ${controller.windowId}: $e',
+        );
+      }
+    }
+  }
 }

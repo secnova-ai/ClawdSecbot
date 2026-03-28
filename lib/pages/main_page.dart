@@ -4,6 +4,7 @@ import 'dart:ffi' as ffi;
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -100,6 +101,8 @@ class _MainPageState extends State<MainPage>
   // ============ API Server 状态 ============
   bool _apiServerEnabled = false;
   bool _isApiServerToggling = false;
+  Timer? _externalStateRefreshTimer;
+  bool _isExternalStateRefreshing = false;
 
   /// Future tracking heavy initialization (DB, plugins, etc.)
   Future<void>? _initFuture;
@@ -170,6 +173,7 @@ class _MainPageState extends State<MainPage>
       onExitRequested: _handleAppExitRequest,
     );
     _init();
+    _startExternalStateRefresh();
   }
 
   void _init() async {
@@ -294,6 +298,7 @@ class _MainPageState extends State<MainPage>
     _logSubscription?.cancel();
     _onboardingCompletionTimer?.cancel();
     _scheduledScanTimer?.cancel();
+    _externalStateRefreshTimer?.cancel();
     disposeVersionMixin();
     stopVersionCheckService();
     _scanner.dispose();
@@ -360,6 +365,16 @@ class _MainPageState extends State<MainPage>
   }
 
   // ============ 切换 API Server 状态 ============
+
+  @override
+  void onWindowFocus() {
+    unawaited(_refreshUiStateFromDatabase(force: true));
+  }
+
+  @override
+  void onWindowRestore() {
+    unawaited(_refreshUiStateFromDatabase(force: true));
+  }
 
   Future<void> _toggleApiServer(bool enable) async {
     await _applyApiServerState(
@@ -619,28 +634,17 @@ class _MainPageState extends State<MainPage>
       appLogger.info('[MainPage] Restoring protection states');
       final enabledConfigs = await ProtectionDatabaseService()
           .getEnabledProtectionConfigs();
+      final stateChanged = await _syncProtectedAssetsFromConfigs(
+        enabledConfigs,
+        scanResult: _pendingScanResult ?? _result,
+      );
       if (enabledConfigs.isEmpty) {
         appLogger.info('[MainPage] No enabled protection configs');
         return;
       }
 
       appLogger.info(
-        '[MainPage] Restoring ${enabledConfigs.length} protected assets',
-      );
-
-      for (final config in enabledConfigs) {
-        if (config.assetID.isEmpty) {
-          appLogger.warning(
-            '[MainPage] Skip restoring protection without assetID: ${config.assetName}',
-          );
-          continue;
-        }
-
-        _protectedAssetIDs.add(config.assetID);
-        _protectedAssetNamesByID[config.assetID] = config.assetName;
-      }
-      appLogger.info(
-        '[MainPage] Enabled assets: ${_protectedAssetIDs.map((id) => '${_protectedAssetNamesByID[id]}/$id').join(', ')}',
+        '[MainPage] Restored ${enabledConfigs.length} protected assets, changed=$stateChanged',
       );
 
       if (mounted) {
@@ -658,6 +662,178 @@ class _MainPageState extends State<MainPage>
           _isRestoringProtection = false;
         });
       }
+    }
+  }
+
+  String _resolveAssetIDFromScan(String assetName, [ScanResult? scanResult]) {
+    final assets =
+        scanResult?.assets ??
+        _pendingScanResult?.assets ??
+        _result?.assets ??
+        const <Asset>[];
+    final matches = assets
+        .where((asset) => asset.name == assetName && asset.id.isNotEmpty)
+        .toList();
+    if (matches.isEmpty) {
+      return '';
+    }
+    if (matches.length > 1) {
+      appLogger.warning(
+        '[MainPage] Multiple assets matched for empty assetID restore: $assetName, using first',
+      );
+    }
+    return matches.first.id;
+  }
+
+  void _startExternalStateRefresh() {
+    _externalStateRefreshTimer?.cancel();
+    _externalStateRefreshTimer = Timer.periodic(const Duration(seconds: 3), (
+      _,
+    ) {
+      unawaited(_refreshUiStateFromDatabase());
+    });
+  }
+
+  String _scanResultSignature(ScanResult? result) {
+    if (result == null) {
+      return '';
+    }
+    return jsonEncode(result.toJson());
+  }
+
+  Future<bool> _syncProtectedAssetsFromConfigs(
+    List<ProtectionConfig> enabledConfigs, {
+    required ScanResult? scanResult,
+  }) async {
+    final nextProtectedAssetIDs = <String>{};
+    final nextProtectedAssetNamesByID = <String, String>{};
+
+    for (final config in enabledConfigs) {
+      var resolvedAssetID = config.assetID;
+      if (resolvedAssetID.isEmpty) {
+        resolvedAssetID = _resolveAssetIDFromScan(config.assetName, scanResult);
+        if (resolvedAssetID.isNotEmpty) {
+          try {
+            final modelService = ModelConfigDatabaseService();
+            final oldBotModelConfig = await modelService.getBotModelConfig(
+              config.assetName,
+              config.assetID,
+            );
+            if (oldBotModelConfig != null) {
+              await modelService.saveBotModelConfig(
+                oldBotModelConfig.copyWith(assetID: resolvedAssetID),
+              );
+              await modelService.deleteBotModelConfig(
+                config.assetName,
+                config.assetID,
+              );
+            }
+
+            await ProtectionDatabaseService().saveProtectionConfig(
+              config.copyWith(assetID: resolvedAssetID),
+            );
+            await ProtectionDatabaseService().deleteProtectionConfig(
+              config.assetName,
+              config.assetID,
+            );
+            appLogger.info(
+              '[MainPage] Migrated protection config assetID: ${config.assetName} -> $resolvedAssetID',
+            );
+          } catch (e) {
+            appLogger.warning(
+              '[MainPage] Failed to migrate empty assetID for ${config.assetName}: $e',
+            );
+          }
+        }
+      }
+
+      if (resolvedAssetID.isEmpty) {
+        appLogger.warning(
+          '[MainPage] Skip restoring protection without assetID: ${config.assetName}',
+        );
+        continue;
+      }
+
+      nextProtectedAssetIDs.add(resolvedAssetID);
+      nextProtectedAssetNamesByID[resolvedAssetID] = config.assetName;
+    }
+
+    final idsChanged = !setEquals(_protectedAssetIDs, nextProtectedAssetIDs);
+    final namesChanged = !mapEquals(
+      _protectedAssetNamesByID,
+      nextProtectedAssetNamesByID,
+    );
+    if (!idsChanged && !namesChanged) {
+      return false;
+    }
+
+    _protectedAssetIDs
+      ..clear()
+      ..addAll(nextProtectedAssetIDs);
+    _protectedAssetNamesByID
+      ..clear()
+      ..addAll(nextProtectedAssetNamesByID);
+
+    appLogger.info(
+      '[MainPage] Enabled assets synced: ${_protectedAssetIDs.map((id) => '${_protectedAssetNamesByID[id]}/$id').join(', ')}',
+    );
+    return true;
+  }
+
+  Future<void> _refreshUiStateFromDatabase({bool force = false}) async {
+    if (_isExternalStateRefreshing) {
+      return;
+    }
+
+    if (!force && _scanState == ScanState.scanning) {
+      return;
+    }
+
+    _isExternalStateRefreshing = true;
+    try {
+      final latestScanResult = await ScanDatabaseService()
+          .getLatestScanResult();
+      final currentScanResult = _showWelcome ? _pendingScanResult : _result;
+      final scanChanged =
+          latestScanResult != null &&
+          _scanResultSignature(latestScanResult) !=
+              _scanResultSignature(currentScanResult);
+
+      final enabledConfigs = await ProtectionDatabaseService()
+          .getEnabledProtectionConfigs();
+      final protectedStateChanged = await _syncProtectedAssetsFromConfigs(
+        enabledConfigs,
+        scanResult: latestScanResult ?? _pendingScanResult ?? _result,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (scanChanged || protectedStateChanged) {
+        setState(() {
+          if (scanChanged) {
+            if (_showWelcome) {
+              _pendingScanResult = latestScanResult;
+            } else {
+              _result = latestScanResult;
+              _scanState = ScanState.completed;
+            }
+          }
+        });
+
+        if (protectedStateChanged) {
+          await notifyMonitorWindowsProtectionConfigReload();
+        }
+
+        appLogger.info(
+          '[MainPage] UI state refreshed from database: scanChanged=$scanChanged, protectionChanged=$protectedStateChanged',
+        );
+      }
+    } catch (e) {
+      appLogger.warning('[MainPage] Failed to refresh UI state from DB: $e');
+    } finally {
+      _isExternalStateRefreshing = false;
     }
   }
 
@@ -1922,10 +2098,7 @@ class _MainPageState extends State<MainPage>
                     layoutBuilder: (currentChild, previousChildren) {
                       return Stack(
                         alignment: Alignment.topCenter,
-                        children: [
-                          ...previousChildren,
-                          ?currentChild,
-                        ],
+                        children: [...previousChildren, ?currentChild],
                       );
                     },
                     transitionBuilder: _buildContentTransition,

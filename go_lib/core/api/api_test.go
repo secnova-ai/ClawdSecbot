@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +14,93 @@ import (
 	"time"
 
 	"go_lib/core"
+	"go_lib/core/proxy"
 	"go_lib/core/repository"
+	"go_lib/plugin_sdk"
 )
+
+type apiTestPlugin struct {
+	assetName string
+	pluginID  string
+	assets    []core.Asset
+}
+
+func (p *apiTestPlugin) GetAssetName() string {
+	return p.assetName
+}
+
+func (p *apiTestPlugin) GetID() string {
+	return p.pluginID
+}
+
+func (p *apiTestPlugin) GetManifest() plugin_sdk.PluginManifest {
+	return plugin_sdk.PluginManifest{
+		PluginID:           p.pluginID,
+		BotType:            strings.ToLower(p.assetName),
+		DisplayName:        p.assetName,
+		APIVersion:         "v1",
+		Capabilities:       []string{"scan", "protection_proxy"},
+		SupportedPlatforms: []string{"windows"},
+	}
+}
+
+func (p *apiTestPlugin) GetAssetUISchema() *plugin_sdk.AssetUISchema {
+	return &plugin_sdk.AssetUISchema{
+		ID:      p.pluginID + ".asset.v1",
+		Version: "1",
+	}
+}
+
+// RequiresBotModelConfig 测试中假定需要 Bot 模型配置，与 core 测试桩行为一致。
+func (p *apiTestPlugin) RequiresBotModelConfig() bool {
+	return true
+}
+
+func (p *apiTestPlugin) ScanAssets() ([]core.Asset, error) {
+	return p.assets, nil
+}
+
+func (p *apiTestPlugin) AssessRisks(scannedHashes map[string]bool) ([]core.Risk, error) {
+	return nil, nil
+}
+
+func (p *apiTestPlugin) MitigateRisk(riskInfo string) string {
+	return `{"success":true}`
+}
+
+func (p *apiTestPlugin) StartProtection(assetID string, config core.ProtectionConfig) error {
+	return nil
+}
+
+func (p *apiTestPlugin) StopProtection(assetID string) error {
+	return nil
+}
+
+func (p *apiTestPlugin) GetProtectionStatus(assetID string) core.ProtectionStatus {
+	return core.ProtectionStatus{}
+}
+
+func registerScannedAPITestAsset(t *testing.T, assetName, botID string) {
+	t.Helper()
+
+	plugin := &apiTestPlugin{
+		assetName: assetName,
+		pluginID:  strings.ToLower(assetName) + "-api-test",
+		assets: []core.Asset{
+			{
+				ID:           botID,
+				Name:         assetName,
+				SourcePlugin: assetName,
+			},
+		},
+	}
+
+	pm := core.GetPluginManager()
+	pm.Register(plugin)
+	if _, err := pm.ScanAllAssets(); err != nil {
+		t.Fatalf("ScanAllAssets failed: %v", err)
+	}
+}
 
 // ========== Test Helper Functions ==========
 
@@ -67,6 +153,18 @@ func assertErrorCode(t *testing.T, resp *APIResponse, wantCode int) {
 	if resp.Code != wantCode {
 		t.Errorf("API code = %d, want %d", resp.Code, wantCode)
 	}
+}
+
+func setupPolicyRuntimeTestDB(t *testing.T) {
+	t.Helper()
+
+	dbPath := filepath.Join(t.TempDir(), "policy_runtime_test.db")
+	if err := repository.InitDB(dbPath); err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = repository.CloseDB()
+	})
 }
 
 // ========== Authentication Middleware Tests ==========
@@ -506,6 +604,391 @@ func TestSetProtectionPolicy_ValidModes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSetProtectionPolicy_InvalidBotIDDoesNotApplyRuntime(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	originalStart := startProtectionProxyForPolicy
+	originalStop := stopProtectionProxyForPolicy
+	originalSync := syncGatewaySandboxForPolicy
+	startProtectionProxyForPolicy = func(configJSON string) string {
+		t.Fatalf("start should not be called for invalid botId")
+		return ""
+	}
+	stopProtectionProxyForPolicy = func(assetName, assetID string) string {
+		t.Fatalf("stop should not be called for invalid botId: %s/%s", assetName, assetID)
+		return ""
+	}
+	syncGatewaySandboxForPolicy = func(assetName, assetID string) string {
+		t.Fatalf("sandbox sync should not be called for invalid botId: %s/%s", assetName, assetID)
+		return ""
+	}
+	t.Cleanup(func() {
+		startProtectionProxyForPolicy = originalStart
+		stopProtectionProxyForPolicy = originalStop
+		syncGatewaySandboxForPolicy = originalSync
+	})
+
+	_, ts, token := setupTestServer(t)
+	defer ts.Close()
+
+	body := bytes.NewBufferString(`{"botId":["wrong-bot"],"protection":"enabled"}`)
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1/protection/policy", body)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	assertStatusCode(t, resp.StatusCode, http.StatusNotFound)
+
+	apiResp := parseAPIResponse(t, resp.Body)
+	assertErrorCode(t, apiResp, CodeNotFound)
+	if !strings.Contains(apiResp.Message, "wrong-bot") {
+		t.Fatalf("expected not found message to include botId, got %q", apiResp.Message)
+	}
+
+	configs, err := repository.NewProtectionRepository(nil).GetAllProtectionConfigs()
+	if err != nil {
+		t.Fatalf("GetAllProtectionConfigs failed: %v", err)
+	}
+	if len(configs) != 0 {
+		t.Fatalf("expected no protection configs to be saved, got %d", len(configs))
+	}
+}
+
+func TestGetProtectionPolicy_ScannedBotWithoutConfigReturnsDefaultDisabled(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	registerScannedAPITestAsset(t, "PolicyScanOnlyGet", "policy-scan-only-get")
+
+	_, ts, token := setupTestServer(t)
+	defer ts.Close()
+
+	req := newAuthRequest(
+		"GET",
+		"/api/v1/protection/policy",
+		token,
+		bytes.NewBufferString(`{"botId":["policy-scan-only-get"]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	ts.Config.Handler.ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Code, http.StatusOK)
+
+	apiResp := parseAPIResponse(t, rec.Body)
+	assertErrorCode(t, apiResp, CodeSuccess)
+
+	items, ok := apiResp.Data.([]interface{})
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one policy item, got %#v", apiResp.Data)
+	}
+
+	item, ok := items[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected policy item map, got %#v", items[0])
+	}
+
+	if item["botId"] != "policy-scan-only-get" {
+		t.Fatalf("expected botId=policy-scan-only-get, got %#v", item["botId"])
+	}
+	if item["protection"] != "disabled" {
+		t.Fatalf("expected default protection=disabled, got %#v", item["protection"])
+	}
+}
+
+func TestSetProtectionPolicy_ScannedBotWithoutConfigCreatesConfig(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	registerScannedAPITestAsset(t, "PolicyScanOnlySet", "policy-scan-only-set")
+
+	_, ts, token := setupTestServer(t)
+	defer ts.Close()
+
+	body := bytes.NewBufferString(`{"botId":["policy-scan-only-set"],"protection":"enabled","botModel":{"provider":"openai","id":"gpt-4.1","url":"https://bot.example.com/v1","key":"bot-key"}}`)
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1/protection/policy", body)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	assertStatusCode(t, resp.StatusCode, http.StatusOK)
+
+	apiResp := parseAPIResponse(t, resp.Body)
+	assertErrorCode(t, apiResp, CodeSuccess)
+
+	config, err := repository.NewProtectionRepository(nil).GetProtectionConfig("PolicyScanOnlySet", "policy-scan-only-set")
+	if err != nil {
+		t.Fatalf("GetProtectionConfig failed: %v", err)
+	}
+	if config == nil {
+		t.Fatal("expected protection config to be created")
+	}
+	if !config.Enabled || config.AuditOnly {
+		t.Fatalf("expected enabled non-bypass config, got %+v", config)
+	}
+	if config.BotModelConfig == nil || config.BotModelConfig.Model != "gpt-4.1" {
+		t.Fatalf("expected bot model to be saved, got %+v", config.BotModelConfig)
+	}
+}
+
+func TestSetSecurityModel_SavesConfig(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	_, ts, token := setupTestServer(t)
+	defer ts.Close()
+
+	body := bytes.NewBufferString(`{"provider":"openai","id":"gpt-4.1","url":"https://api.openai.com/v1","key":"sec-key"}`)
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1/security/model", body)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	assertStatusCode(t, resp.StatusCode, http.StatusOK)
+	apiResp := parseAPIResponse(t, resp.Body)
+	assertErrorCode(t, apiResp, CodeSuccess)
+
+	saved, err := repository.NewSecurityModelConfigRepository(nil).Get()
+	if err != nil {
+		t.Fatalf("Get security model config failed: %v", err)
+	}
+	if saved == nil {
+		t.Fatal("expected security model config to be saved")
+	}
+	if saved.Provider != "openai" || saved.Model != "gpt-4.1" || saved.Endpoint != "https://api.openai.com/v1" || saved.APIKey != "sec-key" {
+		t.Fatalf("unexpected saved config: %+v", saved)
+	}
+}
+
+func TestSetSecurityModel_InvalidConfigReturnsBadRequest(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	_, ts, token := setupTestServer(t)
+	defer ts.Close()
+
+	body := bytes.NewBufferString(`{"provider":"openai","id":"","url":"https://api.openai.com/v1","key":"sec-key"}`)
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1/security/model", body)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	assertStatusCode(t, resp.StatusCode, http.StatusBadRequest)
+
+	apiResp := parseAPIResponse(t, resp.Body)
+	assertErrorCode(t, apiResp, CodeInvalidParam)
+	if !strings.Contains(apiResp.Message, "invalid security model config") {
+		t.Fatalf("unexpected error message: %s", apiResp.Message)
+	}
+}
+
+func TestSetSecurityModel_RefreshesStatusFileWhenExportRunning(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	statusFile := filepath.Join(t.TempDir(), "status.json")
+	server := NewAPIServer()
+	server.token = "test-token"
+	server.exportService = &ExportServiceImpl{
+		running:    true,
+		statusFile: statusFile,
+	}
+
+	handler := server.setupRoutes()
+	body := bytes.NewBufferString(`{"provider":"openai","id":"gpt-4.1","url":"https://api.openai.com/v1","key":"sec-key"}`)
+	req := newAuthRequest("POST", "/api/v1/security/model", "test-token", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Code, http.StatusOK)
+	apiResp := parseAPIResponse(t, rec.Body)
+	assertErrorCode(t, apiResp, CodeSuccess)
+
+	raw, err := os.ReadFile(statusFile)
+	if err != nil {
+		t.Fatalf("expected status file to be written: %v", err)
+	}
+
+	var status map[string]interface{}
+	if err := json.Unmarshal(raw, &status); err != nil {
+		t.Fatalf("failed to parse status file: %v", err)
+	}
+
+	securityModel, ok := status["securityModel"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected securityModel object in status file, got %#v", status["securityModel"])
+	}
+	if securityModel["provider"] != "openai" || securityModel["id"] != "gpt-4.1" || securityModel["url"] != "https://api.openai.com/v1" || securityModel["key"] != "sec-key" {
+		t.Fatalf("unexpected securityModel in status file: %#v", securityModel)
+	}
+}
+
+func TestApplyProtectionPolicyRuntime_StartsProxyWhenProtectionBecomesEnabled(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	if err := repository.NewSecurityModelConfigRepository(nil).Save(&repository.SecurityModelConfig{
+		Provider: "openai",
+		Endpoint: "https://example.com/v1",
+		APIKey:   "sec-key",
+		Model:    "gpt-4.1",
+	}); err != nil {
+		t.Fatalf("Save security model failed: %v", err)
+	}
+
+	var startPayload string
+	originalStart := startProtectionProxyForPolicy
+	originalStop := stopProtectionProxyForPolicy
+	originalSync := syncGatewaySandboxForPolicy
+	startProtectionProxyForPolicy = func(configJSON string) string {
+		startPayload = configJSON
+		return `{"success":true}`
+	}
+	stopProtectionProxyForPolicy = func(assetName, assetID string) string {
+		t.Fatalf("stop should not be called, asset=%s id=%s", assetName, assetID)
+		return ""
+	}
+	syncGatewaySandboxForPolicy = func(assetName, assetID string) string {
+		t.Fatalf("sync should not be called, asset=%s id=%s", assetName, assetID)
+		return ""
+	}
+	t.Cleanup(func() {
+		startProtectionProxyForPolicy = originalStart
+		stopProtectionProxyForPolicy = originalStop
+		syncGatewaySandboxForPolicy = originalSync
+	})
+
+	newConfig := &repository.ProtectionConfig{
+		AssetName:      "openclaw",
+		AssetID:        "bot-1",
+		Enabled:        true,
+		AuditOnly:      true,
+		BotModelConfig: &repository.BotModelConfigData{Provider: "openai", BaseURL: "https://bot.example.com/v1", APIKey: "bot-key", Model: "gpt-4o"},
+	}
+
+	applyProtectionPolicyRuntime(nil, newConfig, nil)
+
+	if startPayload == "" {
+		t.Fatal("expected start proxy to be called")
+	}
+
+	var startConfig proxy.ProtectionConfig
+	if err := json.Unmarshal([]byte(startPayload), &startConfig); err != nil {
+		t.Fatalf("Failed to parse start payload: %v", err)
+	}
+	if startConfig.AssetName != "openclaw" || startConfig.AssetID != "bot-1" {
+		t.Fatalf("unexpected asset identity: %+v", startConfig)
+	}
+	if startConfig.SecurityModel == nil || startConfig.SecurityModel.Provider != "openai" {
+		t.Fatalf("expected security model to be included, got %+v", startConfig.SecurityModel)
+	}
+	if startConfig.BotModel == nil || startConfig.BotModel.BaseURL != "https://bot.example.com/v1" {
+		t.Fatalf("expected bot model to be included, got %+v", startConfig.BotModel)
+	}
+	if startConfig.Runtime == nil || !startConfig.Runtime.AuditOnly {
+		t.Fatalf("expected runtime config with auditOnly=true, got %+v", startConfig.Runtime)
+	}
+}
+
+func TestApplyProtectionPolicyRuntime_StopsProxyWhenProtectionBecomesDisabled(t *testing.T) {
+	var stoppedAssetName, stoppedAssetID string
+	originalStart := startProtectionProxyForPolicy
+	originalStop := stopProtectionProxyForPolicy
+	originalSync := syncGatewaySandboxForPolicy
+	startProtectionProxyForPolicy = func(configJSON string) string {
+		t.Fatalf("start should not be called")
+		return ""
+	}
+	stopProtectionProxyForPolicy = func(assetName, assetID string) string {
+		stoppedAssetName = assetName
+		stoppedAssetID = assetID
+		return `{"success":true}`
+	}
+	syncGatewaySandboxForPolicy = func(assetName, assetID string) string {
+		t.Fatalf("sync should not be called")
+		return ""
+	}
+	t.Cleanup(func() {
+		startProtectionProxyForPolicy = originalStart
+		stopProtectionProxyForPolicy = originalStop
+		syncGatewaySandboxForPolicy = originalSync
+	})
+
+	oldConfig := &repository.ProtectionConfig{AssetName: "openclaw", AssetID: "bot-2", Enabled: true}
+	newConfig := &repository.ProtectionConfig{AssetName: "openclaw", AssetID: "bot-2", Enabled: false}
+
+	applyProtectionPolicyRuntime(oldConfig, newConfig, nil)
+
+	if stoppedAssetName != "openclaw" || stoppedAssetID != "bot-2" {
+		t.Fatalf("unexpected stop target: %s/%s", stoppedAssetName, stoppedAssetID)
+	}
+}
+
+func TestApplyProtectionPolicyRuntime_SyncsSandboxLikeUIFlow(t *testing.T) {
+	var syncCalls int
+	originalStart := startProtectionProxyForPolicy
+	originalStop := stopProtectionProxyForPolicy
+	originalSync := syncGatewaySandboxForPolicy
+	startProtectionProxyForPolicy = func(configJSON string) string {
+		t.Fatalf("start should not be called")
+		return ""
+	}
+	stopProtectionProxyForPolicy = func(assetName, assetID string) string {
+		t.Fatalf("stop should not be called")
+		return ""
+	}
+	syncGatewaySandboxForPolicy = func(assetName, assetID string) string {
+		syncCalls++
+		if assetName != "openclaw" || assetID != "bot-3" {
+			t.Fatalf("unexpected sync target: %s/%s", assetName, assetID)
+		}
+		return `{"success":true}`
+	}
+	t.Cleanup(func() {
+		startProtectionProxyForPolicy = originalStart
+		stopProtectionProxyForPolicy = originalStop
+		syncGatewaySandboxForPolicy = originalSync
+	})
+
+	oldConfig := &repository.ProtectionConfig{AssetName: "openclaw", AssetID: "bot-3", Enabled: true, SandboxEnabled: false}
+	newConfig := &repository.ProtectionConfig{AssetName: "openclaw", AssetID: "bot-3", Enabled: true, SandboxEnabled: true}
+
+	applyProtectionPolicyRuntime(oldConfig, newConfig, nil)
+
+	if syncCalls != 1 {
+		t.Fatalf("expected exactly one sandbox sync, got %d", syncCalls)
 	}
 }
 
@@ -1063,6 +1546,25 @@ func TestConvertToExternalPolicy_DefaultShape(t *testing.T) {
 	if resp.BotModel == nil {
 		t.Fatalf("botModel should always be present")
 	}
+	if resp.BotModel.Key != "" {
+		t.Fatalf("botModel.key should default to empty string, got %q", resp.BotModel.Key)
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal response failed: %v", err)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal response failed: %v", err)
+	}
+	botModel, ok := parsed["botModel"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("botModel should be an object in JSON")
+	}
+	if _, exists := botModel["key"]; !exists {
+		t.Fatalf("botModel.key should always be present in JSON output")
+	}
 }
 
 // ========== Logging Middleware Tests ==========
@@ -1314,6 +1816,88 @@ func TestDiscoveryInfo_JSONStructure(t *testing.T) {
 		if _, exists := parsed[field]; !exists {
 			t.Errorf("Expected field %q in DiscoveryInfo JSON", field)
 		}
+	}
+}
+
+// TestAPIServer_StartStop_DiscoveryAndHTTP 在本机真实监听 TCP、写入 api.json，并用 Bearer 调用 /api/v1/status。
+func TestAPIServer_StartStop_DiscoveryAndHTTP(t *testing.T) {
+	tmpHome := t.TempDir()
+	workspace := filepath.Join(t.TempDir(), "api_e2e_ws")
+	pm := core.GetPathManager()
+	if err := pm.ResetForTest(workspace, tmpHome); err != nil {
+		t.Fatalf("ResetForTest: %v", err)
+	}
+
+	var srv *APIServer
+	t.Cleanup(func() {
+		if srv != nil {
+			_ = srv.Stop()
+		}
+		_ = repository.CloseDB()
+		_ = pm.ResetForTest("", "")
+	})
+
+	dbPath := filepath.Join(workspace, "bot_sec_manager.db")
+	if err := repository.InitDB(dbPath); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+
+	srv = NewAPIServer()
+	if err := srv.Start(0); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	discoveryPath := filepath.Join(workspace, "api.json")
+	raw, err := os.ReadFile(discoveryPath)
+	if err != nil {
+		t.Fatalf("read discovery file: %v", err)
+	}
+	var disc map[string]interface{}
+	if err := json.Unmarshal(raw, &disc); err != nil {
+		t.Fatalf("discovery JSON: %v", err)
+	}
+	token, _ := disc["token"].(string)
+	if token == "" {
+		t.Fatal("discovery token empty")
+	}
+	portF, ok := disc["port"].(float64)
+	if !ok || portF <= 0 {
+		t.Fatalf("discovery port invalid: %#v", disc["port"])
+	}
+	port := int(portF)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest(
+		"GET",
+		fmt.Sprintf("http://127.0.0.1:%d/api/v1/status", port),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/v1/status: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	var apiResp APIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if apiResp.Code != CodeSuccess {
+		t.Fatalf("API code=%d msg=%s", apiResp.Code, apiResp.Message)
+	}
+
+	if err := srv.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if _, err := os.Stat(discoveryPath); !os.IsNotExist(err) {
+		t.Errorf("api.json should be removed after Stop, stat err=%v", err)
 	}
 }
 

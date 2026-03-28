@@ -55,9 +55,9 @@ class ApiService {
   /// 获取 api.json 路径，始终与 bot_sec_manager.db 同级。
   Future<String> getDiscoveryFilePath() async {
     await DatabaseService().init();
-    final dbPath = DatabaseService().dbPath;
-    if (dbPath != null && dbPath.isNotEmpty) {
-      return path.join(path.dirname(dbPath), 'api.json');
+    final appDataDir = DatabaseService().appDataDir;
+    if (appDataDir != null && appDataDir.isNotEmpty) {
+      return path.join(appDataDir, 'api.json');
     }
 
     // 回退：保持与 Application Support 目录一致。

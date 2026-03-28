@@ -24,6 +24,9 @@ func (s *APIServer) setupRoutes() http.Handler {
 	mux.HandleFunc("GET /api/v1/protection/policy", s.handleGetProtectionPolicy)
 	mux.HandleFunc("POST /api/v1/protection/policy", s.handleSetProtectionPolicy)
 
+	// Security model endpoint - manage global security model configuration
+	mux.HandleFunc("POST /api/v1/security/model", s.handleSetSecurityModel)
+
 	// Apply middleware chain: logging -> auth -> mux
 	// Note: loggingMiddleware is outermost so it captures all requests including auth failures
 	handler := loggingMiddleware(authMiddleware(s.token, mux))

@@ -68,6 +68,8 @@ class _ProtectionMonitorWindowAppState
       StreamController<List<SecurityEvent>>.broadcast();
   final StreamController<TruthRecordModel> _relayTruthRecordController =
       StreamController<TruthRecordModel>.broadcast();
+  final StreamController<void> _configReloadController =
+      StreamController<void>.broadcast();
 
   Stream<List<String>> get relayedLogBatches => _relayLogController.stream;
   Stream<ProtectionAnalysisResult> get relayedResultStream =>
@@ -78,6 +80,7 @@ class _ProtectionMonitorWindowAppState
       _relaySecurityEventController.stream;
   Stream<TruthRecordModel> get relayedTruthRecordStream =>
       _relayTruthRecordController.stream;
+  Stream<void> get configReloadStream => _configReloadController.stream;
 
   @override
   void initState() {
@@ -114,6 +117,20 @@ class _ProtectionMonitorWindowAppState
           } catch (e) {
             appLogger.error(
               '[Protection Monitor] Failed to update language',
+              e,
+            );
+          }
+        } else if (call.method == 'reloadProtectionConfig') {
+          try {
+            if (!_configReloadController.isClosed) {
+              _configReloadController.add(null);
+            }
+            appLogger.info(
+              '[Protection Monitor] Received reloadProtectionConfig',
+            );
+          } catch (e) {
+            appLogger.error(
+              '[Protection Monitor] Failed to reload protection config',
               e,
             );
           }
@@ -197,6 +214,7 @@ class _ProtectionMonitorWindowAppState
     _relayStatsController.close();
     _relaySecurityEventController.close();
     _relayTruthRecordController.close();
+    _configReloadController.close();
     super.dispose();
   }
 
@@ -258,6 +276,7 @@ class _ProtectionMonitorWindowAppState
         relayedTruthRecordStream: Platform.isLinux
             ? relayedTruthRecordStream
             : null,
+        configReloadStream: configReloadStream,
       ),
     );
   }
@@ -274,6 +293,7 @@ class ProtectionMonitorPage extends StatefulWidget {
   final Stream<Map<String, dynamic>>? relayedStatsStream;
   final Stream<List<SecurityEvent>>? relayedSecurityEventStream;
   final Stream<TruthRecordModel>? relayedTruthRecordStream;
+  final Stream<void>? configReloadStream;
 
   const ProtectionMonitorPage({
     super.key,
@@ -285,6 +305,7 @@ class ProtectionMonitorPage extends StatefulWidget {
     this.relayedStatsStream,
     this.relayedSecurityEventStream,
     this.relayedTruthRecordStream,
+    this.configReloadStream,
   });
 
   @override
@@ -377,6 +398,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
   StreamSubscription<dynamic>? _metricsSubscription;
   StreamSubscription<List<SecurityEvent>>? _securityEventSubscription;
   StreamSubscription<TruthRecordModel>? _truthRecordSubscription;
+  StreamSubscription<void>? _configReloadSubscription;
   bool _isRelayMode = false;
 
   // 安全事件
@@ -467,6 +489,10 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
         );
       }
       _initializeService();
+    });
+
+    _configReloadSubscription = widget.configReloadStream?.listen((_) {
+      _reloadProtectionConfig();
     });
   }
 
@@ -629,8 +655,9 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
         .then((dbEvents) {
           if (!mounted || dbEvents.isEmpty) return;
           final currentIds = _securityEvents.map((e) => e.id).toSet();
-          final newEvents =
-              dbEvents.where((e) => !currentIds.contains(e.id)).toList();
+          final newEvents = dbEvents
+              .where((e) => !currentIds.contains(e.id))
+              .toList();
           if (newEvents.isEmpty) return;
           setState(() {
             _securityEvents
@@ -1254,6 +1281,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
     _securityEventCatchUpTimer?.cancel();
     _pendingTruthByRequestId.clear();
     _truthRecordFrameFlushScheduled = false;
+    _configReloadSubscription?.cancel();
     logUpdateTimer?.cancel();
     resultUpdateTimer?.cancel();
     _logScrollController.dispose();

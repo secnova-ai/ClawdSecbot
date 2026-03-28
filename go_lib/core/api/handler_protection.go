@@ -16,6 +16,27 @@ import (
 
 var errProtectionPolicyNotFound = errors.New("protection policy not found")
 
+type protectionPolicyNotFoundError struct {
+	botID string
+}
+
+func (e *protectionPolicyNotFoundError) Error() string {
+	if e == nil || strings.TrimSpace(e.botID) == "" {
+		return errProtectionPolicyNotFound.Error()
+	}
+	return errProtectionPolicyNotFound.Error() + ": " + strings.TrimSpace(e.botID)
+}
+
+func (e *protectionPolicyNotFoundError) Unwrap() error {
+	return errProtectionPolicyNotFound
+}
+
+var (
+	startProtectionProxyForPolicy = proxy.StartProtectionProxyInternal
+	stopProtectionProxyForPolicy  = proxy.StopProtectionProxyByAssetInternal
+	syncGatewaySandboxForPolicy   = core.SyncGatewaySandboxByAssetAndPlugin
+)
+
 // ========== External API Types (matching _rules/setting_task.md) ==========
 
 // ProtectionPolicyRequest represents the external API format for protection policy.
@@ -71,7 +92,7 @@ type BotModelConfig struct {
 	Provider string `json:"provider"`
 	ID       string `json:"id"`
 	URL      string `json:"url"`
-	Key      string `json:"key,omitempty"`
+	Key      string `json:"key"`
 }
 
 // ProtectionPolicyResponse represents the response format for protection policy.
@@ -96,6 +117,11 @@ func (s *APIServer) handleGetProtectionPolicy(w http.ResponseWriter, r *http.Req
 	repo := repository.NewProtectionRepository(nil)
 	botIDs, err := resolveRequestedBotIDs(repo, req.BotID)
 	if err != nil {
+		if errors.Is(err, errProtectionPolicyNotFound) {
+			missingBotID := extractProtectionPolicyMissingBotID(err, req.BotID)
+			Error(w, http.StatusNotFound, CodeNotFound, "protection config not found for botId: "+missingBotID)
+			return
+		}
 		logging.Error("API: Failed to resolve requested botIds: %v", err)
 		Error(w, http.StatusInternalServerError, CodeInternalError, "failed to query protection configs")
 		return
@@ -145,6 +171,11 @@ func (s *APIServer) handleSetProtectionPolicy(w http.ResponseWriter, r *http.Req
 	repo := repository.NewProtectionRepository(nil)
 	botIDs, err := resolveRequestedBotIDs(repo, req.BotID)
 	if err != nil {
+		if errors.Is(err, errProtectionPolicyNotFound) {
+			missingBotID := extractProtectionPolicyMissingBotID(err, req.BotID)
+			Error(w, http.StatusNotFound, CodeNotFound, "protection config not found for botId: "+missingBotID)
+			return
+		}
 		logging.Error("API: Failed to resolve requested botIds: %v", err)
 		Error(w, http.StatusInternalServerError, CodeInternalError, "failed to query protection configs")
 		return
@@ -204,7 +235,14 @@ func buildProtectionPolicyResponse(repo *repository.ProtectionRepository, botID 
 		return nil, err
 	}
 	if config == nil {
-		return nil, errProtectionPolicyNotFound
+		assetName, err := resolveAssetNameByBotID(repo, botID)
+		if err != nil {
+			return nil, err
+		}
+		config = &repository.ProtectionConfig{
+			AssetName: assetName,
+			AssetID:   botID,
+		}
 	}
 
 	response := convertToExternalPolicy(config, botID)
@@ -239,6 +277,13 @@ func updateProtectionPolicyForBotID(repo *repository.ProtectionRepository, botID
 	if err != nil {
 		return err
 	}
+	if existingConfig == nil {
+		assetName, err = resolveAssetNameByBotID(repo, botID)
+		if err != nil {
+			return err
+		}
+	}
+	previousConfig := cloneProtectionConfig(existingConfig)
 
 	config := &repository.ProtectionConfig{
 		AssetName: assetName,
@@ -246,10 +291,6 @@ func updateProtectionPolicyForBotID(repo *repository.ProtectionRepository, botID
 	}
 	if existingConfig != nil {
 		config = existingConfig
-	}
-	if assetName == "" {
-		assetName = "openclaw"
-		config.AssetName = assetName
 	}
 
 	switch req.Protection {
@@ -305,14 +346,20 @@ func updateProtectionPolicyForBotID(repo *repository.ProtectionRepository, botID
 		}
 	}
 
-	applyProtectionPolicyRuntime(config, req.UserRules)
+	applyProtectionPolicyRuntime(previousConfig, config, req.UserRules)
 	logging.Info("API: Protection policy updated for botId=%s", botID)
 	return nil
 }
 
 func resolveRequestedBotIDs(repo *repository.ProtectionRepository, requested []string) ([]string, error) {
 	if len(requested) > 0 {
-		return normalizeBotIDs(requested), nil
+		botIDs := normalizeBotIDs(requested)
+		for _, botID := range botIDs {
+			if _, err := resolveAssetNameByBotID(repo, botID); err != nil {
+				return nil, err
+			}
+		}
+		return botIDs, nil
 	}
 
 	configs, err := repo.GetAllProtectionConfigs()
@@ -329,6 +376,40 @@ func resolveRequestedBotIDs(repo *repository.ProtectionRepository, requested []s
 	}
 
 	return normalizeBotIDs(botIDs), nil
+}
+
+func resolveAssetNameByBotID(repo *repository.ProtectionRepository, botID string) (string, error) {
+	config, assetName, err := findProtectionConfigByBotID(repo, botID)
+	if err != nil {
+		return "", err
+	}
+	if config != nil && strings.TrimSpace(assetName) != "" {
+		return strings.TrimSpace(assetName), nil
+	}
+
+	plugin := core.GetPluginManager().GetPluginByAssetID(botID)
+	if plugin != nil {
+		assetName = strings.TrimSpace(plugin.GetAssetName())
+		if assetName != "" {
+			return assetName, nil
+		}
+	}
+
+	return "", &protectionPolicyNotFoundError{botID: botID}
+}
+
+func extractProtectionPolicyMissingBotID(err error, fallback []string) string {
+	var notFoundErr *protectionPolicyNotFoundError
+	if errors.As(err, &notFoundErr) && notFoundErr != nil && strings.TrimSpace(notFoundErr.botID) != "" {
+		return strings.TrimSpace(notFoundErr.botID)
+	}
+	for _, botID := range fallback {
+		trimmed := strings.TrimSpace(botID)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func normalizeBotIDs(botIDs []string) []string {
@@ -435,7 +516,7 @@ func defaultPermissionConfig() *PermissionConfig {
 }
 
 func findProtectionConfigByBotID(repo *repository.ProtectionRepository, botID string) (*repository.ProtectionConfig, string, error) {
-	configs, err := repo.GetEnabledProtectionConfigs()
+	configs, err := repo.GetAllProtectionConfigs()
 	if err != nil {
 		return nil, "", err
 	}
@@ -459,8 +540,87 @@ func findProtectionConfigByBotID(repo *repository.ProtectionRepository, botID st
 	return nil, "", nil
 }
 
-func applyProtectionPolicyRuntime(config *repository.ProtectionConfig, userRules []string) {
+func cloneProtectionConfig(config *repository.ProtectionConfig) *repository.ProtectionConfig {
+	if config == nil {
+		return nil
+	}
+	cloned := *config
+	if config.BotModelConfig != nil {
+		botModelCopy := *config.BotModelConfig
+		cloned.BotModelConfig = &botModelCopy
+	}
+	return &cloned
+}
+
+func buildPolicyProxyConfig(config *repository.ProtectionConfig) (*proxy.ProtectionConfig, error) {
+	if config == nil {
+		return nil, errors.New("protection config is nil")
+	}
+	if config.AssetName == "" || config.AssetID == "" {
+		return nil, errors.New("asset identity is incomplete")
+	}
+	if config.BotModelConfig == nil {
+		return nil, errors.New("bot model config is required")
+	}
+
+	securityModel, err := repository.NewSecurityModelConfigRepository(nil).Get()
+	if err != nil {
+		return nil, err
+	}
+	if securityModel == nil {
+		return nil, errors.New("security model config is required")
+	}
+
+	return &proxy.ProtectionConfig{
+		AssetName:     config.AssetName,
+		AssetID:       config.AssetID,
+		SecurityModel: securityModel,
+		BotModel: &proxy.BotModelConfig{
+			Provider:  config.BotModelConfig.Provider,
+			BaseURL:   config.BotModelConfig.BaseURL,
+			APIKey:    config.BotModelConfig.APIKey,
+			Model:     config.BotModelConfig.Model,
+			SecretKey: config.BotModelConfig.SecretKey,
+		},
+		Runtime: &proxy.ProtectionRuntimeConfig{
+			AuditOnly:               config.AuditOnly,
+			SingleSessionTokenLimit: config.SingleSessionTokenLimit,
+			DailyTokenLimit:         config.DailyTokenLimit,
+		},
+	}, nil
+}
+
+func applyProtectionPolicyRuntime(previousConfig, config *repository.ProtectionConfig, userRules []string) {
 	if config == nil || config.AssetName == "" || config.AssetID == "" {
+		return
+	}
+
+	wasEnabled := previousConfig != nil && previousConfig.Enabled
+	oldSandboxEnabled := previousConfig != nil && previousConfig.SandboxEnabled
+
+	if !wasEnabled && config.Enabled {
+		protectionConfig, err := buildPolicyProxyConfig(config)
+		if err != nil {
+			logging.Warning("API: Failed to build proxy config for botId=%s: %v", config.AssetID, err)
+			return
+		}
+		configJSON, err := json.Marshal(protectionConfig)
+		if err != nil {
+			logging.Warning("API: Failed to marshal proxy config for botId=%s: %v", config.AssetID, err)
+			return
+		}
+		startResult := startProtectionProxyForPolicy(string(configJSON))
+		if strings.Contains(startResult, `"success":false`) {
+			logging.Warning("API: Failed to start protection proxy for botId=%s: %s", config.AssetID, startResult)
+		}
+		return
+	}
+
+	if wasEnabled && !config.Enabled {
+		stopResult := stopProtectionProxyForPolicy(config.AssetName, config.AssetID)
+		if strings.Contains(stopResult, `"success":false`) {
+			logging.Warning("API: Failed to stop protection proxy for botId=%s: %s", config.AssetID, stopResult)
+		}
 		return
 	}
 
@@ -477,7 +637,9 @@ func applyProtectionPolicyRuntime(config *repository.ProtectionConfig, userRules
 		}
 	}
 
-	if syncResult := core.SyncGatewaySandboxByAssetAndPlugin(config.AssetName, config.AssetID); strings.Contains(syncResult, `"success":false`) {
-		logging.Warning("API: Failed to sync gateway sandbox for botId=%s: %s", config.AssetID, syncResult)
+	if config.SandboxEnabled || oldSandboxEnabled {
+		if syncResult := syncGatewaySandboxForPolicy(config.AssetName, config.AssetID); strings.Contains(syncResult, `"success":false`) {
+			logging.Warning("API: Failed to sync gateway sandbox for botId=%s: %s", config.AssetID, syncResult)
+		}
 	}
 }
