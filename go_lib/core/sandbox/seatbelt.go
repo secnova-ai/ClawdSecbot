@@ -17,7 +17,7 @@ type SeatbeltPolicy struct {
 
 // NewSeatbeltPolicy creates a new policy generator
 func NewSeatbeltPolicy(config SandboxConfig) *SeatbeltPolicy {
-	return &SeatbeltPolicy{Config: config}
+	return &SeatbeltPolicy{Config: normalizeSandboxConfig(config)}
 }
 
 // GeneratePolicy generates a complete Seatbelt policy file content
@@ -351,5 +351,3 @@ func ValidateNetworkAddresses(addresses []string) []string {
 	}
 	return errors
 }
-
-

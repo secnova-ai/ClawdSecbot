@@ -585,7 +585,8 @@ SQLite
 - `go_lib/core/service/bot_model_config_service.go` - Bot 模型配置服务
 - `go_lib/core/service/app_settings_service.go` - 应用设置服务
 - `go_lib/core/sandbox/seatbelt.go` - macOS Seatbelt 沙箱策略生成
+- `go_lib/core/sandbox/macos_hook/` - macOS 沙箱入口目录(当前由 Seatbelt 方案实现)
 - `go_lib/core/sandbox/preload_linux.go` - Linux LD_PRELOAD 沙箱策略生成
 - `go_lib/core/sandbox/manager_linux.go` - Linux 沙箱管理器
 - `go_lib/plugins/openclaw/gateway_platform_linux.go` - Linux systemd unit 注入与网关管理
-- `sandbox/preload.c` - LD_PRELOAD 共享库源码(拦截 open/openat/connect/getaddrinfo/system/execve)
+- `go_lib/core/sandbox/linux_hook/preload.c` - Linux LD_PRELOAD 沙箱源码(拦截 open/openat/connect/getaddrinfo/system/execve 等)

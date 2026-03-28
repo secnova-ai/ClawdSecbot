@@ -49,6 +49,7 @@ target_link_libraries(sandbox_hook PRIVATE
     cjson
     ws2_32
     shlwapi
+    iphlpapi
 )
 
 set_target_properties(sandbox_hook PROPERTIES

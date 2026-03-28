@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"go_lib/core/logging"
@@ -54,6 +55,90 @@ type SandboxConfig struct {
 	ShellPermission   ShellPermissionConfig   `json:"shell_permission"`
 }
 
+// 规范化沙箱配置，保证三平台策略生成行为一致。
+func normalizeSandboxConfig(config SandboxConfig) SandboxConfig {
+	config.PathPermission.Mode = normalizePermissionMode(config.PathPermission.Mode)
+	config.NetworkPermission.Inbound.Mode = normalizePermissionMode(config.NetworkPermission.Inbound.Mode)
+	config.NetworkPermission.Outbound.Mode = normalizePermissionMode(config.NetworkPermission.Outbound.Mode)
+	config.ShellPermission.Mode = normalizePermissionMode(config.ShellPermission.Mode)
+
+	config.PathPermission.Paths = normalizePathEntries(config.PathPermission.Paths)
+	config.NetworkPermission.Inbound.Addresses = normalizeNetworkEntries(config.NetworkPermission.Inbound.Addresses)
+	config.NetworkPermission.Outbound.Addresses = normalizeNetworkEntries(config.NetworkPermission.Outbound.Addresses)
+	config.ShellPermission.Commands = normalizeCommandEntries(config.ShellPermission.Commands)
+
+	config.GatewayBinaryPath = normalizePathValue(config.GatewayBinaryPath)
+	config.GatewayConfigPath = normalizePathValue(config.GatewayConfigPath)
+	return config
+}
+
+// 统一权限模式默认值，异常值回退为黑名单模式。
+func normalizePermissionMode(mode PermissionMode) PermissionMode {
+	if mode == ModeWhitelist {
+		return ModeWhitelist
+	}
+	return ModeBlacklist
+}
+
+// 规范化单个路径值。
+func normalizePathValue(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	return filepath.Clean(expandPath(trimmed))
+}
+
+// 规范化路径列表：去空、展开、规整、去重。
+func normalizePathEntries(paths []string) []string {
+	return normalizeUnique(paths, func(v string) string {
+		return normalizePathValue(v)
+	})
+}
+
+// 规范化命令列表：去空、转小写、去重。
+func normalizeCommandEntries(commands []string) []string {
+	return normalizeUnique(commands, func(v string) string {
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return ""
+		}
+		return strings.ToLower(trimmed)
+	})
+}
+
+// 规范化网络地址列表：去空、转小写、去重。
+func normalizeNetworkEntries(addresses []string) []string {
+	return normalizeUnique(addresses, func(v string) string {
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return ""
+		}
+		return strings.ToLower(trimmed)
+	})
+}
+
+// 通用列表规范化与稳定去重。
+func normalizeUnique(values []string, transform func(string) string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized := transform(value)
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
+}
+
 // SandboxStatus represents the current sandbox status
 type SandboxStatus struct {
 	Running          bool   `json:"running"`
@@ -96,14 +181,51 @@ func SanitizeAssetNamePublic(name string) string {
 
 // isDomainName checks whether an address string is a domain name (not an IP)
 func isDomainName(addr string) bool {
-	host := addr
-	if h, _, err := net.SplitHostPort(addr); err == nil {
-		host = h
+	host := extractNetworkHost(addr)
+	if isIPv4WildcardPattern(host) {
+		return false
 	}
 	if net.ParseIP(host) != nil {
 		return false
 	}
 	return strings.Contains(host, ".")
+}
+
+// extractNetworkHost 提取网络地址中的 host 部分，并清理 IPv6 方括号与空白。
+func extractNetworkHost(addr string) string {
+	host := strings.TrimSpace(addr)
+	if host == "" {
+		return ""
+	}
+
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	return strings.TrimSpace(host)
+}
+
+// isIPv4WildcardPattern 判断字符串是否为 IPv4 星号通配模式（如 10.0.*.*）。
+func isIPv4WildcardPattern(host string) bool {
+	if !strings.Contains(host, "*") {
+		return false
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "*" {
+			continue
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 0 || n > 255 {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveDomainsToIPs resolves a list of domain names to IP addresses
@@ -127,15 +249,41 @@ func resolveDomainsToIPs(domains []string) []string {
 
 // classifyAddresses splits addresses into IPs and domains, resolving domains to IPs as well
 func classifyAddresses(addresses []string) (ips []string, domains []string) {
+	seenIPs := make(map[string]struct{}, len(addresses))
+	seenDomains := make(map[string]struct{}, len(addresses))
+
 	for _, addr := range addresses {
-		if isDomainName(addr) {
-			domains = append(domains, addr)
+		host := extractNetworkHost(addr)
+		if host == "" {
+			continue
+		}
+		normalized := strings.ToLower(host)
+		if isDomainName(normalized) {
+			if _, exists := seenDomains[normalized]; exists {
+				continue
+			}
+			seenDomains[normalized] = struct{}{}
+			domains = append(domains, normalized)
 		} else {
-			ips = append(ips, addr)
+			if _, exists := seenIPs[normalized]; exists {
+				continue
+			}
+			seenIPs[normalized] = struct{}{}
+			ips = append(ips, normalized)
 		}
 	}
 	resolvedIPs := resolveDomainsToIPs(domains)
-	ips = append(ips, resolvedIPs...)
+	for _, ip := range resolvedIPs {
+		normalized := strings.ToLower(strings.TrimSpace(ip))
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seenIPs[normalized]; exists {
+			continue
+		}
+		seenIPs[normalized] = struct{}{}
+		ips = append(ips, normalized)
+	}
 	return
 }
 

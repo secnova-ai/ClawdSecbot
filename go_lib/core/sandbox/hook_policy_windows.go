@@ -30,6 +30,8 @@ func (c *HookConfig) ToPolicyJSON() ([]byte, error) {
 
 // buildHookConfig converts SandboxConfig to HookConfig for Windows
 func buildHookConfig(config SandboxConfig) *HookConfig {
+	config = normalizeSandboxConfig(config)
+
 	hc := &HookConfig{
 		FilePolicyType:    "blacklist",
 		BlockedPaths:      []string{},
