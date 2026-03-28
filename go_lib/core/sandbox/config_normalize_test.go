@@ -1,6 +1,9 @@
 package sandbox
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestNormalizeSandboxConfig_DeduplicateAndCleanEntries(t *testing.T) {
 	cfg := SandboxConfig{
@@ -41,8 +44,9 @@ func TestNormalizeSandboxConfig_DeduplicateAndCleanEntries(t *testing.T) {
 		t.Fatalf("ShellPermission.Mode = %q, want %q", got.ShellPermission.Mode, ModeWhitelist)
 	}
 
-	if len(got.PathPermission.Paths) != 1 || got.PathPermission.Paths[0] != "/tmp" {
-		t.Fatalf("PathPermission.Paths = %v, want [/tmp]", got.PathPermission.Paths)
+	wantTmpPath := filepath.Clean("/tmp")
+	if len(got.PathPermission.Paths) != 1 || got.PathPermission.Paths[0] != wantTmpPath {
+		t.Fatalf("PathPermission.Paths = %v, want [%s]", got.PathPermission.Paths, wantTmpPath)
 	}
 	if len(got.NetworkPermission.Outbound.Addresses) != 2 ||
 		got.NetworkPermission.Outbound.Addresses[0] != "example.com:443" ||
@@ -55,10 +59,12 @@ func TestNormalizeSandboxConfig_DeduplicateAndCleanEntries(t *testing.T) {
 	if len(got.ShellPermission.Commands) != 1 || got.ShellPermission.Commands[0] != "curl" {
 		t.Fatalf("ShellPermission.Commands = %v, want [curl]", got.ShellPermission.Commands)
 	}
-	if got.GatewayBinaryPath != "/usr/bin/openclaw" {
-		t.Fatalf("GatewayBinaryPath = %q, want /usr/bin/openclaw", got.GatewayBinaryPath)
+	wantGatewayBinaryPath := filepath.Clean("/usr/bin/openclaw")
+	if got.GatewayBinaryPath != wantGatewayBinaryPath {
+		t.Fatalf("GatewayBinaryPath = %q, want %q", got.GatewayBinaryPath, wantGatewayBinaryPath)
 	}
-	if got.GatewayConfigPath != "/tmp/openclaw.json" {
-		t.Fatalf("GatewayConfigPath = %q, want /tmp/openclaw.json", got.GatewayConfigPath)
+	wantGatewayConfigPath := filepath.Clean("/tmp/openclaw.json")
+	if got.GatewayConfigPath != wantGatewayConfigPath {
+		t.Fatalf("GatewayConfigPath = %q, want %q", got.GatewayConfigPath, wantGatewayConfigPath)
 	}
 }

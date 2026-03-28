@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
-#include <shlwapi.h>
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
 
