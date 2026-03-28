@@ -41,6 +41,7 @@
 - `NativeLibraryService` 是 Flutter 侧动态库加载唯一入口：
   主 Isolate 复用缓存实例；后台 Isolate 通过 `libraryPath` 重新打开。
 - Go -> Dart 消息优先使用 FFI callback（`MessageBridgeService` + `NativeCallable.listener`），轮询仅作为降级路径。
+- 路径统一由 core 派生；Flutter 仅传基础目录，禁止分别传 db/log/version 等具体路径。
 
 ## 6. 插件与资产规范
 

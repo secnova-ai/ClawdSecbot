@@ -6,18 +6,20 @@ import (
 	"path/filepath"
 	"testing"
 
+	"go_lib/core"
 	"go_lib/core/repository"
 
 	_ "modernc.org/sqlite"
 )
 
-// TestInitializeDatabase 验证数据库初始化
+// TestInitializeDatabase verifies database initialization.
 func TestInitializeDatabase(t *testing.T) {
 	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "test.db")
+	tmpFile := filepath.Join(tmpDir, "bot_sec_manager.db")
 	versionFile := filepath.Join(tmpDir, "bot_sec_manager.version")
+	mustInitPathManager(t, tmpDir)
 
-	result := InitializeDatabase(mustInitDatabaseRequestJSON(t, tmpFile, versionFile, "1.0.1"))
+	result := InitializeDatabase(mustInitDatabaseRequestJSON(t, "1.0.1"))
 	defer repository.CloseDB()
 
 	if result["success"] != true {
@@ -31,7 +33,7 @@ func TestInitializeDatabase(t *testing.T) {
 		t.Errorf("Expected path=%s, got: %v", tmpFile, data["path"])
 	}
 
-	// 验证数据库可用
+	// Verify the shared database is available.
 	db := repository.GetDB()
 	if db == nil {
 		t.Fatal("GetDB returned nil after InitializeDatabase")
@@ -46,26 +48,25 @@ func TestInitializeDatabase(t *testing.T) {
 	}
 }
 
-// TestInitializeDatabase_InvalidPath 验证无效路径返回错误
-func TestInitializeDatabase_InvalidPath(t *testing.T) {
-	result := InitializeDatabase(mustInitDatabaseRequestJSON(
-		t,
-		"/nonexistent/dir/test.db",
-		"/nonexistent/dir/bot_sec_manager.version",
-		"1.0.1",
-	))
+// TestInitializeDatabase_PathManagerNotInitialized verifies init fails when
+// core path state is unavailable.
+func TestInitializeDatabase_PathManagerNotInitialized(t *testing.T) {
+	if err := core.GetPathManager().ResetForTest("", ""); err != nil {
+		t.Fatalf("Failed to reset path manager: %v", err)
+	}
+	result := InitializeDatabase(mustInitDatabaseRequestJSON(t, "1.0.1"))
 	defer repository.CloseDB()
 
 	if result["success"] != false {
-		t.Errorf("Expected success=false for invalid path, got: %v", result)
+		t.Errorf("Expected success=false for uninitialized path manager, got: %v", result)
 	}
 	if result["error"] == nil {
-		t.Error("Expected error message for invalid path")
+		t.Error("Expected error message for uninitialized path manager")
 	}
 }
 
 func TestInitializeDatabase_InvalidRequest(t *testing.T) {
-	result := InitializeDatabase(`{"db_path":""}`)
+	result := InitializeDatabase(`{}`)
 	if result["success"] != false {
 		t.Fatalf("Expected success=false, got: %v", result)
 	}
@@ -74,20 +75,28 @@ func TestInitializeDatabase_InvalidRequest(t *testing.T) {
 	}
 }
 
-// TestCloseDatabase 验证数据库关闭
+// TestCloseDatabase verifies database shutdown.
 func TestCloseDatabase(t *testing.T) {
 	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "test.db")
+	tmpFile := filepath.Join(tmpDir, "bot_sec_manager.db")
 	versionFile := filepath.Join(tmpDir, "bot_sec_manager.version")
-	InitializeDatabase(mustInitDatabaseRequestJSON(t, tmpFile, versionFile, "1.0.1"))
+	mustInitPathManager(t, tmpDir)
+	InitializeDatabase(mustInitDatabaseRequestJSON(t, "1.0.1"))
 
 	result := CloseDatabase()
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
+
+	if _, err := os.Stat(tmpFile); err != nil {
+		t.Fatalf("Expected database file to exist: %v", err)
+	}
+	if _, err := os.Stat(versionFile); err != nil {
+		t.Fatalf("Expected version file to exist: %v", err)
+	}
 }
 
-// TestCloseDatabase_NotInitialized 验证未初始化时关闭不报错
+// TestCloseDatabase_NotInitialized verifies closing before initialization is safe.
 func TestCloseDatabase_NotInitialized(t *testing.T) {
 	result := CloseDatabase()
 	if result["success"] != true {
@@ -95,18 +104,11 @@ func TestCloseDatabase_NotInitialized(t *testing.T) {
 	}
 }
 
-func mustInitDatabaseRequestJSON(
-	t *testing.T,
-	dbPath,
-	versionFilePath,
-	currentVersion string,
-) string {
+func mustInitDatabaseRequestJSON(t *testing.T, currentVersion string) string {
 	t.Helper()
 
 	request := InitializeDatabaseRequest{
-		DBPath:          dbPath,
-		CurrentVersion:  currentVersion,
-		VersionFilePath: versionFilePath,
+		CurrentVersion: currentVersion,
 	}
 
 	data, err := json.Marshal(request)
@@ -115,4 +117,12 @@ func mustInitDatabaseRequestJSON(
 	}
 
 	return string(data)
+}
+
+func mustInitPathManager(t *testing.T, workspaceDir string) {
+	t.Helper()
+
+	if err := core.GetPathManager().ResetForTest(workspaceDir, t.TempDir()); err != nil {
+		t.Fatalf("Failed to initialize path manager: %v", err)
+	}
 }

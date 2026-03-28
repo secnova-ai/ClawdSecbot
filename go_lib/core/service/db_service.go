@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"go_lib/core"
 	"go_lib/core/logging"
 	"go_lib/core/repository"
 )
@@ -14,14 +15,11 @@ import (
 // ========== Database lifecycle management ==========
 
 type InitializeDatabaseRequest struct {
-	DBPath          string `json:"db_path"`
-	CurrentVersion  string `json:"current_version"`
-	VersionFilePath string `json:"version_file_path"`
+	CurrentVersion string `json:"current_version"`
 }
 
 // InitializeDatabase initializes the database connection.
-// Request must use JSON input and include
-// db_path/current_version/version_file_path.
+// Request must use JSON input and include current_version.
 func InitializeDatabase(requestJSON string) map[string]interface{} {
 	var request InitializeDatabaseRequest
 	if err := json.Unmarshal([]byte(requestJSON), &request); err != nil {
@@ -29,27 +27,26 @@ func InitializeDatabase(requestJSON string) map[string]interface{} {
 		return errorResult(fmt.Errorf("invalid InitializeDatabase request: %w", err))
 	}
 
-	if request.DBPath == "" {
-		return errorResult(fmt.Errorf("db_path is required"))
-	}
 	if request.CurrentVersion == "" {
 		return errorResult(fmt.Errorf("current_version is required"))
 	}
-	if request.VersionFilePath == "" {
-		return errorResult(fmt.Errorf("version_file_path is required"))
+
+	pm := core.GetPathManager()
+	if !pm.IsInitialized() {
+		return errorResult(fmt.Errorf("path manager is not initialized"))
 	}
 
 	logging.Info(
 		"Initializing database: db_path=%s current_version=%s version_file=%s",
-		request.DBPath,
+		pm.GetDBPath(),
 		request.CurrentVersion,
-		request.VersionFilePath,
+		pm.GetVersionFilePath(),
 	)
 
 	summary, err := repository.InitDBWithVersion(
-		request.DBPath,
+		pm.GetDBPath(),
 		request.CurrentVersion,
-		request.VersionFilePath,
+		pm.GetVersionFilePath(),
 	)
 	if err != nil {
 		logging.Error("Failed to initialize database: %v", err)
@@ -57,12 +54,13 @@ func InitializeDatabase(requestJSON string) map[string]interface{} {
 	}
 
 	return successDataResult(map[string]interface{}{
-		"path":             request.DBPath,
-		"current_version":  summary.CurrentVersion,
-		"previous_version": summary.PreviousVersion,
-		"version_source":   summary.VersionSource,
-		"fresh_install":    summary.FreshInstall,
-		"upgraded":         summary.Upgraded,
+		"path":              pm.GetDBPath(),
+		"current_version":   summary.CurrentVersion,
+		"previous_version":  summary.PreviousVersion,
+		"version_source":    summary.VersionSource,
+		"fresh_install":     summary.FreshInstall,
+		"upgraded":          summary.Upgraded,
+		"version_file_path": pm.GetVersionFilePath(),
 	})
 }
 

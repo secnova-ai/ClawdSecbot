@@ -159,9 +159,13 @@ class NativeLibraryService {
 
   /// 初始化Go路径管理器
   void _initGoPaths(ffi.DynamicLibrary dylib, FreeStringDart freeStr) {
-    // workspaceDir 使用插件目录的父目录
-    final pluginDir = _getPluginDirectory();
-    final workspaceDir = pluginDir.parent.path;
+    final appDataDir = DatabaseService().appDataDir;
+    if (appDataDir == null) {
+      appLogger.warning(
+        '[NativeLib] Cannot init Go paths: app data dir unavailable',
+      );
+      return;
+    }
     // homeDir 使用用户主目录
     final homeDir =
         Platform.environment['HOME'] ??
@@ -171,7 +175,7 @@ class NativeLibraryService {
     try {
       final initPathsFFI = dylib
           .lookupFunction<_InitPathsFFIC, _InitPathsFFIDart>('InitPathsFFI');
-      final workspaceDirPtr = workspaceDir.toNativeUtf8();
+      final workspaceDirPtr = appDataDir.toNativeUtf8();
       final homeDirPtr = homeDir.toNativeUtf8();
       final resultPtr = initPathsFFI(workspaceDirPtr, homeDirPtr);
       final result = resultPtr.toDartString();
@@ -186,15 +190,12 @@ class NativeLibraryService {
 
   /// 初始化Go日志
   void _initGoLogging(ffi.DynamicLibrary dylib, FreeStringDart freeStr) {
-    final logDir = appLogger.logDir;
-    if (logDir == null) return;
-
     try {
       final initLoggingFFI = dylib
           .lookupFunction<_InitLoggingFFIC, _InitLoggingFFIDart>(
             'InitLoggingFFI',
           );
-      final logDirPtr = logDir.toNativeUtf8();
+      final logDirPtr = ''.toNativeUtf8();
       final resultPtr = initLoggingFFI(logDirPtr);
       final result = resultPtr.toDartString();
       freeStr(resultPtr);
@@ -210,15 +211,9 @@ class NativeLibraryService {
     ffi.DynamicLibrary dylib,
     FreeStringDart freeStr,
   ) async {
-    final dbPathStr = DatabaseService().dbPath;
-    final versionFilePathStr = DatabaseService().versionFilePath;
-    if (dbPathStr == null) {
-      appLogger.warning('[NativeLib] Cannot init Go DB: DB path unavailable');
-      return;
-    }
-    if (versionFilePathStr == null) {
+    if (DatabaseService().appDataDir == null) {
       appLogger.warning(
-        '[NativeLib] Cannot init Go DB: version file path unavailable',
+        '[NativeLib] Cannot init Go DB: app data dir unavailable',
       );
       return;
     }
@@ -227,11 +222,7 @@ class NativeLibraryService {
       final packageInfo = await PackageInfo.fromPlatform();
       final initDatabase = dylib
           .lookupFunction<_InitDatabaseC, _InitDatabaseDart>('InitDatabase');
-      final requestJson = jsonEncode({
-        'db_path': dbPathStr,
-        'version_file_path': versionFilePathStr,
-        'current_version': packageInfo.version,
-      });
+      final requestJson = jsonEncode({'current_version': packageInfo.version});
       final requestPtr = requestJson.toNativeUtf8();
       final resultPtr = initDatabase(requestPtr);
       final result = resultPtr.toDartString();
