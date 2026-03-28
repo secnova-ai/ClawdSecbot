@@ -15,16 +15,22 @@ import (
 // ==================== record_security_event ====================
 
 // NewRecordSecurityEventTool creates the record_security_event tool.
-func NewRecordSecurityEventTool(assetName, assetID string) tool.BaseTool {
+func NewRecordSecurityEventTool(assetName, assetID string, requestID ...string) tool.BaseTool {
+	reqID := ""
+	if len(requestID) > 0 {
+		reqID = requestID[0]
+	}
 	return &recordSecurityEventTool{
 		assetName: strings.TrimSpace(assetName),
 		assetID:   strings.TrimSpace(assetID),
+		requestID: strings.TrimSpace(reqID),
 	}
 }
 
 type recordSecurityEventTool struct {
 	assetName string
 	assetID   string
+	requestID string
 }
 
 func (t *recordSecurityEventTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
@@ -79,6 +85,7 @@ func (t *recordSecurityEventTool) InvokableRun(ctx context.Context, argumentsInJ
 		Source:     "react_agent",
 		AssetName:  t.assetName,
 		AssetID:    t.assetID,
+		RequestID:  t.requestID,
 	}
 	securityEventBuffer.AddSecurityEvent(event)
 

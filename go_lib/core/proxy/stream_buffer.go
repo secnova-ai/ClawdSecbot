@@ -10,10 +10,13 @@ import (
 // StreamBuffer accumulates stream chunks and tool calls for analysis
 type StreamBuffer struct {
 	mu              sync.Mutex
+	requestID       string
 	requestMessages []ConversationMessage                  // Original request messages
 	contentChunks   []string                               // Accumulated content from stream deltas
 	toolCalls       []openai.ChatCompletionMessageToolCall // Accumulated tool calls
 	toolsRaw        json.RawMessage                        // Tools definitions from request (raw JSON for token estimation)
+	loggedToolCalls map[int]bool                           // Tool calls already emitted to UI during streaming
+	started         bool                                   // Whether monitor_upstream_stream_started has been emitted
 
 	// Token usage for current request (set when usage is received in stream)
 	promptTokens     int
@@ -21,22 +24,29 @@ type StreamBuffer struct {
 	totalTokens      int
 }
 
+type StreamToolCallUpdate struct {
+	Index    int
+	ToolCall openai.ChatCompletionMessageToolCall
+}
+
 // NewStreamBuffer creates a new stream buffer
 func NewStreamBuffer() *StreamBuffer {
 	return &StreamBuffer{
-		contentChunks: make([]string, 0),
-		toolCalls:     make([]openai.ChatCompletionMessageToolCall, 0),
+		contentChunks:   make([]string, 0),
+		toolCalls:       make([]openai.ChatCompletionMessageToolCall, 0),
+		loggedToolCalls: make(map[int]bool),
 	}
 }
 
 // SetRequest initializes buffer with request data
-func (sb *StreamBuffer) SetRequest(req *openai.ChatCompletionNewParams, rawBody []byte) {
+func (sb *StreamBuffer) SetRequest(requestID string, req *openai.ChatCompletionNewParams, rawBody []byte) {
 	if sb == nil {
 		return
 	}
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 
+	sb.requestID = requestID
 	sb.requestMessages = make([]ConversationMessage, 0, len(req.Messages))
 	for _, msg := range req.Messages {
 		cm := extractConversationMessage(msg)
@@ -48,6 +58,15 @@ func (sb *StreamBuffer) SetRequest(req *openai.ChatCompletionNewParams, rawBody 
 			sb.toolsRaw = toolsBytes
 		}
 	}
+}
+
+func (sb *StreamBuffer) RequestID() string {
+	if sb == nil {
+		return ""
+	}
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.requestID
 }
 
 // AppendContent appends content from a stream delta
@@ -90,6 +109,33 @@ func (sb *StreamBuffer) MergeStreamToolCall(stc openai.ChatCompletionChunkChoice
 	}
 }
 
+// ConsumeNewlyReadyToolCalls returns tool calls whose names became available
+// during streaming and marks them as emitted to avoid duplicate UI events.
+func (sb *StreamBuffer) ConsumeNewlyReadyToolCalls() []StreamToolCallUpdate {
+	if sb == nil {
+		return nil
+	}
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	if len(sb.toolCalls) == 0 {
+		return nil
+	}
+
+	ready := make([]StreamToolCallUpdate, 0)
+	for idx, tc := range sb.toolCalls {
+		if tc.Function.Name == "" || sb.loggedToolCalls[idx] {
+			continue
+		}
+		sb.loggedToolCalls[idx] = true
+		ready = append(ready, StreamToolCallUpdate{
+			Index:    idx,
+			ToolCall: tc,
+		})
+	}
+	return ready
+}
+
 // HasToolCalls returns true if buffer has tool calls
 func (sb *StreamBuffer) HasToolCalls() bool {
 	if sb == nil {
@@ -110,9 +156,11 @@ func (sb *StreamBuffer) Clear() {
 	sb.contentChunks = make([]string, 0)
 	sb.toolCalls = make([]openai.ChatCompletionMessageToolCall, 0)
 	sb.requestMessages = make([]ConversationMessage, 0)
+	sb.loggedToolCalls = make(map[int]bool)
 	sb.promptTokens = 0
 	sb.completionTokens = 0
 	sb.totalTokens = 0
+	sb.started = false
 }
 
 // ClearAll resets the entire buffer including request data
@@ -122,13 +170,16 @@ func (sb *StreamBuffer) ClearAll() {
 	}
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
+	sb.requestID = ""
 	sb.requestMessages = nil
 	sb.contentChunks = make([]string, 0)
 	sb.toolCalls = make([]openai.ChatCompletionMessageToolCall, 0)
 	sb.toolsRaw = nil
+	sb.loggedToolCalls = make(map[int]bool)
 	sb.promptTokens = 0
 	sb.completionTokens = 0
 	sb.totalTokens = 0
+	sb.started = false
 }
 
 // truncateString truncates a string to maxLen runes and adds "..." if truncated

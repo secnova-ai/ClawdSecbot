@@ -21,6 +21,7 @@ type SecurityEvent struct {
 	Source     string `json:"source"`      // react_agent | heuristic
 	AssetName  string `json:"asset_name,omitempty"`
 	AssetID    string `json:"asset_id,omitempty"`
+	RequestID  string `json:"request_id,omitempty"`
 }
 
 // SecurityEventCallback is a function to notify external systems of security events.
@@ -90,6 +91,7 @@ func (b *SecurityEventBuffer) AddSecurityEvent(event SecurityEvent) {
 		Source:     event.Source,
 		AssetName:  event.AssetName,
 		AssetID:    event.AssetID,
+		RequestID:  event.RequestID,
 	}
 	repo := repository.NewSecurityEventRepository(nil)
 	if err := repo.SaveSecurityEventsBatch([]*repository.SecurityEventRecord{record}); err != nil {

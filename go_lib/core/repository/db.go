@@ -5,6 +5,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 
 	"go_lib/core/logging"
@@ -188,11 +189,21 @@ func createAuditLogTables(db *sql.DB) error {
 			prompt_tokens INTEGER,
 			completion_tokens INTEGER,
 			total_tokens INTEGER,
-			duration_ms INTEGER NOT NULL DEFAULT 0
+			duration_ms INTEGER NOT NULL DEFAULT 0,
+			phase TEXT DEFAULT 'completed',
+			primary_content TEXT,
+			primary_content_type TEXT DEFAULT 'unavailable',
+			finish_reason TEXT,
+			message_count INTEGER DEFAULT 0,
+			messages TEXT,
+			completed_at TEXT
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create audit_logs table: %w", err)
 	}
+
+	// 为已有数据库安全添加 TruthRecord 对齐所需的新列
+	ensureAuditLogTruthRecordColumns(db)
 
 	if _, err := db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)
@@ -214,6 +225,38 @@ func createAuditLogTables(db *sql.DB) error {
 
 	logging.Info("Audit log tables created/verified successfully")
 	return nil
+}
+
+// ensureAuditLogTruthRecordColumns 安全地为 audit_logs 表添加 TruthRecord 对齐所需的新列。
+// 对已有数据库执行 ALTER TABLE ADD COLUMN, 忽略列已存在的错误以实现幂等。
+func ensureAuditLogTruthRecordColumns(db *sql.DB) {
+	columns := []struct {
+		name string
+		def  string
+	}{
+		{"phase", "TEXT DEFAULT 'completed'"},
+		{"primary_content", "TEXT"},
+		{"primary_content_type", "TEXT DEFAULT 'unavailable'"},
+		{"finish_reason", "TEXT"},
+		{"message_count", "INTEGER DEFAULT 0"},
+		{"messages", "TEXT"},
+		{"completed_at", "TEXT"},
+	}
+	for _, col := range columns {
+		addColumnSafe(db, "audit_logs", col.name, col.def)
+	}
+}
+
+// addColumnSafe 安全地向表中添加列, 忽略 "duplicate column name" 错误。
+func addColumnSafe(db *sql.DB, table, column, colDef string) {
+	stmt := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colDef)
+	_, err := db.Exec(stmt)
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate column name") {
+			return
+		}
+		logging.Warning("Failed to add column %s to %s: %v", column, table, err)
+	}
 }
 
 // createMetricsTables creates API metrics tables.
@@ -287,10 +330,16 @@ func createSecurityEventTables(db *sql.DB) error {
 			detail TEXT,
 			source TEXT NOT NULL,
 			asset_name TEXT NOT NULL DEFAULT '',
-			asset_id TEXT NOT NULL DEFAULT ''
+			asset_id TEXT NOT NULL DEFAULT '',
+			request_id TEXT NOT NULL DEFAULT ''
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create security_events table: %w", err)
+	}
+
+	// Migrate: add request_id column for existing databases
+	if _, err := db.Exec(`ALTER TABLE security_events ADD COLUMN request_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		// Column already exists — safe to ignore
 	}
 
 	if _, err := db.Exec(`
@@ -315,6 +364,12 @@ func createSecurityEventTables(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_security_events_asset_name ON security_events(asset_name, timestamp)
 	`); err != nil {
 		return fmt.Errorf("failed to create security_events asset_name index: %w", err)
+	}
+
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_security_events_request_id ON security_events(request_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create security_events request_id index: %w", err)
 	}
 
 	logging.Info("Security event tables created/verified successfully")

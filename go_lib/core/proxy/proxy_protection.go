@@ -80,6 +80,9 @@ type ProxyProtection struct {
 	// Log channel for streaming logs to Flutter
 	logChan chan string
 
+	// TruthRecord 存储（SSOT），替代原 RequestViewStore + AuditLogBuffer
+	records *RecordStore
+
 	// Analysis statistics
 	analysisCount int
 	blockedCount  int
@@ -103,8 +106,7 @@ type ProxyProtection struct {
 	requestCount          int
 	metricsMu             sync.Mutex
 
-	// Current request audit log tracking
-	currentAuditLog  *AuditLog
+	// Current request tracking
 	currentRequestID string
 	requestStartTime time.Time
 	auditMu          sync.Mutex
@@ -457,8 +459,9 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 		singleSessionTokenLimit: singleSessionTokenLimit,
 		dailyTokenLimit:         dailyTokenLimit,
 		initialDailyUsage:       initialDailyUsage,
-		streamBuffer:            &StreamBuffer{},
+		streamBuffer:            NewStreamBuffer(),
 		logChan:                 logChan,
+		records:                 NewRecordStore(),
 		recoveryMu:              &sync.Mutex{},
 	}
 
@@ -614,18 +617,31 @@ func (pp *ProxyProtection) SetAuditOnly(auditOnly bool) {
 }
 
 func (pp *ProxyProtection) sendLog(key string, params map[string]interface{}) {
+	pp.sendLogForRequest("", key, params)
+}
+
+func (pp *ProxyProtection) sendLogForRequest(requestID, key string, params map[string]interface{}) {
 	if params == nil {
 		params = map[string]interface{}{}
 	}
 
-	pp.auditMu.Lock()
-	reqID := pp.currentRequestID
-	pp.auditMu.Unlock()
+	reqID := strings.TrimSpace(requestID)
+	if reqID == "" {
+		pp.auditMu.Lock()
+		reqID = pp.currentRequestID
+		pp.auditMu.Unlock()
+	}
 
 	if reqID != "" {
 		if _, exists := params["request_id"]; !exists {
 			params["request_id"] = reqID
 		}
+	}
+	if _, exists := params["asset_id"]; !exists && strings.TrimSpace(pp.assetID) != "" {
+		params["asset_id"] = strings.TrimSpace(pp.assetID)
+	}
+	if _, exists := params["asset_name"]; !exists && strings.TrimSpace(pp.assetName) != "" {
+		params["asset_name"] = strings.TrimSpace(pp.assetName)
 	}
 
 	logMsg := LogMessage{
@@ -646,6 +662,112 @@ func (pp *ProxyProtection) sendLog(key string, params map[string]interface{}) {
 
 	// 发送到 Callback Bridge 用于推送式通信
 	sendToCallback(msg)
+}
+
+func (pp *ProxyProtection) providerProtocol() string {
+	switch adapter.NormalizeProviderName(pp.providerName) {
+	case adapter.ProviderAnthropic, adapter.ProviderMiniMax:
+		return "anthropic_native"
+	case adapter.ProviderGoogle:
+		return "gemini_native"
+	default:
+		return "openai_compatible"
+	}
+}
+
+func truncateJSONPreview(raw []byte, maxLen int) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if len(trimmed) <= maxLen {
+		return trimmed
+	}
+	return trimmed[:maxLen] + "..."
+}
+
+func summarizeForwardedRequest(req *openai.ChatCompletionNewParams) string {
+	roles := make([]string, 0, len(req.Messages))
+	for _, msg := range req.Messages {
+		roles = append(roles, getMessageRole(msg))
+	}
+	return fmt.Sprintf(
+		"model=%s messages=%d roles=%s tools=%d",
+		string(req.Model),
+		len(req.Messages),
+		strings.Join(roles, ","),
+		len(req.Tools),
+	)
+}
+
+func (pp *ProxyProtection) emitMonitorRequestCreated(req *openai.ChatCompletionNewParams, rawBody []byte, stream bool) {
+	pp.sendLog("monitor_request_created", map[string]interface{}{
+		"asset_id":          pp.assetID,
+		"start_time":        time.Now().Format(time.RFC3339Nano),
+		"provider_name":     pp.providerName,
+		"provider_protocol": pp.providerProtocol(),
+		"client_model":      string(req.Model),
+		"stream":            stream,
+		"message_count":     len(req.Messages),
+		"messages_raw":      truncateJSONPreview(rawBody, 1200),
+	})
+}
+
+func (pp *ProxyProtection) emitMonitorClientMessage(index int, role, content string) {
+	pp.sendLog("monitor_client_message_received", map[string]interface{}{
+		"index":   index,
+		"role":    role,
+		"content": truncateString(content, 500),
+	})
+}
+
+func (pp *ProxyProtection) emitMonitorUpstreamRequestBuilt(req *openai.ChatCompletionNewParams, rawBody []byte) {
+	pp.sendLog("monitor_upstream_request_built", map[string]interface{}{
+		"provider_name":        pp.providerName,
+		"provider_protocol":    pp.providerProtocol(),
+		"forward_start_time":   time.Now().Format(time.RFC3339Nano),
+		"forwarded_raw":        truncateJSONPreview(rawBody, 1200),
+		"forwarded_normalized": summarizeForwardedRequest(req),
+	})
+}
+
+func (pp *ProxyProtection) emitMonitorUpstreamRequestSent() {
+	pp.sendLog("monitor_upstream_request_sent", map[string]interface{}{
+		"provider_name":     pp.providerName,
+		"provider_protocol": pp.providerProtocol(),
+	})
+}
+
+func (pp *ProxyProtection) emitMonitorSecurityDecision(status, reason string, blocked bool, securityMessage string) {
+	pp.sendLog("monitor_security_decision", map[string]interface{}{
+		"status":           status,
+		"reason":           reason,
+		"blocked":          blocked,
+		"security_message": truncateString(securityMessage, 1000),
+	})
+}
+
+func (pp *ProxyProtection) emitMonitorResponseReturned(status, returnedText, returnedRaw string) {
+	pp.sendLog("monitor_response_returned", map[string]interface{}{
+		"status":                status,
+		"returned_to_user_text": truncateString(returnedText, 2000),
+		"returned_to_user_raw":  truncateString(returnedRaw, 2000),
+	})
+}
+
+func (pp *ProxyProtection) emitMonitorRequestFailed(status, errMsg string) {
+	pp.sendLog("monitor_request_failed", map[string]interface{}{
+		"status": status,
+		"error":  truncateString(errMsg, 1000),
+	})
+}
+
+func (pp *ProxyProtection) previewToolResult(content string) string {
+	flat := strings.Join(strings.Fields(content), " ")
+	if len(flat) <= 160 {
+		return flat
+	}
+	return flat[:160] + "..."
 }
 
 // sendMetricsToCallback 将当前指标发送到 Callback Bridge
@@ -677,6 +799,49 @@ func (pp *ProxyProtection) sendMetricsToCallback() {
 	sendMetricsToCallback(metrics)
 }
 
+// updateTruthRecord 是 handler 中更新请求记录的唯一入口。
+// 每次调用都会：1) 更新 RecordStore 2) 推送快照给 CallbackBridge 3) 写入视图日志 4) 写入原始日志流。
+func (pp *ProxyProtection) updateTruthRecord(requestID string, update func(r *TruthRecord)) {
+	if pp == nil || pp.records == nil {
+		return
+	}
+	snapshot := pp.records.Upsert(requestID, func(r *TruthRecord) {
+		if r.AssetName == "" {
+			r.AssetName = pp.assetName
+		}
+		if r.AssetID == "" {
+			r.AssetID = pp.assetID
+		}
+		update(r)
+	})
+	if snapshot != nil {
+		sendTruthRecordToCallback(truthRecordToMap(snapshot))
+		pp.sendLog("protection_record_snapshot", truthRecordToMap(snapshot))
+	}
+}
+
+// GetPendingTruthRecords 返回待推送的 TruthRecord 快照（轮询回退模式使用）。
+func (pp *ProxyProtection) GetPendingTruthRecords() []TruthRecord {
+	if pp == nil || pp.records == nil {
+		return nil
+	}
+	return pp.records.Pending()
+}
+
+func (pp *ProxyProtection) activeRequestID() string {
+	if pp == nil {
+		return ""
+	}
+	if pp.streamBuffer != nil {
+		if reqID := strings.TrimSpace(pp.streamBuffer.RequestID()); reqID != "" {
+			return reqID
+		}
+	}
+	pp.auditMu.Lock()
+	defer pp.auditMu.Unlock()
+	return strings.TrimSpace(pp.currentRequestID)
+}
+
 func (pp *ProxyProtection) sendTerminalLog(message string) {
 	pp.auditMu.Lock()
 	reqID := pp.currentRequestID
@@ -690,88 +855,40 @@ func (pp *ProxyProtection) sendTerminalLog(message string) {
 	logging.Info("[Proxy] %s", message)
 }
 
-// saveAuditLog saves the current audit log to the buffer
-func (pp *ProxyProtection) saveAuditLog(hasRisk bool, riskLevel, riskReason string, confidence int, action string) {
-	pp.auditMu.Lock()
-	defer pp.auditMu.Unlock()
+// finalizeTruthRecord 完成请求记录：设置输出内容、token、生成的工具调用，并标记为 completed。
+// 工具调用按 ID 去重，避免流式路径中 onStreamChunk 与 finalize 双重追加。
+func (pp *ProxyProtection) finalizeTruthRecord(requestID string, outputContent string, generatedToolCalls []openai.ChatCompletionMessageToolCall, promptTokens, completionTokens int) {
+	pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+		r.OutputContent = truncateToBytes(outputContent, maxRecordOutputBytes)
+		r.PromptTokens = promptTokens
+		r.CompletionTokens = completionTokens
+		r.CompletedAt = time.Now().Format(time.RFC3339Nano)
+		r.Phase = RecordPhaseCompleted
 
-	if pp.currentAuditLog == nil {
-		return
-	}
-
-	// Calculate duration
-	duration := time.Since(pp.requestStartTime).Milliseconds()
-
-	pp.currentAuditLog.HasRisk = hasRisk
-	pp.currentAuditLog.RiskLevel = riskLevel
-	pp.currentAuditLog.RiskReason = riskReason
-	pp.currentAuditLog.Confidence = confidence
-	pp.currentAuditLog.Action = action
-	pp.currentAuditLog.Duration = duration
-	pp.currentAuditLog.AssetName = strings.TrimSpace(pp.assetName)
-	pp.currentAuditLog.AssetID = strings.TrimSpace(pp.assetID)
-
-	// Add to buffer
-	auditLogBuffer.AddAuditLog(*pp.currentAuditLog)
-
-	// Clear current audit log
-	pp.currentAuditLog = nil
-}
-
-// finalizeAuditLog finalizes and saves the audit log for a completed request
-func (pp *ProxyProtection) finalizeAuditLog(outputContent string, generatedToolCalls []openai.ChatCompletionMessageToolCall, promptTokens, completionTokens, totalTokens int) {
-	pp.auditMu.Lock()
-	defer pp.auditMu.Unlock()
-
-	if pp.currentAuditLog == nil {
-		return
-	}
-
-	// Calculate duration
-	duration := time.Since(pp.requestStartTime).Milliseconds()
-
-	pp.currentAuditLog.OutputContent = truncateString(outputContent, 2000)
-	pp.currentAuditLog.PromptTokens = promptTokens
-	pp.currentAuditLog.CompletionTokens = completionTokens
-	pp.currentAuditLog.TotalTokens = totalTokens
-	pp.currentAuditLog.Duration = duration
-	pp.currentAuditLog.AssetName = strings.TrimSpace(pp.assetName)
-	pp.currentAuditLog.AssetID = strings.TrimSpace(pp.assetID)
-
-	// Add generated tool calls to audit log
-	for _, tc := range generatedToolCalls {
-		isSensitive := false
-		if pp.toolValidator != nil {
-			isSensitive = pp.toolValidator.IsSensitive(tc.Function.Name)
+		existingIDs := make(map[string]bool, len(r.ToolCalls))
+		for _, existing := range r.ToolCalls {
+			if existing.ID != "" {
+				existingIDs[existing.ID] = true
+			}
 		}
-		pp.currentAuditLog.ToolCalls = append(pp.currentAuditLog.ToolCalls, AuditToolCall{
-			Name:        tc.Function.Name,
-			Arguments:   truncateString(tc.Function.Arguments, 1000),
-			IsSensitive: isSensitive,
-			Result:      "", // No result yet for generated tool calls
-		})
-	}
 
-	// Add to buffer
-	auditLogBuffer.AddAuditLog(*pp.currentAuditLog)
-
-	// Clear current audit log
-	pp.currentAuditLog = nil
-}
-
-// updateAuditLogRisk updates the risk information in the current audit log
-func (pp *ProxyProtection) updateAuditLogRisk(hasRisk bool, riskLevel, riskReason string, confidence int, action string) {
-	pp.auditMu.Lock()
-	defer pp.auditMu.Unlock()
-
-	if pp.currentAuditLog == nil {
-		return
-	}
-
-	pp.currentAuditLog.HasRisk = hasRisk
-	pp.currentAuditLog.RiskLevel = riskLevel
-	pp.currentAuditLog.RiskReason = riskReason
-	pp.currentAuditLog.Confidence = confidence
+		for _, tc := range generatedToolCalls {
+			if tc.ID != "" && existingIDs[tc.ID] {
+				continue
+			}
+			isSensitive := false
+			if pp.toolValidator != nil {
+				isSensitive = pp.toolValidator.IsSensitive(tc.Function.Name)
+			}
+			r.ToolCalls = append(r.ToolCalls, RecordToolCall{
+				ID:          tc.ID,
+				Name:        tc.Function.Name,
+				Arguments:   truncateToBytes(tc.Function.Arguments, maxRecordToolArgsBytes),
+				IsSensitive: isSensitive,
+				Source:      "response",
+			})
+		}
+	})
 }
 
 // ResetStatistics resets all statistical counters

@@ -50,6 +50,11 @@ var databaseVersionMigrations = []databaseVersionMigration{
 		toVersion:   "1.0.1",
 		run:         migrateDatabaseFrom1_0_0To1_0_1,
 	},
+	{
+		fromVersion: "1.0.1",
+		toVersion:   "1.0.2",
+		run:         migrateDatabaseFrom1_0_1To1_0_2,
+	},
 }
 
 func initializeDatabaseState(db *sql.DB, currentVersion, versionFilePath string) (*DBInitSummary, error) {
@@ -531,4 +536,11 @@ func parseVersionParts(version string) []int {
 		values = append(values, value)
 	}
 	return values
+}
+
+// migrateDatabaseFrom1_0_1To1_0_2 为 audit_logs 表添加 TruthRecord 对齐所需的新列。
+func migrateDatabaseFrom1_0_1To1_0_2(db *sql.DB) error {
+	logging.Info("Migrating audit_logs table: adding TruthRecord columns")
+	ensureAuditLogTruthRecordColumns(db)
+	return nil
 }

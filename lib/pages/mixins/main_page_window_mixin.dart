@@ -5,6 +5,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import '../../models/protection_analysis_model.dart';
+import '../../models/truth_record_model.dart';
 import '../../services/protection_database_service.dart';
 import '../../models/security_event_model.dart';
 import '../../services/protection_service.dart';
@@ -42,6 +43,8 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
   final Map<String, ProtectionService> _relayServices = {};
   final Map<String, StreamSubscription<List<SecurityEvent>>>
   _relaySecurityEventSubscriptions = {};
+  final Map<String, StreamSubscription<TruthRecordModel>>
+  _relayTruthRecordSubscriptions = {};
   final Map<String, Timer> _relayTimers = {};
   final Map<String, Timer> _relayStatsTimers = {};
   final Map<String, bool> _relayStatsInFlight = {};
@@ -210,7 +213,7 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
     }
   }
 
-  /// 启动 Linux 子窗口日志/结果/统计中继
+  /// 启动 Linux 子窗口数据中继。
   void _startRelayForWindowKey(
     String windowKey,
     String assetName,
@@ -220,9 +223,8 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
     if (!mounted) return;
     final service = _relayServices.putIfAbsent(
       windowKey,
-      () => ProtectionService.scoped('monitor_relay::$windowKey'),
+      () => ProtectionService.forAsset(assetName, assetID),
     );
-    service.setAssetName(assetName, assetID);
 
     _relayLogBuffers[windowKey] = [];
 
@@ -249,6 +251,18 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
           final payload = events.map((e) => e.toJson()).toList();
           controller
               .invokeMethod('relaySecurityEvents', jsonEncode(payload))
+              .catchError((e) {
+                if (e.toString().contains('disposed') ||
+                    e.toString().contains('closed')) {
+                  _stopRelayForWindowKey(windowKey);
+                }
+              });
+        });
+
+    _relayTruthRecordSubscriptions[windowKey] = service.truthRecordStream
+        .listen((record) {
+          controller
+              .invokeMethod('relayTruthRecords', jsonEncode([record.toJson()]))
               .catchError((e) {
                 if (e.toString().contains('disposed') ||
                     e.toString().contains('closed')) {
@@ -308,16 +322,17 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
     });
   }
 
-  /// 停止指定资产的日志中继
+  /// 停止指定窗口的数据中继（仅取消订阅，不 dispose 共享的 ProtectionService）
   void _stopRelayForWindowKey(String windowKey) {
     _relayLogSubscriptions.remove(windowKey)?.cancel();
     _relayResultSubscriptions.remove(windowKey)?.cancel();
     _relaySecurityEventSubscriptions.remove(windowKey)?.cancel();
+    _relayTruthRecordSubscriptions.remove(windowKey)?.cancel();
     _relayTimers.remove(windowKey)?.cancel();
     _relayStatsTimers.remove(windowKey)?.cancel();
     _relayStatsInFlight.remove(windowKey);
     _relayLogBuffers.remove(windowKey);
-    _relayServices.remove(windowKey)?.dispose();
+    _relayServices.remove(windowKey);
   }
 
   /// 关闭所有监控窗口

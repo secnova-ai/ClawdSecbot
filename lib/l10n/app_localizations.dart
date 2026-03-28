@@ -2340,6 +2340,18 @@ abstract class AppLocalizations {
   /// **'敏感'**
   String get auditLogSensitive;
 
+  /// No description provided for @auditLogExport.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出'**
+  String get auditLogExport;
+
+  /// No description provided for @auditLogExportFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出失败'**
+  String get auditLogExportFailed;
+
   /// No description provided for @auditLogPageInfo.
   ///
   /// In zh, this message translates to:

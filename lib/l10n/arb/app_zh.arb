@@ -818,6 +818,8 @@
   "auditLogToolArguments": "参数",
   "auditLogToolResult": "结果",
   "auditLogSensitive": "敏感",
+  "auditLogExport": "导出",
+  "auditLogExportFailed": "导出失败",
   "auditLogPageInfo": "第 {current} 页，共 {total} 页",
   "@auditLogPageInfo": {
     "placeholders": {

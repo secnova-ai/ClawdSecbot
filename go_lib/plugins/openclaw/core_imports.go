@@ -18,8 +18,8 @@ type BotModelConfig = proxy.BotModelConfig
 type ProtectionConfig = proxy.ProtectionConfig
 type ProtectionRuntimeConfig = proxy.ProtectionRuntimeConfig
 type LogMessage = proxy.LogMessage
-type AuditLog = proxy.AuditLog
-type AuditToolCall = proxy.AuditToolCall
+type TruthRecord = proxy.TruthRecord
+type RecordToolCall = proxy.RecordToolCall
 type ProxyStartResponse = proxy.ProxyStartResponse
 type ProxyStatusResponse = proxy.ProxyStatusResponse
 

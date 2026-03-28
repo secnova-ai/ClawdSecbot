@@ -1343,6 +1343,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get auditLogSensitive => 'SENSITIVE';
 
   @override
+  String get auditLogExport => 'Export';
+
+  @override
+  String get auditLogExportFailed => 'Export failed';
+
+  @override
   String auditLogPageInfo(int current, int total) {
     return 'Page $current of $total';
   }
