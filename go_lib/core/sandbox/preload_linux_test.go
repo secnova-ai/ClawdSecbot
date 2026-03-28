@@ -19,6 +19,9 @@ func TestIsDomainName(t *testing.T) {
 		{"sub.domain.example.com", true},
 		{"192.168.1.1:8080", false},
 		{"www.baidu.com:443", true},
+		{"*.example.com", true},
+		{"10.0.*.*", false},
+		{"192.168.1.10:8080", false},
 		{"localhost", false},
 		{"", false},
 		{"*", false},
@@ -33,14 +36,31 @@ func TestIsDomainName(t *testing.T) {
 	}
 }
 
+func TestClassifyAddresses_NormalizeAndSplit(t *testing.T) {
+	ips, domains := classifyAddresses([]string{
+		"10.0.*.*",
+		"192.168.1.10:8080",
+		"EXAMPLE.COM:443",
+		"*.Example.com",
+		"10.0.*.*",
+	})
+
+	if !containsAll(ips, []string{"10.0.*.*", "192.168.1.10"}) {
+		t.Fatalf("ips = %v, want contain [10.0.*.* 192.168.1.10]", ips)
+	}
+	if !containsAll(domains, []string{"example.com", "*.example.com"}) {
+		t.Fatalf("domains = %v, want contain [example.com *.example.com]", domains)
+	}
+}
+
 func TestBuildPreloadConfig_PathPermission(t *testing.T) {
 	tests := []struct {
-		name         string
-		mode         PermissionMode
-		paths        []string
-		wantType     string
-		wantBlocked  []string
-		wantAllowed  []string
+		name        string
+		mode        PermissionMode
+		paths       []string
+		wantType    string
+		wantBlocked []string
+		wantAllowed []string
 	}{
 		{
 			name:        "blacklist mode",
@@ -85,12 +105,12 @@ func TestBuildPreloadConfig_PathPermission(t *testing.T) {
 
 func TestBuildPreloadConfig_CommandPermission(t *testing.T) {
 	tests := []struct {
-		name         string
-		mode         PermissionMode
-		commands     []string
-		wantType     string
-		wantBlocked  []string
-		wantAllowed  []string
+		name        string
+		mode        PermissionMode
+		commands    []string
+		wantType    string
+		wantBlocked []string
+		wantAllowed []string
 	}{
 		{
 			name:        "blacklist shell commands",

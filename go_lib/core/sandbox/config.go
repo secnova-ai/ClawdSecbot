@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"go_lib/core/logging"
@@ -180,14 +181,51 @@ func SanitizeAssetNamePublic(name string) string {
 
 // isDomainName checks whether an address string is a domain name (not an IP)
 func isDomainName(addr string) bool {
-	host := addr
-	if h, _, err := net.SplitHostPort(addr); err == nil {
-		host = h
+	host := extractNetworkHost(addr)
+	if isIPv4WildcardPattern(host) {
+		return false
 	}
 	if net.ParseIP(host) != nil {
 		return false
 	}
 	return strings.Contains(host, ".")
+}
+
+// extractNetworkHost 提取网络地址中的 host 部分，并清理 IPv6 方括号与空白。
+func extractNetworkHost(addr string) string {
+	host := strings.TrimSpace(addr)
+	if host == "" {
+		return ""
+	}
+
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	return strings.TrimSpace(host)
+}
+
+// isIPv4WildcardPattern 判断字符串是否为 IPv4 星号通配模式（如 10.0.*.*）。
+func isIPv4WildcardPattern(host string) bool {
+	if !strings.Contains(host, "*") {
+		return false
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "*" {
+			continue
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 0 || n > 255 {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveDomainsToIPs resolves a list of domain names to IP addresses
@@ -211,15 +249,41 @@ func resolveDomainsToIPs(domains []string) []string {
 
 // classifyAddresses splits addresses into IPs and domains, resolving domains to IPs as well
 func classifyAddresses(addresses []string) (ips []string, domains []string) {
+	seenIPs := make(map[string]struct{}, len(addresses))
+	seenDomains := make(map[string]struct{}, len(addresses))
+
 	for _, addr := range addresses {
-		if isDomainName(addr) {
-			domains = append(domains, addr)
+		host := extractNetworkHost(addr)
+		if host == "" {
+			continue
+		}
+		normalized := strings.ToLower(host)
+		if isDomainName(normalized) {
+			if _, exists := seenDomains[normalized]; exists {
+				continue
+			}
+			seenDomains[normalized] = struct{}{}
+			domains = append(domains, normalized)
 		} else {
-			ips = append(ips, addr)
+			if _, exists := seenIPs[normalized]; exists {
+				continue
+			}
+			seenIPs[normalized] = struct{}{}
+			ips = append(ips, normalized)
 		}
 	}
 	resolvedIPs := resolveDomainsToIPs(domains)
-	ips = append(ips, resolvedIPs...)
+	for _, ip := range resolvedIPs {
+		normalized := strings.ToLower(strings.TrimSpace(ip))
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seenIPs[normalized]; exists {
+			continue
+		}
+		seenIPs[normalized] = struct{}{}
+		ips = append(ips, normalized)
+	}
 	return
 }
 
