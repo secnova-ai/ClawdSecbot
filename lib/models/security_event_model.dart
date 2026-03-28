@@ -7,6 +7,8 @@ class SecurityEvent {
   final String riskType; // 风险类型（中文）
   final String detail; // 补充细节
   final String source; // react_agent | heuristic
+  final String assetName; // openclaw | nullclaw
+  final String assetID; // 资产实例ID
 
   SecurityEvent({
     required this.id,
@@ -16,6 +18,8 @@ class SecurityEvent {
     required this.riskType,
     required this.detail,
     required this.source,
+    this.assetName = '',
+    this.assetID = '',
   });
 
   factory SecurityEvent.fromJson(Map<String, dynamic> json) {
@@ -27,6 +31,8 @@ class SecurityEvent {
       riskType: json['risk_type'] as String? ?? '',
       detail: json['detail'] as String? ?? '',
       source: json['source'] as String? ?? '',
+      assetName: json['asset_name'] as String? ?? '',
+      assetID: json['asset_id'] as String? ?? '',
     );
   }
 
@@ -39,6 +45,8 @@ class SecurityEvent {
       'risk_type': riskType,
       'detail': detail,
       'source': source,
+      'asset_name': assetName,
+      'asset_id': assetID,
     };
   }
 

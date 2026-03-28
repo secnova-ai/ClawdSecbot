@@ -8,25 +8,25 @@ import (
 	"go_lib/core/logging"
 )
 
-// PathManager 全局路径管理器
-// 负责管理所有路径，由Flutter初始化时传入基础路径
-// 其他路径由基础路径派生，确保路径管理的统一性
+// PathManager manages application paths derived from a single base directory
+// provided by Flutter during startup.
 type PathManager struct {
 	mu sync.RWMutex
 
 	initialized bool
 
-	// 基础路径（由Flutter传入）
-	workspaceDir string // 工作区目录，用于存储日志、数据库、临时文件等
-	homeDir      string // 用户主目录（如 /Users/username）
+	// Base paths provided or inferred at startup.
+	workspaceDir string
+	homeDir      string
 
-	// 派生路径
-	logDir        string // 日志目录：{workspaceDir}/logs
-	backupDir     string // 备份目录：{workspaceDir}/backups
-	policyDir     string // 策略目录：{homeDir}/.botsec/policies（用于sandbox-exec）
-	reactSkillDir string // ReAct 风险技能目录：{workspaceDir}/skills/shepherd_gate
-	scanSkillDir  string // 扫描技能目录：{workspaceDir}/skills/skill_scanner
-	dbPath        string // 数据库路径：{workspaceDir}/botsec.db
+	// Derived paths owned by core.
+	logDir          string
+	backupDir       string
+	policyDir       string
+	reactSkillDir   string
+	scanSkillDir    string
+	dbPath          string
+	versionFilePath string
 }
 
 var (
@@ -34,7 +34,7 @@ var (
 	pathManagerOnce   sync.Once
 )
 
-// GetPathManager 获取全局路径管理器实例
+// GetPathManager returns the shared path manager instance.
 func GetPathManager() *PathManager {
 	pathManagerOnce.Do(func() {
 		globalPathManager = &PathManager{}
@@ -42,9 +42,8 @@ func GetPathManager() *PathManager {
 	return globalPathManager
 }
 
-// Initialize 初始化路径管理器
-// workspaceDir: 工作区目录（由Flutter获取并传入）
-// homeDir: 用户主目录
+// Initialize configures the path manager from a single app data base
+// directory and the user home directory.
 func (pm *PathManager) Initialize(workspaceDir, homeDir string) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -57,15 +56,16 @@ func (pm *PathManager) Initialize(workspaceDir, homeDir string) error {
 	pm.workspaceDir = workspaceDir
 	pm.homeDir = homeDir
 
-	// 派生其他路径
+	// Derive all runtime-owned paths from the shared base directory.
 	pm.logDir = filepath.Join(workspaceDir, "logs")
 	pm.backupDir = filepath.Join(workspaceDir, "backups")
 	pm.policyDir = filepath.Join(homeDir, ".botsec", "policies")
 	pm.reactSkillDir = filepath.Join(workspaceDir, "skills", "shepherd_gate")
 	pm.scanSkillDir = filepath.Join(workspaceDir, "skills", "skill_scanner")
-	pm.dbPath = filepath.Join(workspaceDir, "botsec.db")
+	pm.dbPath = filepath.Join(workspaceDir, "bot_sec_manager.db")
+	pm.versionFilePath = filepath.Join(workspaceDir, "bot_sec_manager.version")
 
-	// 确保必要的目录存在
+	// Ensure required directories exist before use.
 	if err := pm.ensureDirectories(); err != nil {
 		logging.Error("Failed to ensure directories: %v", err)
 		return err
@@ -73,14 +73,20 @@ func (pm *PathManager) Initialize(workspaceDir, homeDir string) error {
 
 	pm.initialized = true
 	logging.Info("PathManager initialized: workspaceDir=%s, homeDir=%s", workspaceDir, homeDir)
-	logging.Info("Derived paths: logDir=%s, backupDir=%s, policyDir=%s, dbPath=%s",
-		pm.logDir, pm.backupDir, pm.policyDir, pm.dbPath)
+	logging.Info(
+		"Derived paths: logDir=%s, backupDir=%s, policyDir=%s, dbPath=%s, versionFilePath=%s",
+		pm.logDir,
+		pm.backupDir,
+		pm.policyDir,
+		pm.dbPath,
+		pm.versionFilePath,
+	)
 	logging.Info("Derived paths (skills): reactSkillDir=%s, scanSkillDir=%s", pm.reactSkillDir, pm.scanSkillDir)
 
 	return nil
 }
 
-// ensureDirectories 确保必要的目录存在
+// ensureDirectories creates required runtime directories.
 func (pm *PathManager) ensureDirectories() error {
 	dirs := []string{pm.logDir, pm.backupDir, pm.policyDir, pm.reactSkillDir, pm.scanSkillDir}
 	for _, dir := range dirs {
@@ -91,74 +97,104 @@ func (pm *PathManager) ensureDirectories() error {
 	return nil
 }
 
-// IsInitialized 检查是否已初始化
+// IsInitialized reports whether the manager has been configured.
 func (pm *PathManager) IsInitialized() bool {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.initialized
 }
 
-// ========== Getter方法 ==========
+// ========== Getters ==========
 
-// GetWorkspaceDir 获取工作区目录
+// GetWorkspaceDir returns the shared app data base directory.
 func (pm *PathManager) GetWorkspaceDir() string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.workspaceDir
 }
 
-// GetHomeDir 获取用户主目录
+// GetHomeDir returns the user home directory.
 func (pm *PathManager) GetHomeDir() string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.homeDir
 }
 
-// GetLogDir 获取日志目录
+// GetLogDir returns the derived logs directory.
 func (pm *PathManager) GetLogDir() string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.logDir
 }
 
-// GetBackupDir 获取备份目录
+// GetBackupDir returns the derived backups directory.
 func (pm *PathManager) GetBackupDir() string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.backupDir
 }
 
-// GetPolicyDir 获取策略目录（用于sandbox-exec）
+// GetPolicyDir returns the derived sandbox policy directory.
 func (pm *PathManager) GetPolicyDir() string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.policyDir
 }
 
-// GetReActSkillDir 获取 ReAct 风险技能目录
+// GetReActSkillDir returns the derived ReAct skill directory.
 func (pm *PathManager) GetReActSkillDir() string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.reactSkillDir
 }
 
-// GetScanSkillDir 获取扫描技能目录
+// GetScanSkillDir returns the derived scan skill directory.
 func (pm *PathManager) GetScanSkillDir() string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.scanSkillDir
 }
 
-// GetDBPath 获取数据库文件路径
+// GetDBPath returns the derived database file path.
 func (pm *PathManager) GetDBPath() string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.dbPath
 }
 
-// ========== 路径构建辅助方法 ==========
+// GetVersionFilePath returns the derived runtime version file path.
+func (pm *PathManager) GetVersionFilePath() string {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.versionFilePath
+}
 
-// JoinWorkspace 在工作区目录下拼接路径
+// ResetForTest resets the manager and optionally reinitializes it.
+// This is intended for tests that need isolated path state.
+func (pm *PathManager) ResetForTest(workspaceDir, homeDir string) error {
+	pm.mu.Lock()
+	pm.initialized = false
+	pm.workspaceDir = ""
+	pm.homeDir = ""
+	pm.logDir = ""
+	pm.backupDir = ""
+	pm.policyDir = ""
+	pm.reactSkillDir = ""
+	pm.scanSkillDir = ""
+	pm.dbPath = ""
+	pm.versionFilePath = ""
+	pm.mu.Unlock()
+
+	if workspaceDir == "" && homeDir == "" {
+		return nil
+	}
+
+	return pm.Initialize(workspaceDir, homeDir)
+}
+
+// ========== Path helpers ==========
+
+// JoinWorkspace joins paths under the shared base directory.
 func (pm *PathManager) JoinWorkspace(elem ...string) string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
@@ -166,7 +202,7 @@ func (pm *PathManager) JoinWorkspace(elem ...string) string {
 	return filepath.Join(parts...)
 }
 
-// JoinHome 在用户主目录下拼接路径
+// JoinHome joins paths under the user home directory.
 func (pm *PathManager) JoinHome(elem ...string) string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
@@ -174,7 +210,7 @@ func (pm *PathManager) JoinHome(elem ...string) string {
 	return filepath.Join(parts...)
 }
 
-// JoinLog 在日志目录下拼接路径
+// JoinLog joins paths under the logs directory.
 func (pm *PathManager) JoinLog(elem ...string) string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
@@ -182,7 +218,7 @@ func (pm *PathManager) JoinLog(elem ...string) string {
 	return filepath.Join(parts...)
 }
 
-// JoinBackup 在备份目录下拼接路径
+// JoinBackup joins paths under the backups directory.
 func (pm *PathManager) JoinBackup(elem ...string) string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
@@ -190,7 +226,7 @@ func (pm *PathManager) JoinBackup(elem ...string) string {
 	return filepath.Join(parts...)
 }
 
-// JoinPolicy 在策略目录下拼接路径
+// JoinPolicy joins paths under the policy directory.
 func (pm *PathManager) JoinPolicy(elem ...string) string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
@@ -198,7 +234,7 @@ func (pm *PathManager) JoinPolicy(elem ...string) string {
 	return filepath.Join(parts...)
 }
 
-// JoinReActSkill 在 ReAct 风险技能目录下拼接路径
+// JoinReActSkill joins paths under the ReAct skill directory.
 func (pm *PathManager) JoinReActSkill(elem ...string) string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
@@ -206,7 +242,7 @@ func (pm *PathManager) JoinReActSkill(elem ...string) string {
 	return filepath.Join(parts...)
 }
 
-// JoinScanSkill 在扫描技能目录下拼接路径
+// JoinScanSkill joins paths under the scan skill directory.
 func (pm *PathManager) JoinScanSkill(elem ...string) string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()

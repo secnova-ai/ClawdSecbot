@@ -2,6 +2,10 @@
 
 **[中文文档](README_zh-CN.md)**
 
+Migration docs:
+- [Version Upgrade Migration Guide (EN)](mds/version_upgrade_migration_en.md)
+- [版本升级迁移指南 (ZH-CN)](mds/version_upgrade_migration_zh-CN.md)
+
 Desktop security protection software for Bot-type endpoint AI agents.
 
 ClawSecbot monitors and secures local AI Bot agents (such as Openclaw) running on your machine. It acts as a protective layer between AI agents and LLM services — intercepting API requests, analyzing risks in real time, enforcing sandbox policies, and providing full audit trails.

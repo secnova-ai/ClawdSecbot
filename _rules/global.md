@@ -1,193 +1,83 @@
-# ClawSecbot 全局开发规范
+# ClawSecbot 全局开发规范（精简版）
 
-**产品名称:** ClawSecbot —— 面向 Bot 类端侧智能体的桌面安全防护软件
+> 适用范围：本文件仅保留长期稳定、跨模块共享的约束。实现细节请写入各模块文档。
 
-## 核心架构
+## 1. 架构底线
 
-- **前后端分离:** Flutter Desktop(UI+状态) + Go(全业务逻辑) + FFI 通信
-- **单体集成:** 所有插件和 core 编译为单一动态库(botsec.dylib/so/dll),共享路径/数据库/日志实例
-- **跨平台:** 兼容 Windows/Linux/macOS,macOS 支持 x86_64 和 arm64
+- 架构分层：Flutter Desktop（UI/状态）+ Go（业务）+ FFI（通信）。
+- Go 以 `c-shared` 构建单一动态库：`botsec.dylib` / `botsec.so` / `botsec.dll`。
+- 支持平台：macOS（arm64/x86_64）、Linux（arm64/x86_64）、Windows（x86_64）。
 
-## 代码规范
+## 2. 目录职责
 
-- 英文注释,英文日志;单文件 ≤1500 行
-- 禁止无用代码、重复实现、未经要求的逻辑
-- 禁止过度封装导致语义模糊：单一职责、语义清晰、组合优于继承
-- 强制国际化(i18n);Flutter 生产环境必须使用 appLogger
-- Go 层业务逻辑需要有单元测试
-- 除非明确要求，否则不用向前兼容，不用做数据迁移
+- `lib/`：UI、状态管理、FFI 调用封装。
+- `go_lib/main.go`：唯一 FFI 导出入口（所有 `//export` 函数放在 `package main`）。
+- `go_lib/core/`：公共核心能力（`repository/service/scanner/sandbox/proxy/shepherd/skillscan/modelfactory/callback_bridge/logging`）。
+- `go_lib/plugins/`：插件实现（当前包含 `openclaw`、`nullclaw`）。
+- `go_lib/chatmodel-routing/`：LLM 协议适配与转发。
 
-## FFI 通信规范
+## 3. 代码规则
 
-### 动态库加载
-- `NativeLibraryService` 单例加载 dylib,应用启动时 `initialize()` 一次,缓存 `dylib/libraryPath/freeString`
-- 主 Isolate 服务通过 `NativeLibraryService().dylib` 获取已缓存实例
-- 后台 Isolate 通过 `DynamicLibrary.open(libPath)` 重新打开(OS 保证同一句柄)
+- 日志和注释统一英文。
+- 禁止无用代码、重复实现、无需求依据的“提前设计”。
+- 优先在原有模块扩展，避免平行新实现造成语义分裂。
+- Go 业务改动需补充单元测试（至少覆盖 `service/repository` 相关逻辑）。
+- Flutter 生产日志统一使用 `appLogger`；Go 使用 `core/logging`。
+- 非明确需求不做隐式向前兼容与数据迁移。
+- 单文件代码不超过1500行
 
-### 数据协议
-- 统一 JSON 输入/输出,响应格式: `{"success": bool, "data": ..., "error": ...}`
-- Go 端必须使用 `json.Marshal` 序列化,禁止 `fmt.Sprintf` 拼接
-- 复用 `core/ffi.go` 的 `toCString` 辅助函数
+## 4. 分层与调用链
 
-### 回调机制
-- Go -> Dart 使用 `NativeCallable.listener` 实现回调
-- `MessageBridgeService` 负责注册回调、分发日志/指标/状态流
-- 回调优先,轮询(200ms)降级
+- 统一调用链：`Flutter -> FFI(main.go) -> core/service -> core/repository -> SQLite`。
+- Flutter 禁止直接操作业务数据库文件，业务数据读写必须走 Go FFI。
+- 资产实例隔离统一以 `asset_id` 为主键；`asset_name` 仅用于资产类型标识。
 
-### CGO 约束
-- 所有 `//export` 函数必须在 `package main` 中,symbol 不重复
-- `.h` 头文件为编译产物,已加入 `.gitignore`
+## 5. FFI 通信规范
 
-## Go 层架构
+- 统一 JSON 输入输出，响应格式固定为：
+  `{"success": bool, "data": any, "error": string|null}`。
+- Go 端必须使用 `json.Marshal` 序列化；禁止手工拼接 JSON。
+- Go 返回的 C 字符串必须由 Dart 侧 `FreeString` 释放。
+- `NativeLibraryService` 是 Flutter 侧动态库加载唯一入口：
+  主 Isolate 复用缓存实例；后台 Isolate 通过 `libraryPath` 重新打开。
+- Go -> Dart 消息优先使用 FFI callback（`MessageBridgeService` + `NativeCallable.listener`），轮询仅作为降级路径。
+- 路径统一由 core 派生；Flutter 仅传基础目录，禁止分别传 db/log/version 等具体路径。
 
-```
-go_lib/
-├── main.go              # dylib 入口,导出所有 FFI
-├── core/                # 核心公共包
-│   ├── plugin.go        # BotPlugin 接口
-│   ├── plugin_manager.go # 插件管理器
-│   ├── path_manager.go  # 路径管理器
-│   ├── ffi.go           # FFI 辅助函数
-│   ├── logging/         # 日志模块
-│   ├── repository/      # 数据访问层(CRUD)
-│   ├── service/         # 业务服务层
-│   ├── scanner/         # 资产扫描引擎
-│   ├── sandbox/         # 沙箱策略模块
-│   └── callback_bridge/ # FFI 回调桥接
-├── plugins/openclaw/    # Openclaw 插件
-├── skillagent/          # Skill Agent 独立包
-└── chatmodel-routing/   # LLM 协议转换模块
-```
+## 6. 插件与资产规范
 
-### 插件规范
-- 实现 `BotPlugin` 接口: `GetID/GetAssetName/ScanAssets/AssessRisks/Start|Stop|GetProtectionStatus`
-- `init()` 中自动注册到全局 `PluginManager`
-- UI 层通过 core 聚合方法调用,不直接与插件交互
-- 插件随软件启动初始化、退出卸载
+- 插件必须实现 `BotPlugin` 并在 `init()` 中注册到 `PluginManager`。
+- `BotPlugin` 关键方法组：
+  `GetID/GetAssetName/GetManifest/GetAssetUISchema/ScanAssets/AssessRisks/MitigateRisk/StartProtection/StopProtection/GetProtectionStatus`。
+- 每个资产实例必须生成稳定 `asset_id`（由名称、配置路径、端口、进程路径等指纹计算）。
+- 运行时绑定关系：`1 asset_id : 1 plugin instance`。
+- 防护、事件、指标、状态查询必须按 `asset_id` 路由，避免跨实例串数据。
 
-### 路径管理
-- `PathManager` 集中管理所有路径
-- Flutter 传入 `workspaceDir/homeDir` -> Go 派生 `logDir/backupDir/policyDir/dbPath`
+### 6.1 `asset_id` 生成规范
 
-## Flutter 层架构
+- 统一调用 `core.ComputeAssetID(name, configPath, ports, processPaths)`，禁止插件私自实现另一套算法。
+- 参与指纹字段：`name`、`config_path`、`ports`、`process_paths`。
+- 规范化与拼接顺序（必须一致）：
+  - `name` 转小写后写入：`name=<lowercase_name>`
+  - `config_path` 非空时写入：`config=<config_path>`
+  - `ports` 升序排序后写入：`ports=1,2,3`
+  - `process_paths` 字典序排序后写入：`paths=/a,/b`
+  - 使用 `|` 拼接为 canonical 字符串
+- 哈希算法：`sha256(canonical)`，取前 6 字节转十六进制（12 位）作为短哈希。
+- 输出格式：`<lowercase_name>:<12hex>`（示例：`openclaw:1a2b3c4d5e6f`）。
+- 语义要求：同一资产在字段不变时 `asset_id` 必须稳定；任一指纹字段变化必须触发 `asset_id` 变化。
 
-### 核心服务
-- `NativeLibraryService`: 动态库加载唯一入口
-- `PluginService`: 插件管理
-- `ProtectionService`: 防护代理管理
-- `ProtectionMonitorService`: 防护监控(日志/指标/事件流)
-- `MessageBridgeService`: FFI 回调桥接
-- 各 `*DatabaseService`: 业务域数据库 FFI 封装
+## 7. 监控与审计
 
-### 关键约束
-- 所有数据库操作通过 FFI 在 Go 层完成,Flutter 禁止直接操作 DB
+- 审计日志必须包含请求、响应、模型、风险判断、动作、token 用量、耗时等核心字段。
+- 回调模式下日志/指标/安全事件实时推送；审计日志按周期从 Go 缓冲同步入库。
+- 安全事件查询、统计、清理按 `asset_id` 过滤。
 
-## 数据库规范
+## 8. 沙箱规范
 
-- **分层:** `repository`(数据访问) -> `service`(业务逻辑) -> `main.go` FFI(C 字符串转换)
-- **FFI 位置:** 数据库相关 FFI(如 db_ffi.go)必须位于 `core/` 目录
-- **调用链路:** Flutter -> main.go FFI -> core/service -> core/repository
-- 每个业务域独立 repository/service 文件
-- DB 为全局实例,启动时初始化,退出时关闭
-- 表结构初始化保持幂等(`CREATE TABLE IF NOT EXISTS`)
-- ShepherdGate 规则优先从 SQLite 查询,无记录则用默认规则
-
-## 日志规范
-
-- 执行流程需有 info 日志记录
-- 日志必须精简有效,仅保留: ① 链路追踪标识 ② 关键操作节点 ③ 真实错误信息
-- 禁止调试杂音、冗余状态打印
-- Go 使用 `core/logging`,Flutter 使用 `appLogger`
-
-## 业务规范
-
-### 资产与插件
-- 插件通过 `GetAssetName` 导出资产名称(如 'openclaw')
-- 每个 Bot 有独立资产属性(工作区路径/配置文件/命令行名称/端口/进程路径)
-
-### 防护代理
-- 代理 Bot 与 LLM 接口请求,分析内容判断风险
-- 检测到风险时模拟返回风险提示,要求用户确认
-- 代理实例归属于资产插件实例,支持持久化到数据库
-
-### 协议转换
-- 代理接收 OpenAI 标准协议请求,转换为目标 LLM 格式转发
-- 解析目标 LLM 返回,转换为 OpenAI 格式返回
-- 每种 provider 在 `chatmodel-routing/providers/` 独立实现
-- 支持非流式/流式/reasoning/toolcall/usage 等数据解析和转换
-- **Provider 路由:** Flutter UI 选择 -> 存入数据库 `provider` 字段 -> Flutter 读取自动解析为 `AgentConfig.type` -> Go 层 `BotModelConfig.Provider` 接收 -> `adapter.NormalizeProviderName()` 标准化 -> `createForwardingProvider()` switch 匹配实例化
-
-### 审计日志
-- 必录字段: request_id/timestamp/model/request_content/tool_calls/output_content/has_risk/risk_level/risk_reason/action/token 用量/duration
-- Go 端内存缓存,Flutter 端定期(每 25 次轮询周期)通过 `GetPendingAuditLogs` 同步到 SQLite
-
-## 沙箱规范(macOS)
-
-### 策略文件路径
-- 沙箱策略文件必须放在 `~/.botsec/policies/`(用户主目录)
-- 原因: `sandbox-exec` 需在沙箱生效前读取策略文件,应用沙盒目录内文件不可访问
-- 数据库文件使用 `getApplicationSupportDirectory()`,与策略文件路径分离
-
-### Seatbelt 策略生成
-- **黑名单模式:** `deny` 规则必须放在 `(allow default)` 之前
-- **白名单模式:** `(deny default)` 在前 -> 必要系统 allow 规则 -> 用户 allow 规则
-- 路径使用绝对路径 `(subpath "/absolute/path")`,不使用 `(home)` 可移植语法
-- 引用 HOME 目录需在策略顶部显式声明 `(define user-homedir (param "HOME"))`
-
-### 进程监控自愈
-- 通过进程监控器检测用户手动启动的网关进程,发现后终止并使用 `sandbox-exec` 在 Seatbelt 策略下重启,实现沙箱防护自动恢复
-- 沙箱操作需先检查 plist 状态保证幂等
-
-## Windows 平台规范
-
-### 沙箱实现(MinHook)
-- Windows 沙箱通过 `sandbox_hook.dll` 实现用户态 API Hook,等效于 macOS Seatbelt / Linux LD_PRELOAD
-- Hook 库: MinHook (轻量内联 Hook),拦截 `CreateFileW`/`CreateProcessW`/`connect`/`WSAConnect`
-- 注入流程: `CREATE_SUSPENDED` → `CreateRemoteThread(LoadLibraryW)` → `ResumeThread`
-- 子进程继承: `CreateProcessW` Hook 自动向子进程注入相同 DLL,实现沙箱链式传递
-- 策略格式与 Linux PreloadConfig 兼容,通过 `SANDBOX_POLICY_FILE` 环境变量传递
-- 审计日志写入 `SANDBOX_LOG_FILE`,由 Go 层 `HookLogWatcher` 轮询并接入 SecurityEvent 管线
-- `isSandboxSupportedOnPlatform()` 在找到 `sandbox_hook.dll` 时返回 true
-- 失败降级: DLL 注入失败时终止进程并上报错误,不允许"伪保护"状态
-
-### 网关管理
-- 沙箱可用时: 通过 SandboxManager 以 Hook 模式启动,支持策略执行与自愈重启
-- 沙箱不可用时: 回退到直接进程 start/stop,无服务注册
-- 进程管理使用 `taskkill`/`tasklist`/`wmic` 替代 Unix `pgrep`/`ps`/`SIGTERM`
-
-### 桌面 UI 一致性
-- 窗口标题栏: 与 macOS 对齐,使用 `TitleBarStyle.hidden` + Flutter 自定义标题栏。Windows 在 `win32_window.cpp` 使用无边框样式(无原生标题栏/系统菜单),仅保留 Flutter 绘制的标题栏与 -/x 按钮
-- 子窗口(审计/监控): Windows 使用对称 `horizontal: 16` padding,macOS 保留 `left: 78` 为红黄绿预留
-- 子窗口标题栏包含最小化/关闭按钮(macOS 由原生红黄绿处理)
-- 托盘图标: `images/tray_icon.ico`,应用图标: `windows/runner/resources/app_icon.ico`
-- 菜单项结构与 Linux/macOS 一致
-
-### 平台抽象规范
-- Go 平台相关函数通过文件名后缀(`_windows.go`/`_darwin.go`/`_linux.go`)或 build tag 分离
-- 进程信号操作统一使用 `sandbox/process_{unix,windows}.go` 中的 `gracefulTerminate`/`KillProcess` 等函数
-- 信号重置使用 `signal_{unix,windows}.go` 中的 `resetSignals()`,Windows 不支持 SIGTSTP
-- Dart 层获取用户主目录使用 `Platform.environment['HOME'] ?? Platform.environment['USERPROFILE']` 双 fallback
-- 文件可执行权限检查需跳过 Windows(`runtime.GOOS != "windows"`)
-- `platformPostStart()` 为各平台的进程启动后钩子,Windows 用于 DLL 注入+恢复线程
-
-### 路径与环境变量
-- 策略目录: `%USERPROFILE%\.botsec\policies\`(与 Unix `~/.botsec/policies/` 对应)
-- 环境变量: 使用 `USERPROFILE` 替代 `HOME`,Go 层 `os.UserHomeDir()` 自动适配
-- Hook DLL 搜索路径: 可执行文件同目录 > 策略目录 > 工作目录
-
-## 构建与 SCM
-
-### 构建脚本
-- `scripts/build_go.sh`: 构建 Go 安全引擎库
-- `scripts/build_openclaw_plugin.sh`: 构建 Openclaw 插件
-- `scripts/build_macos_release.sh`: macOS 发布构建
-- `scripts/build_windows_release.ps1`: Windows 发布构建(PowerShell,含 hook DLL CMake 构建)
-- `scripts/build_windows_from_mac.sh`: 通过 Parallels VM 从 Mac 构建 Windows 包
-- `scripts/build_linux_release.sh`: Linux 发布构建(DEB/RPM)
-- `scripts/generate_icons.sh`: 从 `icon_1024.png` 生成所有平台图标(含 Windows app_icon.ico)
-- `chatmodel-routing` 作为 `go_lib/` 下的独立模块存在
-- Hook DLL 源码: `go_lib/core/sandbox/windows_hook/`,使用 CMake + FetchContent(MinHook + cJSON)
-
-### Git 管理
-- cgo 生成的 `.h` 头文件为编译产物,已加入 `.gitignore`
-- `go_lib/` 下的编译产物(.dylib/.so/.dll)不纳入版本管理
+- 策略目录统一：
+  - Unix：`~/.botsec/policies/`
+  - Windows：`%USERPROFILE%\.botsec\policies\`
+- macOS：`sandbox-exec`（Seatbelt 策略）。
+- Linux：`LD_PRELOAD` + JSON policy（`SANDBOX_POLICY_FILE`）。
+- Windows：`sandbox_hook.dll` + MinHook 注入（失败必须 fail-close，不允许“伪保护”状态）。
+- 沙箱不可用时允许降级启动，但 UI/状态必须明确标识未启用沙箱防护。

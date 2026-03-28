@@ -20,6 +20,7 @@ func TestMetrics_SaveAndGetRecent(t *testing.T) {
 		Model:            "gpt-4",
 		IsBlocked:        false,
 		AssetName:        "openclaw",
+		AssetID:          "openclaw:test-1",
 	}
 
 	err := repo.SaveApiMetrics(metrics)
@@ -54,16 +55,18 @@ func TestMetrics_Statistics(t *testing.T) {
 			TotalTokens:      150,
 			ToolCallCount:    1,
 			AssetName:        "openclaw",
+			AssetID:          "openclaw:test-1",
 		})
 	}
 	_ = repo.SaveApiMetrics(&ApiMetrics{
-		Timestamp:        now,
-		TotalTokens:      200,
-		IsBlocked:        true,
-		AssetName:        "openclaw",
+		Timestamp:   now,
+		TotalTokens: 200,
+		IsBlocked:   true,
+		AssetName:   "openclaw",
+		AssetID:     "openclaw:test-1",
 	})
 
-	stats, err := repo.GetApiStatistics(86400, "openclaw")
+	stats, err := repo.GetApiStatistics(86400, "openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetApiStatistics failed: %v", err)
 	}
@@ -89,14 +92,16 @@ func TestMetrics_DailyTokenUsage(t *testing.T) {
 		Timestamp:   now,
 		TotalTokens: 500,
 		AssetName:   "openclaw",
+		AssetID:     "openclaw:test-1",
 	})
 	_ = repo.SaveApiMetrics(&ApiMetrics{
 		Timestamp:   now,
 		TotalTokens: 300,
 		AssetName:   "openclaw",
+		AssetID:     "openclaw:test-1",
 	})
 
-	usage, err := repo.GetDailyTokenUsage("openclaw")
+	usage, err := repo.GetDailyTokenUsage("openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetDailyTokenUsage failed: %v", err)
 	}
@@ -117,6 +122,7 @@ func TestMetrics_CleanOld(t *testing.T) {
 		Timestamp:   oldTime,
 		TotalTokens: 100,
 		AssetName:   "openclaw",
+		AssetID:     "openclaw:test-1",
 	})
 
 	// 插入一条新数据
@@ -125,6 +131,7 @@ func TestMetrics_CleanOld(t *testing.T) {
 		Timestamp:   now,
 		TotalTokens: 200,
 		AssetName:   "openclaw",
+		AssetID:     "openclaw:test-1",
 	})
 
 	err := repo.CleanOldApiMetrics(7)

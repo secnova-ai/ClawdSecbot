@@ -44,10 +44,11 @@ class SecurityEventDatabaseService {
   Future<List<SecurityEvent>> getSecurityEvents({
     int limit = 100,
     int offset = 0,
+    String assetID = '',
   }) async {
     final result = _callFFI(
       'GetSecurityEventsFFI',
-      jsonEncode({'limit': limit, 'offset': offset}),
+      jsonEncode({'limit': limit, 'offset': offset, 'asset_id': assetID}),
     );
     if (result['success'] != true) return [];
 
@@ -69,6 +70,11 @@ class SecurityEventDatabaseService {
   /// 清空所有安全事件
   Future<void> clearAllSecurityEvents() async {
     _callFFINoArg('ClearAllSecurityEventsFFI');
+  }
+
+  /// 清空指定资产安全事件（仅按 assetID 过滤）
+  Future<void> clearSecurityEvents({String assetID = ''}) async {
+    _callFFI('ClearSecurityEventsFFI', jsonEncode({'asset_id': assetID}));
   }
 
   // --- Helper methods ---

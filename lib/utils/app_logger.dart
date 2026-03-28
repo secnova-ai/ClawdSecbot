@@ -72,15 +72,8 @@ class AppLogger {
     }
   }
 
-  /// Resolve log directory by platform.
-  /// Windows: force logs under installation directory (exe sibling).
-  /// Others: keep using app support directory.
+  /// Resolve the shared log directory under the app data base directory.
   Future<String> _resolveLogDir() async {
-    if (Platform.isWindows) {
-      final exeDir = Directory(Platform.resolvedExecutable).parent.path;
-      return p.join(exeDir, 'logs');
-    }
-
     final dir = await getApplicationSupportDirectory();
     return p.join(dir.path, 'logs');
   }

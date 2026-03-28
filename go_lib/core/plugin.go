@@ -22,6 +22,13 @@ type BotPlugin interface {
 	// GetAssetUISchema returns the declarative asset card schema.
 	GetAssetUISchema() *plugin_sdk.AssetUISchema
 
+	// RequiresBotModelConfig reports whether this plugin's protection
+	// implementation depends on explicit Bot model configuration.
+	//
+	// true  -> protection startup must include bot_model config
+	// false -> plugin can resolve forwarding target without bot_model config
+	RequiresBotModelConfig() bool
+
 	// ========== Asset Discovery ==========
 
 	// ScanAssets discovers assets and returns the current asset instances.
@@ -111,4 +118,19 @@ type ProtectionLifecycleHooks interface {
 
 	// OnBeforeProxyStop runs before proxy stop for cleanup.
 	OnBeforeProxyStop(ctx *ProtectionContext)
+}
+
+// ProxyForwardingTarget is the resolved upstream target for proxy forwarding.
+// Plugins that do not require explicit Bot model configuration can provide
+// this target from their own runtime config files.
+type ProxyForwardingTarget struct {
+	Provider string
+	BaseURL  string
+	APIKey   string
+}
+
+// ProxyForwardingTargetResolver defines optional plugin capability to resolve
+// forwarding target dynamically for a specific asset instance.
+type ProxyForwardingTargetResolver interface {
+	ResolveProxyForwardingTarget(assetID string) (*ProxyForwardingTarget, error)
 }

@@ -6,9 +6,9 @@ import (
 	"go_lib/core/logging"
 )
 
-// ========== FFI辅助函数（供main包调用）==========
+// ========== FFI helpers used by main ==========
 
-// MarshalJSON 将Go值序列化为JSON字符串
+// MarshalJSON serializes a Go value to JSON.
 func MarshalJSON(v interface{}) string {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -17,7 +17,7 @@ func MarshalJSON(v interface{}) string {
 	return string(b)
 }
 
-// SuccessResult 成功响应结构
+// SuccessResult builds a successful FFI response.
 func SuccessResult(data interface{}) map[string]interface{} {
 	return map[string]interface{}{
 		"success": true,
@@ -25,7 +25,7 @@ func SuccessResult(data interface{}) map[string]interface{} {
 	}
 }
 
-// ErrorResult 错误响应结构
+// ErrorResult builds an error FFI response.
 func ErrorResult(err error) map[string]interface{} {
 	return map[string]interface{}{
 		"success": false,
@@ -33,11 +33,11 @@ func ErrorResult(err error) map[string]interface{} {
 	}
 }
 
-// ========== 全局初始化函数 ==========
+// ========== Global initialization ==========
 
-// Initialize 初始化全局路径管理器
-// workspaceDir: 工作区目录，用于存储日志、数据库、临时文件等
-// homeDir: 用户主目录，用于发现 Bot 配置等
+// Initialize configures the shared path manager.
+// workspaceDir is the app data base directory provided by Flutter.
+// homeDir is the user home directory for discovery and policy paths.
 func Initialize(workspaceDir, homeDir string) (map[string]interface{}, error) {
 	logging.Info("Initializing global path manager: workspaceDir=%s, homeDir=%s", workspaceDir, homeDir)
 
@@ -48,20 +48,21 @@ func Initialize(workspaceDir, homeDir string) (map[string]interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		"success":         true,
-		"workspace_dir":   workspaceDir,
-		"home_dir":        homeDir,
-		"log_dir":         pm.GetLogDir(),
-		"backup_dir":      pm.GetBackupDir(),
-		"policy_dir":      pm.GetPolicyDir(),
-		"react_skill_dir": pm.GetReActSkillDir(),
-		"db_path":         pm.GetDBPath(),
+		"success":           true,
+		"workspace_dir":     workspaceDir,
+		"home_dir":          homeDir,
+		"log_dir":           pm.GetLogDir(),
+		"backup_dir":        pm.GetBackupDir(),
+		"policy_dir":        pm.GetPolicyDir(),
+		"react_skill_dir":   pm.GetReActSkillDir(),
+		"scan_skill_dir":    pm.GetScanSkillDir(),
+		"db_path":           pm.GetDBPath(),
+		"version_file_path": pm.GetVersionFilePath(),
 	}, nil
 }
 
-// InitLogging 初始化日志系统
-// logDir: 日志目录路径，由 Flutter 传入（可写的 Application Support 目录）。
-// 若为空则降级从 PathManager 获取。
+// InitLogging initializes Go loggers.
+// When logDir is empty, the path is derived from PathManager.
 func InitLogging(logDir string) (map[string]interface{}, error) {
 	if logDir == "" {
 		pm := GetPathManager()
@@ -74,17 +75,17 @@ func InitLogging(logDir string) (map[string]interface{}, error) {
 		logDir = pm.GetLogDir()
 	}
 
-	// 初始化主日志
+	// Initialize the main logger.
 	if err := logging.InitLogger(logDir, logging.INFO); err != nil {
 		return nil, err
 	}
 
-	// 初始化历史日志
+	// Initialize the history logger.
 	if err := logging.InitHistoryLogger(logDir, logging.INFO); err != nil {
 		return nil, err
 	}
 
-	// 初始化 ShepherdGate 日志
+	// Initialize the ShepherdGate logger.
 	if err := logging.InitShepherdGateLogger(logDir, logging.INFO); err != nil {
 		return nil, err
 	}
@@ -97,7 +98,7 @@ func InitLogging(logDir string) (map[string]interface{}, error) {
 	}, nil
 }
 
-// GetPaths 获取所有路径信息
+// GetPaths returns all derived path information.
 func GetPaths() map[string]interface{} {
 	pm := GetPathManager()
 	if !pm.IsInitialized() {
@@ -108,14 +109,16 @@ func GetPaths() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"success":         true,
-		"workspace_dir":   pm.GetWorkspaceDir(),
-		"home_dir":        pm.GetHomeDir(),
-		"log_dir":         pm.GetLogDir(),
-		"backup_dir":      pm.GetBackupDir(),
-		"policy_dir":      pm.GetPolicyDir(),
-		"react_skill_dir": pm.GetReActSkillDir(),
-		"db_path":         pm.GetDBPath(),
+		"success":           true,
+		"workspace_dir":     pm.GetWorkspaceDir(),
+		"home_dir":          pm.GetHomeDir(),
+		"log_dir":           pm.GetLogDir(),
+		"backup_dir":        pm.GetBackupDir(),
+		"policy_dir":        pm.GetPolicyDir(),
+		"react_skill_dir":   pm.GetReActSkillDir(),
+		"scan_skill_dir":    pm.GetScanSkillDir(),
+		"db_path":           pm.GetDBPath(),
+		"version_file_path": pm.GetVersionFilePath(),
 	}
 }
 

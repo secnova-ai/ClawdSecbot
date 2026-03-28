@@ -1641,6 +1641,28 @@ class AppLocalizationsZh extends AppLocalizations {
       '确定要恢复到初始配置吗？这将:\n\n1. 停止当前防护\n2. 恢复 openclaw.json 到首次启动防护前的状态\n3. 重启 openclaw 网关\n\n此操作无法撤销。';
 
   @override
+  String get exitRestoreTitle => '退出前恢复 Bot 服务';
+
+  @override
+  String exitRestoreMessage(int count) {
+    return '当前有 $count 个 Bot 资产仍在使用 ClawdSecbot 代理流量。退出后如果不恢复默认配置，这些 Bot 可能无法继续工作。\n\n确认后，ClawdSecbot 会停止代理、防护失效，并尽量恢复 Bot 自身的未防护服务。';
+  }
+
+  @override
+  String get exitRestoreConfirm => '恢复并退出';
+
+  @override
+  String get exitRestoreInProgress => '正在恢复 Bot 默认服务，请稍候...';
+
+  @override
+  String get exitRestoreFailedTitle => '恢复失败，已取消退出';
+
+  @override
+  String exitRestoreFailedMessage(String details) {
+    return '以下资产恢复失败，为避免 Bot 退出后无法继续工作，本次不会退出应用：\n\n$details';
+  }
+
+  @override
   String get restoreConfigSuccess => '配置已恢复到初始状态';
 
   @override

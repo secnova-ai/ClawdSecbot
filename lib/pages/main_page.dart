@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:io';
+import 'dart:ui' show AppExitResponse;
 import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../utils/app_fonts.dart';
 import 'package:launch_at_startup/launch_at_startup.dart';
@@ -84,6 +86,11 @@ class _MainPageState extends State<MainPage>
   bool _showWelcome = true;
   bool _startupFlowStarted = false;
   Timer? _onboardingCompletionTimer;
+  AppLifecycleListener? _appExitListener;
+  bool _isExitFlowInProgress = false;
+  static const MethodChannel _appExitChannel = MethodChannel(
+    'com.clawdbot.guard/app_exit',
+  );
 
   // ============ 开机启动 ============
   bool _launchAtStartupEnabled = false;
@@ -105,9 +112,7 @@ class _MainPageState extends State<MainPage>
 
   @override
   void handleExitFromTray() async {
-    await windowManager.setPreventClose(false);
-    await windowManager.destroy();
-    exit(0);
+    await _requestAppExit();
   }
 
   // MainPageDataMixin 需要的接口
@@ -154,6 +159,10 @@ class _MainPageState extends State<MainPage>
     super.initState();
     trayManager.addListener(this);
     windowManager.addListener(this);
+    _appExitChannel.setMethodCallHandler(_handleNativeAppExitCall);
+    _appExitListener = AppLifecycleListener(
+      onExitRequested: _handleAppExitRequest,
+    );
     _init();
   }
 
@@ -212,10 +221,13 @@ class _MainPageState extends State<MainPage>
     try {
       final enabledConfigs = await ProtectionDatabaseService()
           .getEnabledProtectionConfigs();
-      final assetName = enabledConfigs.isNotEmpty
-          ? enabledConfigs.first.assetName
-          : 'GLOBAL';
-      await PluginService().loadAndSyncShepherdRules(assetName);
+      if (enabledConfigs.isNotEmpty) {
+        final config = enabledConfigs.first;
+        await PluginService().loadAndSyncShepherdRules(
+          config.assetName,
+          config.assetID,
+        );
+      }
     } catch (e) {
       appLogger.error('[MainPage] Failed to init Shepherd rules', e);
     }
@@ -264,6 +276,8 @@ class _MainPageState extends State<MainPage>
 
   @override
   void dispose() {
+    _appExitChannel.setMethodCallHandler(null);
+    _appExitListener?.dispose();
     trayManager.removeListener(this);
     windowManager.removeListener(this);
     _logSubscription?.cancel();
@@ -276,6 +290,19 @@ class _MainPageState extends State<MainPage>
     // 关闭 Go DB
     NativeLibraryService().close();
     super.dispose();
+  }
+
+  Future<dynamic> _handleNativeAppExitCall(MethodCall call) async {
+    if (call.method == 'requestAppExit') {
+      await _requestAppExit();
+      return true;
+    }
+    return null;
+  }
+
+  Future<AppExitResponse> _handleAppExitRequest() async {
+    await _requestAppExit();
+    return AppExitResponse.cancel;
   }
 
   // ============ 初始化开机启动 ============
@@ -349,53 +376,15 @@ class _MainPageState extends State<MainPage>
       );
 
       for (final config in enabledConfigs) {
-        var resolvedAssetID = config.assetID;
-        if (resolvedAssetID.isEmpty) {
-          resolvedAssetID = _resolveAssetIDFromCachedScan(config.assetName);
-          if (resolvedAssetID.isNotEmpty) {
-            try {
-              final modelService = ModelConfigDatabaseService();
-              final oldBotModelConfig = await modelService.getBotModelConfig(
-                config.assetName,
-                config.assetID,
-              );
-              if (oldBotModelConfig != null) {
-                await modelService.saveBotModelConfig(
-                  oldBotModelConfig.copyWith(assetID: resolvedAssetID),
-                );
-                await modelService.deleteBotModelConfig(
-                  config.assetName,
-                  config.assetID,
-                );
-              }
-
-              await ProtectionDatabaseService().saveProtectionConfig(
-                config.copyWith(assetID: resolvedAssetID),
-              );
-              await ProtectionDatabaseService().deleteProtectionConfig(
-                config.assetName,
-                config.assetID,
-              );
-              appLogger.info(
-                '[MainPage] Migrated protection config assetID: ${config.assetName} -> $resolvedAssetID',
-              );
-            } catch (e) {
-              appLogger.warning(
-                '[MainPage] Failed to migrate empty assetID for ${config.assetName}: $e',
-              );
-            }
-          }
-        }
-
-        if (resolvedAssetID.isEmpty) {
+        if (config.assetID.isEmpty) {
           appLogger.warning(
             '[MainPage] Skip restoring protection without assetID: ${config.assetName}',
           );
           continue;
         }
 
-        _protectedAssetIDs.add(resolvedAssetID);
-        _protectedAssetNamesByID[resolvedAssetID] = config.assetName;
+        _protectedAssetIDs.add(config.assetID);
+        _protectedAssetNamesByID[config.assetID] = config.assetName;
       }
       appLogger.info(
         '[MainPage] Enabled assets: ${_protectedAssetIDs.map((id) => '${_protectedAssetNamesByID[id]}/$id').join(', ')}',
@@ -417,22 +406,6 @@ class _MainPageState extends State<MainPage>
         });
       }
     }
-  }
-
-  String _resolveAssetIDFromCachedScan(String assetName) {
-    final assets = _pendingScanResult?.assets ?? const <Asset>[];
-    final matches = assets
-        .where((asset) => asset.name == assetName && asset.id.isNotEmpty)
-        .toList();
-    if (matches.isEmpty) {
-      return '';
-    }
-    if (matches.length > 1) {
-      appLogger.warning(
-        '[MainPage] Multiple assets matched for empty assetID restore: $assetName, using first',
-      );
-    }
-    return matches.first.id;
   }
 
   Future<void> _startProxyInBackground() async {
@@ -599,6 +572,311 @@ class _MainPageState extends State<MainPage>
     exit(0);
   }
 
+  Future<void> _requestAppExit() async {
+    if (_isExitFlowInProgress) {
+      return;
+    }
+    _isExitFlowInProgress = true;
+
+    try {
+      final enabledConfigs = await _loadExitTargets();
+      if (enabledConfigs.isNotEmpty) {
+        if (mounted) {
+          await showWindow();
+        }
+        final confirmed = await _showExitRestoreDialog(enabledConfigs.length);
+        if (confirmed != true) {
+          return;
+        }
+
+        final failures = await _runExitCleanupWithProgress(
+          () => _restoreTargetsForExit(enabledConfigs),
+        );
+        if (failures.isNotEmpty) {
+          await _showExitFailureDialog(failures);
+          return;
+        }
+      }
+
+      await _finalizeAppExit();
+    } finally {
+      _isExitFlowInProgress = false;
+    }
+  }
+
+  Future<List<ProtectionConfig>> _loadExitTargets() async {
+    final configs = await ProtectionDatabaseService()
+        .getEnabledProtectionConfigs();
+    if (configs.isNotEmpty) {
+      return configs;
+    }
+
+    final fallbacks = <ProtectionConfig>[];
+    for (final assetID in _protectedAssetIDs) {
+      final assetName = _protectedAssetNamesByID[assetID];
+      if (assetName == null || assetName.trim().isEmpty) {
+        continue;
+      }
+      fallbacks.add(
+        ProtectionConfig.defaultConfig(
+          assetName,
+        ).copyWith(assetID: assetID, enabled: true),
+      );
+    }
+    return fallbacks;
+  }
+
+  Future<List<String>> _restoreTargetsForExit(
+    List<ProtectionConfig> targets,
+  ) async {
+    final pluginService = PluginService();
+    final failures = <String>[];
+
+    for (final target in targets) {
+      final assetName = target.assetName.trim();
+      final assetID = target.assetID.trim();
+      final assetLabel = assetID.isEmpty ? assetName : '$assetName ($assetID)';
+
+      try {
+        final exitResult = await pluginService.notifyPluginAppExit(
+          assetName,
+          assetID,
+        );
+        if (exitResult['success'] != true) {
+          appLogger.warning(
+            '[MainPage] Plugin exit callback failed for $assetLabel: ${exitResult['error']}',
+          );
+        }
+
+        final protectionService = ProtectionService.forAsset(
+          assetName,
+          assetID,
+        );
+        protectionService.setAssetName(assetName, assetID);
+
+        final proxyStatus = await protectionService.getProtectionProxyStatus();
+        final wasRunning = proxyStatus['running'] == true;
+        String? stopError;
+        if (wasRunning) {
+          final stopResult = await protectionService.stopProtectionProxy();
+          if (stopResult['success'] != true) {
+            stopError = '${stopResult['error'] ?? 'stop proxy failed'}';
+          }
+        }
+
+        final requiresExplicitRestore =
+            assetName.toLowerCase() == 'openclaw' || !wasRunning;
+        if (requiresExplicitRestore) {
+          final restoreResult = await pluginService.restoreBotDefaultState(
+            assetName,
+            assetID,
+          );
+          if (restoreResult['success'] != true) {
+            failures.add(
+              '$assetLabel: ${restoreResult['error'] ?? 'restore bot default state failed'}',
+            );
+            continue;
+          }
+        }
+        if (stopError != null && !requiresExplicitRestore) {
+          failures.add('$assetLabel: $stopError');
+          continue;
+        }
+
+        await ProtectionDatabaseService().setProtectionEnabled(
+          assetName,
+          false,
+          assetID,
+        );
+      } catch (e) {
+        failures.add('$assetLabel: $e');
+      }
+    }
+
+    return failures;
+  }
+
+  Future<T> _runExitCleanupWithProgress<T>(Future<T> Function() action) async {
+    if (mounted) {
+      unawaited(
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            backgroundColor: const Color(0xFF1E1E2E),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            content: Row(
+              children: [
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(
+                    AppLocalizations.of(context)!.exitRestoreInProgress,
+                    style: AppFonts.inter(fontSize: 14, color: Colors.white70),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+
+    try {
+      return await action();
+    } finally {
+      if (mounted) {
+        final navigator = Navigator.of(context, rootNavigator: true);
+        if (navigator.canPop()) {
+          navigator.pop();
+        }
+      }
+    }
+  }
+
+  Future<bool?> _showExitRestoreDialog(int protectedCount) {
+    final l10n = AppLocalizations.of(context)!;
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                LucideIcons.shieldAlert,
+                color: Color(0xFFF59E0B),
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                l10n.exitRestoreTitle,
+                style: AppFonts.inter(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          l10n.exitRestoreMessage(protectedCount),
+          style: AppFonts.inter(fontSize: 14, color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(
+              l10n.cancel,
+              style: AppFonts.inter(color: Colors.white54),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFF59E0B),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text(
+              l10n.exitRestoreConfirm,
+              style: AppFonts.inter(
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showExitFailureDialog(List<String> failures) async {
+    if (!mounted) {
+      return;
+    }
+    final l10n = AppLocalizations.of(context)!;
+    final message = failures.join('\n');
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text(
+          l10n.exitRestoreFailedTitle,
+          style: AppFonts.inter(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        content: Text(
+          l10n.exitRestoreFailedMessage(message),
+          style: AppFonts.inter(fontSize: 13, color: Colors.white70),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(
+              l10n.continueButton,
+              style: AppFonts.inter(
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _finalizeAppExit() async {
+    try {
+      await PluginService().closePlugin();
+    } catch (e) {
+      appLogger.warning('[MainPage] Failed to close plugin during exit: $e');
+    }
+
+    try {
+      await NativeLibraryService().close();
+    } catch (e) {
+      appLogger.warning(
+        '[MainPage] Failed to close native library during exit: $e',
+      );
+    }
+
+    try {
+      await windowManager.setPreventClose(false);
+    } catch (_) {}
+
+    try {
+      await windowManager.destroy();
+    } catch (e) {
+      appLogger.warning('[MainPage] Window destroy failed during exit: $e');
+    }
+
+    exit(0);
+  }
+
   Future<void> _hideOnboarding() async {
     if (!mounted) return;
     setState(() {
@@ -694,6 +972,7 @@ class _MainPageState extends State<MainPage>
     });
 
     // 设置本地化，确保风险标题显示中文
+    if (!mounted) return;
     _scanner.setLocalization(AppLocalizations.of(context)!);
 
     final result = await _scanner.scan();
@@ -1233,12 +1512,20 @@ class _MainPageState extends State<MainPage>
             ),
             const Spacer(),
             IconButton(
-              icon: const Icon(LucideIcons.fileSearch, size: 16, color: Colors.white70),
+              icon: const Icon(
+                LucideIcons.fileSearch,
+                size: 16,
+                color: Colors.white70,
+              ),
               tooltip: l10n.auditLog,
               onPressed: showAuditLogWindow,
             ),
             IconButton(
-              icon: const Icon(LucideIcons.cpu, size: 16, color: Colors.white70),
+              icon: const Icon(
+                LucideIcons.cpu,
+                size: 16,
+                color: Colors.white70,
+              ),
               tooltip: l10n.settings,
               onPressed: _handleSettingsTap,
             ),
@@ -1317,7 +1604,11 @@ class _MainPageState extends State<MainPage>
             ),
           ),
           IconButton(
-            icon: const Icon(LucideIcons.fileSearch, size: 16, color: Colors.white70),
+            icon: const Icon(
+              LucideIcons.fileSearch,
+              size: 16,
+              color: Colors.white70,
+            ),
             tooltip: l10n.auditLog,
             onPressed: showAuditLogWindow,
           ),

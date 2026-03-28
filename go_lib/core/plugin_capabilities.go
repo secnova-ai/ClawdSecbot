@@ -36,6 +36,13 @@ type GatewaySandboxCapability interface {
 	RestoreToInitialConfig() string
 }
 
+// ApplicationLifecycleCapability defines optional plugin capability for
+// application-exit orchestration and best-effort bot state restoration.
+type ApplicationLifecycleCapability interface {
+	OnAppExit(assetID string) string
+	RestoreBotDefaultState(assetID string) string
+}
+
 func capabilityError(err error) string {
 	payload, marshalErr := json.Marshal(map[string]interface{}{
 		"success": false,
@@ -45,6 +52,41 @@ func capabilityError(err error) string {
 		return `{"success":false,"error":"internal error"}`
 	}
 	return string(payload)
+}
+
+func pickPluginFromDiscoveredAssets(matched []BotPlugin) BotPlugin {
+	if len(matched) == 0 {
+		return nil
+	}
+
+	counts := GetPluginManager().getAssetInstanceCountsByPlugin()
+	bestCount := 0
+	var best BotPlugin
+	tied := false
+	for _, plugin := range matched {
+		count := counts[normalizeAssetName(plugin.GetAssetName())]
+		if count > bestCount {
+			bestCount = count
+			best = plugin
+			tied = false
+		} else if count > 0 && count == bestCount {
+			tied = true
+		}
+	}
+	if bestCount > 0 && !tied {
+		return best
+	}
+	return nil
+}
+
+func pickLegacyDefaultPlugin(matched []BotPlugin) BotPlugin {
+	// Preserve historical behavior when no explicit asset was provided.
+	for _, plugin := range matched {
+		if normalizeAssetName(plugin.GetAssetName()) == "openclaw" {
+			return plugin
+		}
+	}
+	return nil
 }
 
 func resolvePluginByCapability(assetName, capability string, supports func(BotPlugin) bool) (BotPlugin, error) {
@@ -73,6 +115,12 @@ func resolvePluginByCapability(assetName, capability string, supports func(BotPl
 		return nil, fmt.Errorf("no plugin supports capability: %s", capability)
 	}
 	if len(matched) > 1 {
+		if plugin := pickPluginFromDiscoveredAssets(matched); plugin != nil {
+			return plugin, nil
+		}
+		if plugin := pickLegacyDefaultPlugin(matched); plugin != nil {
+			return plugin, nil
+		}
 		return nil, fmt.Errorf("multiple plugins support capability %s; specify asset_name", capability)
 	}
 	return matched[0], nil
@@ -200,6 +248,22 @@ func SyncGatewaySandboxByPlugin(assetName string) string {
 }
 
 func SyncGatewaySandboxByAssetAndPlugin(assetName, assetID string) string {
+	assetID = strings.TrimSpace(assetID)
+	assetName = strings.TrimSpace(assetName)
+
+	// Instance isolation must always be driven by asset_id when provided.
+	if assetID != "" {
+		plugin := GetPluginManager().GetPluginByAssetID(assetID)
+		if plugin == nil {
+			return capabilityError(fmt.Errorf("no plugin found for asset_id: %s", assetID))
+		}
+		cap, ok := plugin.(GatewaySandboxCapability)
+		if !ok {
+			return capabilityError(fmt.Errorf("plugin %s does not support capability: gateway_sandbox", plugin.GetAssetName()))
+		}
+		return cap.SyncGatewaySandboxByAsset(assetID)
+	}
+
 	plugin, err := resolvePluginByCapability(assetName, "gateway_sandbox", func(p BotPlugin) bool {
 		_, ok := p.(GatewaySandboxCapability)
 		return ok
@@ -207,7 +271,7 @@ func SyncGatewaySandboxByAssetAndPlugin(assetName, assetID string) string {
 	if err != nil {
 		return capabilityError(err)
 	}
-	return plugin.(GatewaySandboxCapability).SyncGatewaySandboxByAsset(assetID)
+	return plugin.(GatewaySandboxCapability).SyncGatewaySandbox()
 }
 
 func HasInitialBackupByPlugin(assetName string) string {
@@ -230,4 +294,26 @@ func RestoreToInitialConfigByPlugin(assetName string) string {
 		return capabilityError(err)
 	}
 	return plugin.(GatewaySandboxCapability).RestoreToInitialConfig()
+}
+
+func NotifyAppExitByPlugin(assetName, assetID string) string {
+	plugin, err := resolvePluginByCapability(assetName, "application_exit", func(p BotPlugin) bool {
+		_, ok := p.(ApplicationLifecycleCapability)
+		return ok
+	})
+	if err != nil {
+		return capabilityError(err)
+	}
+	return plugin.(ApplicationLifecycleCapability).OnAppExit(strings.TrimSpace(assetID))
+}
+
+func RestoreBotDefaultStateByPlugin(assetName, assetID string) string {
+	plugin, err := resolvePluginByCapability(assetName, "restore_bot_default_state", func(p BotPlugin) bool {
+		_, ok := p.(ApplicationLifecycleCapability)
+		return ok
+	})
+	if err != nil {
+		return capabilityError(err)
+	}
+	return plugin.(ApplicationLifecycleCapability).RestoreBotDefaultState(strings.TrimSpace(assetID))
 }

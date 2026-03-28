@@ -163,7 +163,7 @@ func (pm *PluginManager) resolvePluginInstance(assetName, assetID string) (*Asse
 	pm.mu.RUnlock()
 	if inst != nil {
 		if assetName != "" && normalizeAssetName(assetName) != normalizeAssetName(inst.AssetName) {
-			return nil, fmt.Errorf("asset mismatch: assetID %s belongs to %s, got %s", assetID, inst.AssetName, assetName)
+			logging.Warning("resolvePluginInstance: ignore assetName mismatch for assetID=%s, expected=%s, got=%s", assetID, inst.AssetName, assetName)
 		}
 		return inst, nil
 	}
@@ -309,6 +309,28 @@ func (pm *PluginManager) getAllPluginsDeterministic() []BotPlugin {
 	return plugins
 }
 
+// getAssetInstanceCountsByPlugin returns discovered asset instance counts keyed by normalized asset name.
+func (pm *PluginManager) getAssetInstanceCountsByPlugin() map[string]int {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	counts := make(map[string]int)
+	for _, inst := range pm.instances {
+		if inst == nil {
+			continue
+		}
+		key := normalizeAssetName(inst.AssetName)
+		if key == "" && inst.plugin != nil {
+			key = normalizeAssetName(inst.plugin.GetAssetName())
+		}
+		if key == "" {
+			continue
+		}
+		counts[key]++
+	}
+	return counts
+}
+
 // StartProtection starts protection by asset instance.
 func (pm *PluginManager) StartProtection(assetName string, assetID string, config ProtectionConfig) error {
 	inst, err := pm.resolvePluginInstance(assetName, assetID)
@@ -375,6 +397,9 @@ func (pm *PluginManager) GetAllProtectionStatus() map[string]ProtectionStatus {
 type PluginInfo struct {
 	AssetName     string `json:"asset_name"`
 	InstanceCount int    `json:"instance_count"`
+	// RequiresBotModelConfig indicates whether protection startup must provide
+	// bot_model config for this plugin.
+	RequiresBotModelConfig bool `json:"requires_bot_model_config"`
 
 	// Canonical metadata fields from BotPlugin contract.
 	ID                 string                     `json:"id,omitempty"`
@@ -405,14 +430,15 @@ func (pm *PluginManager) GetAllPluginInfos() []PluginInfo {
 	for key, plugin := range pm.registeredPlugins {
 		manifest := plugin.GetManifest()
 		info := PluginInfo{
-			AssetName:     plugin.GetAssetName(),
-			InstanceCount: instanceCountByAsset[key],
-			ID:            strings.TrimSpace(plugin.GetID()),
-			PluginID:      strings.TrimSpace(manifest.PluginID),
-			BotType:       strings.TrimSpace(manifest.BotType),
-			DisplayName:   strings.TrimSpace(manifest.DisplayName),
-			APIVersion:    strings.TrimSpace(manifest.APIVersion),
-			Capabilities:  append([]string{}, manifest.Capabilities...),
+			AssetName:              plugin.GetAssetName(),
+			InstanceCount:          instanceCountByAsset[key],
+			RequiresBotModelConfig: plugin.RequiresBotModelConfig(),
+			ID:                     strings.TrimSpace(plugin.GetID()),
+			PluginID:               strings.TrimSpace(manifest.PluginID),
+			BotType:                strings.TrimSpace(manifest.BotType),
+			DisplayName:            strings.TrimSpace(manifest.DisplayName),
+			APIVersion:             strings.TrimSpace(manifest.APIVersion),
+			Capabilities:           append([]string{}, manifest.Capabilities...),
 			SupportedPlatforms: append([]string{},
 				manifest.SupportedPlatforms...),
 		}

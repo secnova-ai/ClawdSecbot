@@ -1,0 +1,326 @@
+[
+  {
+    "risk_id": "logging_redact_off",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "redact_sensitive",
+          "label": "启用自动脱敏 (tools)",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "gateway_auth_disabled",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "enable_pairing",
+          "label": "启用 Gateway 配对认证",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "gateway_auth_password_mode",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "switch_to_token",
+          "label": "切换到 Token 模式 (推荐)",
+          "type": "boolean",
+          "default_value": true
+        },
+        {
+          "key": "token_value",
+          "label": "新 Token",
+          "type": "text",
+          "min_length": 32
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "config_perm_unsafe",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "fix_permission",
+          "label": "Fix permission (Windows: ACL / Unix: chmod 600)",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "config_dir_perm_unsafe",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "fix_permission",
+          "label": "Fix permission (Windows: ACL / Unix: chmod 700)",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "gateway_bind_unsafe",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "bind_address",
+          "label": "绑定地址",
+          "type": "select",
+          "options": ["127.0.0.1", "loopback", "::1"],
+          "default_value": "127.0.0.1"
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "gateway_weak_password",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "action",
+          "label": "选择处置方式",
+          "type": "select",
+          "options": ["switch_to_token", "use_stronger_password"],
+          "default_value": "switch_to_token"
+        },
+        {
+          "key": "token_value",
+          "label": "Token (>=32位)",
+          "type": "text",
+          "min_length": 32,
+          "default_value": "${GEN_RANDOM_TOKEN}"
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "gateway_weak_token",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "regenerate_token",
+          "label": "重新生成强 Token",
+          "type": "boolean",
+          "default_value": true
+        },
+        {
+          "key": "token_value",
+          "label": "新 Token (>=32位)",
+          "type": "text",
+          "min_length": 32,
+          "default_value": "${GEN_RANDOM_TOKEN}"
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "sandbox_disabled_default",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "sandbox_mode",
+          "label": "沙箱模式",
+          "type": "select",
+          "options": ["auto", "docker", "gvisor"],
+          "default_value": "auto"
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "sandbox_disabled_agent",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "sandbox_mode",
+          "label": "沙箱模式",
+          "type": "select",
+          "options": ["docker", "gvisor"],
+          "default_value": "docker"
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "log_dir_perm_unsafe",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "fix_permission",
+          "label": "Fix permission (Windows: ACL / Unix: chmod 700)",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "audit_disabled",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "enable_audit",
+          "label": "启用安全审计日志",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "autonomy_workspace_unrestricted",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "workspace_only",
+          "label": "限制为工作区内文件访问",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "plaintext_secrets",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "action",
+          "label": "处理方式",
+          "type": "select",
+          "options": ["use_env_var", "manual_review"],
+          "default_value": "use_env_var"
+        },
+        {
+          "key": "env_var_name",
+          "label": "环境变量名称",
+          "type": "text",
+          "default_value": "MOLTBOT_SECRET"
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "skills_not_scanned",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "scan_skills",
+          "label": "扫描未检测的 Skills",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "skill_agent_risk",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "delete_skill",
+          "label": "删除此 Skill",
+          "type": "boolean",
+          "default_value": false
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "nullclaw_1click_rce_vulnerability",
+    "mitigation": {
+      "type": "suggestion",
+      "title": "1-click RCE漏洞修复建议",
+      "description": "此漏洞为严重的远程代码执行漏洞（CVSS 10.0），需要升级OpenClaw版本或手动应用修复补丁。",
+      "suggestions": [
+        {
+          "priority": "P0",
+          "category": "立即措施",
+          "items": [
+            {
+              "action": "升级OpenClaw版本",
+              "detail": "执行命令检查当前版本：nullclaw --version\n建议升级到包含修复的最新版本（>= 2026.1.24-1）",
+              "command": "nullclaw --version"
+            },
+            {
+              "action": "禁用gatewayUrl参数覆盖",
+              "detail": "修改 ui/src/ui/app-settings.ts 文件，删除或禁用 applySettingsFromUrl 函数中的 gatewayUrl 参数读取逻辑，或添加域名白名单验证"
+            },
+            {
+              "action": "添加WebSocket Origin验证",
+              "detail": "在 src/gateway/auth.ts 的 authorizeGatewayConnect 函数中添加 Origin 白名单验证，拒绝来自非授权域名的连接"
+            },
+            {
+              "action": "修改Token存储方式",
+              "detail": "将 localStorage 改为 sessionStorage 存储token，降低跨站泄露风险（ui/src/ui/storage.ts）"
+            }
+          ]
+        },
+        {
+          "priority": "P1",
+          "category": "短期措施",
+          "items": [
+            {
+              "action": "引入安全响应头",
+              "detail": "在服务器配置中添加：\nContent-Security-Policy: default-src 'self'; connect-src 'self' wss://yourdomain.com\nX-Frame-Options: DENY\nStrict-Transport-Security: max-age=31536000"
+            },
+            {
+              "action": "实施Gateway URL白名单",
+              "detail": "在配置文件中定义允许的Gateway URL列表，拒绝连接到非白名单地址"
+            },
+            {
+              "action": "添加URL修改警告",
+              "detail": "在 UI 层检测 gatewayUrl 变化时弹出安全警告，要求用户确认"
+            }
+          ]
+        },
+        {
+          "priority": "P2",
+          "category": "长期措施",
+          "items": [
+            {
+              "action": "定期安全审计",
+              "detail": "建立定期安全扫描机制（每周自动化扫描、每月代码审查、每季度渗透测试）"
+            },
+            {
+              "action": "安全监控",
+              "detail": "监控异常的Gateway URL连接、异常Origin连接、异常token使用等行为"
+            },
+            {
+              "action": "安全培训",
+              "detail": "对开发人员进行安全编码培训，建立漏洞报告流程"
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

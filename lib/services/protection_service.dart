@@ -22,11 +22,42 @@ import '../utils/app_logger.dart';
 /// 合并了代理生命周期管理与协调编排，内部持有 [ProtectionMonitorService]
 /// 负责日志/事件/统计/审计。UI 层仅依赖本服务。
 class ProtectionService {
-  static final ProtectionService _instance = ProtectionService._internal();
-  factory ProtectionService() => _instance;
-  ProtectionService._internal();
+  static const String defaultInstanceKey = '__global__';
+  static final Map<String, ProtectionService> _instances = {};
 
-  final ProtectionMonitorService _monitor = ProtectionMonitorService();
+  static String normalizeInstanceKey(String? instanceKey) {
+    final key = instanceKey?.trim() ?? '';
+    return key.isEmpty ? defaultInstanceKey : key;
+  }
+
+  static String buildAssetScopedInstanceKey(String _, [String assetID = '']) {
+    final normalizedAssetID = assetID.trim();
+    if (normalizedAssetID.isNotEmpty) {
+      return 'asset::$normalizedAssetID';
+    }
+    return defaultInstanceKey;
+  }
+
+  factory ProtectionService([String instanceKey = defaultInstanceKey]) {
+    final normalizedKey = normalizeInstanceKey(instanceKey);
+    return _instances.putIfAbsent(
+      normalizedKey,
+      () => ProtectionService._internal(normalizedKey),
+    );
+  }
+
+  factory ProtectionService.scoped(String instanceKey) =>
+      ProtectionService(instanceKey);
+
+  factory ProtectionService.forAsset(String assetName, [String assetID = '']) =>
+      ProtectionService(buildAssetScopedInstanceKey(assetName, assetID));
+
+  ProtectionService._internal(this._instanceKey) {
+    _monitor = ProtectionMonitorService(_instanceKey);
+  }
+
+  final String _instanceKey;
+  late final ProtectionMonitorService _monitor;
 
   // === 代理状态 ===
   String? _assetName;
@@ -70,13 +101,14 @@ class ProtectionService {
   int get auditCompletionTokens => _monitor.auditCompletionTokens;
 
   void setAssetName(String name, [String assetID = '']) {
-    _assetName = name;
-    _assetID = assetID;
-    _monitor.setAssetName(name, assetID);
+    final normalizedName = name.trim();
+    final normalizedAssetID = assetID.trim();
+    _assetName = normalizedName;
+    _assetID = normalizedAssetID;
+    _monitor.setAssetName(normalizedName, normalizedAssetID);
   }
 
-  bool get _hasAssetBinding =>
-      (_assetName?.isNotEmpty ?? false) && _assetID.isNotEmpty;
+  bool get _hasAssetBinding => _assetID.isNotEmpty;
 
   // === 内部工具 ===
 
@@ -106,8 +138,8 @@ class ProtectionService {
       '[Protection] startProtectionProxy called: asset=$_assetName, auditOnly=${runtimeConfig.auditOnly}',
     );
 
-    // 加载基线统计
-    if (_monitor.baselineAnalysisCount == 0 && _assetName != null) {
+    // 切换资产实例时必须重新加载该资产的基线统计，避免复用上一资产数据。
+    if (_assetName != null) {
       await _monitor.loadStatisticsFromDatabase();
     }
 
@@ -237,7 +269,7 @@ class ProtectionService {
     int initialDailyTokenUsage = runtimeConfig.initialDailyTokenUsage;
     if (_assetName != null && effectiveDailyTokenLimit > 0) {
       initialDailyTokenUsage = await MetricsDatabaseService()
-          .getDailyTokenUsage(_assetName!);
+          .getDailyTokenUsage(_assetName!, _assetID);
     }
 
     final ProtectionRuntimeConfig finalRuntimeConfig = ProtectionRuntimeConfig(
@@ -385,31 +417,21 @@ class ProtectionService {
 
     appLogger.info('[Protection] Stopping proxy...');
     try {
-      final dylib = _getDylib();
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-      ffi.Pointer<Utf8> resultPtr;
-      if (_hasAssetBinding) {
-        final stopProxy = dylib
-            .lookupFunction<
-              StopProtectionProxyByAssetC,
-              StopProtectionProxyByAssetDart
-            >('StopProtectionProxyByAsset');
-        final assetNamePtr = _assetName!.toNativeUtf8();
-        final assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = stopProxy(assetNamePtr, assetIDPtr);
-        malloc.free(assetNamePtr);
-        malloc.free(assetIDPtr);
-      } else {
-        final stopProxy = dylib
-            .lookupFunction<StopProtectionProxyC, StopProtectionProxyDart>(
-              'StopProtectionProxy',
-            );
-        resultPtr = stopProxy();
+      final libPath = _getLibraryPath();
+      if (libPath == null) {
+        throw Exception('Plugin library not found');
       }
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
+
+      final resultStr = await Isolate.run(() {
+        if (_hasAssetBinding) {
+          return ProtectionProxyFFI.stopProtectionProxyByAssetInIsolate(
+            libPath,
+            _assetName!,
+            _assetID,
+          );
+        }
+        return ProtectionProxyFFI.stopProtectionProxyInIsolate(libPath);
+      });
 
       final result = jsonDecode(resultStr);
       appLogger.info('[Protection] Proxy stopped successfully');
@@ -571,7 +593,7 @@ class ProtectionService {
       int initialDailyTokenUsage = 0;
       if (dailyTokenLimit > 0 && assetName.isNotEmpty) {
         initialDailyTokenUsage = await MetricsDatabaseService()
-            .getDailyTokenUsage(assetName);
+            .getDailyTokenUsage(assetName, assetID);
       }
 
       final configJson = jsonEncode({
@@ -647,6 +669,13 @@ class ProtectionService {
       }
 
       final resultStr = await Isolate.run(() {
+        if (_hasAssetBinding) {
+          return ProtectionProxyFFI.syncGatewaySandboxByAssetInIsolate(
+            libPath,
+            _assetName!,
+            _assetID,
+          );
+        }
         return ProtectionProxyFFI.syncGatewaySandboxInIsolate(libPath);
       });
 
@@ -905,7 +934,12 @@ class ProtectionService {
     riskLevel: riskLevel,
   );
 
-  void dispose() => _monitor.dispose();
+  void dispose({bool removeInstance = true}) {
+    _monitor.dispose(removeInstance: removeInstance);
+    if (removeInstance) {
+      _instances.remove(_instanceKey);
+    }
+  }
 
   AuditLogQueryResult getAuditLogsFromBuffer({
     int limit = 100,
@@ -959,18 +993,14 @@ class ProtectionService {
 
   Future<void> clearAllAuditLogs() async => _monitor.clearAllAuditLogs();
 
-  Future<void> clearAuditLogs({
-    String? assetName,
-    String? assetID,
-  }) async => _monitor.clearAuditLogs(assetName: assetName, assetID: assetID);
+  Future<void> clearAuditLogs({String? assetName, String? assetID}) async =>
+      _monitor.clearAuditLogs(assetName: assetName, assetID: assetID);
 
-  void clearAuditLogsBufferWithFilter({
-    String? assetName,
-    String? assetID,
-  }) => _monitor.clearAuditLogsBufferWithFilter(
-    assetName: assetName,
-    assetID: assetID,
-  );
+  void clearAuditLogsBufferWithFilter({String? assetName, String? assetID}) =>
+      _monitor.clearAuditLogsBufferWithFilter(
+        assetName: assetName,
+        assetID: assetID,
+      );
 
   // === 安全事件委托 ===
 
@@ -995,15 +1025,35 @@ class ProtectionService {
   Future<bool> hasInitialBackup() async {
     try {
       final dylib = _getDylib();
-      final hasBackupFunc = dylib
-          .lookupFunction<HasInitialBackupFFIC, HasInitialBackupFFIDart>(
-            'HasInitialBackupFFI',
-          );
+      late final ffi.Pointer<Utf8> Function() hasBackupFunc;
+      ffi.Pointer<Utf8>? assetNamePtr;
+      ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>)? hasBackupByAssetFunc;
+      if (_hasAssetBinding) {
+        hasBackupByAssetFunc = dylib
+            .lookupFunction<
+              HasInitialBackupByAssetFFIC,
+              HasInitialBackupByAssetFFIDart
+            >('HasInitialBackupByAssetFFI');
+      } else {
+        hasBackupFunc = dylib
+            .lookupFunction<HasInitialBackupFFIC, HasInitialBackupFFIDart>(
+              'HasInitialBackupFFI',
+            );
+      }
       final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
         'FreeString',
       );
 
-      final resultPtr = hasBackupFunc();
+      final ffi.Pointer<Utf8> resultPtr;
+      if (_hasAssetBinding) {
+        assetNamePtr = _assetName!.toNativeUtf8();
+        resultPtr = hasBackupByAssetFunc!(assetNamePtr);
+      } else {
+        resultPtr = hasBackupFunc();
+      }
+      if (assetNamePtr != null) {
+        malloc.free(assetNamePtr);
+      }
       final resultStr = resultPtr.toDartString();
       freeString(resultPtr);
 
@@ -1037,6 +1087,12 @@ class ProtectionService {
 
       // 通过 Isolate 执行恢复操作，避免阻塞 UI 线程
       final resultStr = await Isolate.run(() {
+        if (_hasAssetBinding) {
+          return ProtectionProxyFFI.restoreToInitialConfigByAssetInIsolate(
+            libPath,
+            _assetName!,
+          );
+        }
         return ProtectionProxyFFI.restoreToInitialConfigInIsolate(libPath);
       });
 

@@ -29,8 +29,9 @@ func SaveSecurityEventsBatch(jsonStr string) map[string]interface{} {
 // GetSecurityEvents 获取安全事件列表
 func GetSecurityEvents(filterJSON string) map[string]interface{} {
 	var filter struct {
-		Limit  int `json:"limit"`
-		Offset int `json:"offset"`
+		Limit   int    `json:"limit"`
+		Offset  int    `json:"offset"`
+		AssetID string `json:"asset_id"`
 	}
 	if err := json.Unmarshal([]byte(filterJSON), &filter); err != nil {
 		logging.Error("Failed to parse security event filter JSON: %v", err)
@@ -38,7 +39,7 @@ func GetSecurityEvents(filterJSON string) map[string]interface{} {
 	}
 
 	repo := repository.NewSecurityEventRepository(nil)
-	events, err := repo.GetSecurityEvents(filter.Limit, filter.Offset)
+	events, err := repo.GetSecurityEvents(filter.Limit, filter.Offset, filter.AssetID)
 	if err != nil {
 		logging.Error("Failed to get security events: %v", err)
 		return errorResult(err)
@@ -50,7 +51,7 @@ func GetSecurityEvents(filterJSON string) map[string]interface{} {
 // GetSecurityEventCount 获取安全事件数量
 func GetSecurityEventCount() map[string]interface{} {
 	repo := repository.NewSecurityEventRepository(nil)
-	count, err := repo.GetSecurityEventCount()
+	count, err := repo.GetSecurityEventCount("")
 	if err != nil {
 		logging.Error("Failed to get security event count: %v", err)
 		return errorResult(err)
@@ -59,13 +60,26 @@ func GetSecurityEventCount() map[string]interface{} {
 	return successDataResult(count)
 }
 
-// ClearAllSecurityEvents 清空所有安全事件
-func ClearAllSecurityEvents() map[string]interface{} {
+// ClearSecurityEvents 清空安全事件（仅按 asset_id 过滤）
+func ClearSecurityEvents(filterJSON string) map[string]interface{} {
+	var filter struct {
+		AssetID string `json:"asset_id"`
+	}
+	if err := json.Unmarshal([]byte(filterJSON), &filter); err != nil {
+		logging.Error("Failed to parse security event clear filter JSON: %v", err)
+		return errorMessageResult("invalid JSON: " + err.Error())
+	}
+
 	repo := repository.NewSecurityEventRepository(nil)
-	if err := repo.ClearAllSecurityEvents(); err != nil {
-		logging.Error("Failed to clear all security events: %v", err)
+	if err := repo.ClearAllSecurityEvents(filter.AssetID); err != nil {
+		logging.Error("Failed to clear security events: %v", err)
 		return errorResult(err)
 	}
 
 	return successResult()
+}
+
+// ClearAllSecurityEvents 清空所有安全事件
+func ClearAllSecurityEvents() map[string]interface{} {
+	return ClearSecurityEvents(`{}`)
 }

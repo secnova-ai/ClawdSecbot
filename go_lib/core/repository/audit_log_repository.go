@@ -86,7 +86,7 @@ func (r *AuditLogRepository) SaveAuditLog(log *AuditLog) error {
 		 has_risk, risk_level, risk_reason, confidence, action,
 		 prompt_tokens, completion_tokens, total_tokens, duration_ms)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, log.ID, log.Timestamp, log.RequestID, log.AssetName, log.AssetID, log.Model,
+	`, log.ID, log.Timestamp, log.RequestID, strings.TrimSpace(log.AssetName), strings.TrimSpace(log.AssetID), log.Model,
 		log.RequestContent, log.ToolCalls, log.OutputContent,
 		hasRisk, log.RiskLevel, log.RiskReason, log.Confidence, log.Action,
 		log.PromptTokens, log.CompletionTokens, log.TotalTokens, log.DurationMs)
@@ -129,7 +129,7 @@ func (r *AuditLogRepository) SaveAuditLogsBatch(logs []*AuditLog) error {
 		if log.HasRisk {
 			hasRisk = 1
 		}
-		_, err := stmt.Exec(log.ID, log.Timestamp, log.RequestID, log.AssetName, log.AssetID, log.Model,
+		_, err := stmt.Exec(log.ID, log.Timestamp, log.RequestID, strings.TrimSpace(log.AssetName), strings.TrimSpace(log.AssetID), log.Model,
 			log.RequestContent, log.ToolCalls, log.OutputContent,
 			hasRisk, log.RiskLevel, log.RiskReason, log.Confidence, log.Action,
 			log.PromptTokens, log.CompletionTokens, log.TotalTokens, log.DurationMs)
@@ -154,6 +154,8 @@ func (r *AuditLogRepository) GetAuditLogs(filter *AuditLogFilter) ([]*AuditLog, 
 	if filter.Limit <= 0 {
 		filter.Limit = 100
 	}
+	filter.AssetName = strings.TrimSpace(filter.AssetName)
+	filter.AssetID = strings.TrimSpace(filter.AssetID)
 
 	conditions := []string{}
 	params := []interface{}{}
@@ -225,6 +227,8 @@ func (r *AuditLogRepository) GetAuditLogCount(riskOnly bool, assetName, assetID 
 		return 0, fmt.Errorf("database not initialized")
 	}
 
+	assetName = strings.TrimSpace(assetName)
+	assetID = strings.TrimSpace(assetID)
 	conditions := make([]string, 0, 3)
 	params := make([]interface{}, 0, 3)
 	if riskOnly {
@@ -259,6 +263,8 @@ func (r *AuditLogRepository) GetAuditLogStatistics(assetName, assetID string) (*
 		return nil, fmt.Errorf("database not initialized")
 	}
 
+	assetName = strings.TrimSpace(assetName)
+	assetID = strings.TrimSpace(assetID)
 	conditions := make([]string, 0, 2)
 	params := make([]interface{}, 0, 2)
 	// Prefer unique asset_id; only fallback to asset_name when asset_id is absent.
@@ -345,12 +351,28 @@ func (r *AuditLogRepository) CleanOldAuditLogs(keepDays int) error {
 }
 
 // ClearAllAuditLogs 清空所有审计日志
-func (r *AuditLogRepository) ClearAllAuditLogs() error {
+func (r *AuditLogRepository) ClearAllAuditLogs(assetName, assetID string) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
 
-	_, err := r.db.Exec("DELETE FROM audit_logs")
+	assetName = strings.TrimSpace(assetName)
+	assetID = strings.TrimSpace(assetID)
+	where := make([]string, 0, 2)
+	args := make([]interface{}, 0, 2)
+	if assetID != "" {
+		where = append(where, "asset_id = ?")
+		args = append(args, assetID)
+	} else if assetName != "" {
+		where = append(where, "asset_name = ?")
+		args = append(args, assetName)
+	}
+
+	query := "DELETE FROM audit_logs"
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	_, err := r.db.Exec(query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to clear all audit logs: %w", err)
 	}
@@ -364,7 +386,7 @@ func (r *AuditLogRepository) ClearAuditLogs(assetName, assetID string) error {
 	}
 
 	if assetID == "" && assetName == "" {
-		return r.ClearAllAuditLogs()
+		return r.ClearAllAuditLogs("", "")
 	}
 
 	var (

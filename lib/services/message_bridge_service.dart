@@ -77,6 +77,11 @@ class BridgeMessage {
 
 /// 消息桥接服务 - 使用 FFI 回调实现 Go 与 Dart 之间的实时通信
 class MessageBridgeService {
+  static final MessageBridgeService _instance =
+      MessageBridgeService._internal();
+  factory MessageBridgeService() => _instance;
+  MessageBridgeService._internal();
+
   ffi.DynamicLibrary? _dylib;
 
   // FFI 回调相关
@@ -90,6 +95,7 @@ class MessageBridgeService {
 
   bool _isRunning = false;
   bool _isInitialized = false;
+  int _subscriberCount = 0;
 
   /// 消息流
   Stream<BridgeMessage> get messageStream => _messageController.stream;
@@ -131,6 +137,7 @@ class MessageBridgeService {
   /// 初始化消息桥接服务
   Future<bool> initialize() async {
     if (_isInitialized) {
+      _subscriberCount++;
       return true;
     }
 
@@ -188,10 +195,12 @@ class MessageBridgeService {
 
       _isRunning = true;
       _isInitialized = true;
+      _subscriberCount = 1;
       appLogger.info('[MessageBridge] FFI callback mode initialized');
       return true;
     } catch (e) {
       appLogger.error('[MessageBridge] Initialization error', e);
+      _subscriberCount = 0;
       _disposeCallback();
       return false;
     }
@@ -273,6 +282,14 @@ class MessageBridgeService {
 
   /// 关闭消息桥接服务
   void dispose() {
+    if (_subscriberCount > 0) {
+      _subscriberCount--;
+    }
+
+    if (_subscriberCount > 0) {
+      return;
+    }
+
     if (!_isRunning && !_isInitialized) {
       // 已经关闭
       return;
@@ -310,14 +327,8 @@ class MessageBridgeService {
     // 3. 现在安全地释放 Dart 端资源
     _disposeCallback();
 
-    // 4. 最后关闭状态标志和流控制器
+    // 4. 最后关闭状态标志（流控制器保持打开，供后续重新 initialize 复用）
     _isInitialized = false;
-    if (!_messageController.isClosed) {
-      _messageController.close();
-    }
-    if (!_errorController.isClosed) {
-      _errorController.close();
-    }
     appLogger.info('[MessageBridge] Service closed');
   }
 }

@@ -1,0 +1,24 @@
+[
+  {
+    "code": "nullclaw_gateway_active",
+    "name": "Port and Process Detection",
+    "life_cycle": 1,
+    "os": ["darwin", "linux", "windows"],
+    "desc": "Detects active Nullclaw Gateway via Port and Process",
+    "expression": {
+      "lang": "json_match",
+      "expr": "{\"ports\": [3000], \"process_keywords\": [\"nullclaw\", \"moltbot\"]}"
+    }
+  },
+  {
+    "code": "nullclaw_config_exist",
+    "name": "Config File Detection",
+    "life_cycle": 2,
+    "os": ["darwin", "linux", "windows"],
+    "desc": "Detects Nullclaw presence via Config File",
+    "expression": {
+      "lang": "json_match",
+      "expr": "{\"file_paths\": [\"~/.nullclaw/config.json\", \"~/.config/nullclaw/config.json\", \"~/.nullclaw\"]}"
+    }
+  }
+]

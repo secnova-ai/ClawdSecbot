@@ -59,6 +59,7 @@ func TestSaveProtectionConfig(t *testing.T) {
 
 	input := `{
 		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
 		"enabled": true,
 		"audit_only": false,
 		"sandbox_enabled": true,
@@ -76,9 +77,9 @@ func TestGetProtectionConfig(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	SaveProtectionConfig(`{"asset_name": "openclaw", "enabled": true}`)
+	SaveProtectionConfig(`{"asset_name": "openclaw", "asset_id":"openclaw:test-1", "enabled": true}`)
 
-	result := GetProtectionConfig("openclaw", "")
+	result := GetProtectionConfig("openclaw", "openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
@@ -89,7 +90,7 @@ func TestGetEnabledProtectionConfigs(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	SaveProtectionConfig(`{"asset_name": "openclaw", "enabled": true}`)
+	SaveProtectionConfig(`{"asset_name": "openclaw", "asset_id":"openclaw:test-1", "enabled": true}`)
 
 	result := GetEnabledProtectionConfigs()
 	if result["success"] != true {
@@ -124,8 +125,8 @@ func TestGetActiveProtectionCount(t *testing.T) {
 	}
 
 	// 添加启用的防护配置
-	SaveProtectionConfig(`{"asset_name": "openclaw", "enabled": true}`)
-	SaveProtectionConfig(`{"asset_name": "test", "enabled": true}`)
+	SaveProtectionConfig(`{"asset_name": "openclaw", "asset_id":"openclaw:test-1", "enabled": true}`)
+	SaveProtectionConfig(`{"asset_name": "test", "asset_id":"test:test-2", "enabled": true}`)
 
 	// 再次检查
 	result = GetActiveProtectionCount()
@@ -148,7 +149,7 @@ func TestGetActiveProtectionCount(t *testing.T) {
 	}
 
 	// 禁用一个
-	SetProtectionEnabled(`{"asset_name": "test", "enabled": false}`)
+	SetProtectionEnabled(`{"asset_name": "test", "asset_id":"test:test-2", "enabled": false}`)
 
 	// 检查数量是否减少
 	result = GetActiveProtectionCount()
@@ -176,9 +177,9 @@ func TestSetProtectionEnabled(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	SaveProtectionConfig(`{"asset_name": "openclaw", "enabled": false}`)
+	SaveProtectionConfig(`{"asset_name": "openclaw", "asset_id":"openclaw:test-1", "enabled": false}`)
 
-	result := SetProtectionEnabled(`{"asset_name": "openclaw", "enabled": true}`)
+	result := SetProtectionEnabled(`{"asset_name": "openclaw", "asset_id":"openclaw:test-1", "enabled": true}`)
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
@@ -200,8 +201,8 @@ func TestDeleteProtectionConfig(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	SaveProtectionConfig(`{"asset_name": "openclaw", "enabled": true}`)
-	result := DeleteProtectionConfig("openclaw", "")
+	SaveProtectionConfig(`{"asset_name": "openclaw", "asset_id":"openclaw:test-1", "enabled": true}`)
+	result := DeleteProtectionConfig("openclaw", "openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
@@ -214,6 +215,7 @@ func TestSaveProtectionStatistics(t *testing.T) {
 
 	input := `{
 		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
 		"analysis_count": 10,
 		"warning_count": 2,
 		"blocked_count": 1,
@@ -232,9 +234,9 @@ func TestGetProtectionStatistics(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	SaveProtectionStatistics(`{"asset_name": "openclaw", "analysis_count": 5}`)
+	SaveProtectionStatistics(`{"asset_name": "openclaw", "asset_id":"openclaw:test-1", "analysis_count": 5}`)
 
-	result := GetProtectionStatistics("openclaw", "")
+	result := GetProtectionStatistics("openclaw", "openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
@@ -245,8 +247,8 @@ func TestClearProtectionStatistics(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	SaveProtectionStatistics(`{"asset_name": "openclaw", "analysis_count": 5}`)
-	result := ClearProtectionStatistics("openclaw", "")
+	SaveProtectionStatistics(`{"asset_name": "openclaw", "asset_id":"openclaw:test-1", "analysis_count": 5}`)
+	result := ClearProtectionStatistics("openclaw", "openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
@@ -259,6 +261,7 @@ func TestSaveShepherdSensitiveActions(t *testing.T) {
 
 	input := `{
 		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
 		"actions": ["file_write", "shell_exec", "network_connect"]
 	}`
 
@@ -273,11 +276,58 @@ func TestGetShepherdSensitiveActions(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	SaveShepherdSensitiveActions(`{"asset_name": "openclaw", "actions": ["file_write"]}`)
+	SaveShepherdSensitiveActions(`{"asset_name": "openclaw", "asset_id":"openclaw:test-1", "actions": ["file_write"]}`)
 
-	result := GetShepherdSensitiveActions("openclaw")
+	result := GetShepherdSensitiveActions("openclaw", "openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
+	}
+}
+
+// TestGetShepherdSensitiveActions_DefaultFallback 验证未保存实例规则时返回默认内置规则
+func TestGetShepherdSensitiveActions_DefaultFallback(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	result := GetShepherdSensitiveActions("openclaw", "openclaw:test-default")
+	if result["success"] != true {
+		t.Fatalf("Expected success=true, got: %v", result)
+	}
+	data, ok := result["data"].([]string)
+	if !ok {
+		raw, _ := json.Marshal(result["data"])
+		var parsed []string
+		_ = json.Unmarshal(raw, &parsed)
+		data = parsed
+	}
+	if len(data) == 0 {
+		t.Fatal("Expected default shepherd rules to be non-empty")
+	}
+}
+
+// TestGetShepherdSensitiveActions_SavedEmptyRules 验证保存空规则后返回空列表
+func TestGetShepherdSensitiveActions_SavedEmptyRules(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	saveResult := SaveShepherdSensitiveActions(`{"asset_name":"openclaw","asset_id":"openclaw:test-empty","actions":[]}`)
+	if saveResult["success"] != true {
+		t.Fatalf("SaveShepherdSensitiveActions failed: %v", saveResult)
+	}
+
+	result := GetShepherdSensitiveActions("openclaw", "openclaw:test-empty")
+	if result["success"] != true {
+		t.Fatalf("Expected success=true, got: %v", result)
+	}
+	data, ok := result["data"].([]string)
+	if !ok {
+		raw, _ := json.Marshal(result["data"])
+		var parsed []string
+		_ = json.Unmarshal(raw, &parsed)
+		data = parsed
+	}
+	if len(data) != 0 {
+		t.Fatalf("Expected empty saved shepherd rules, got: %v", data)
 	}
 }
 
@@ -286,7 +336,7 @@ func TestClearAllData(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	SaveProtectionStatistics(`{"asset_name": "openclaw", "analysis_count": 5}`)
+	SaveProtectionStatistics(`{"asset_name": "openclaw", "asset_id":"openclaw:test-1", "analysis_count": 5}`)
 	result := ClearAllData()
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
@@ -367,6 +417,7 @@ func TestProtectionConfig_RoundTrip(t *testing.T) {
 
 	input := `{
 		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
 		"enabled": true,
 		"audit_only": true,
 		"sandbox_enabled": false,
@@ -376,7 +427,7 @@ func TestProtectionConfig_RoundTrip(t *testing.T) {
 
 	SaveProtectionConfig(input)
 
-	result := GetProtectionConfig("openclaw", "")
+	result := GetProtectionConfig("openclaw", "openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
@@ -405,6 +456,7 @@ func TestSaveProtectionConfig_PreservesBotModelConfig(t *testing.T) {
 	// 1. 先通过 SaveBotModelConfig 保存 bot 模型配置
 	botInput := `{
 		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
 		"provider": "openai",
 		"base_url": "https://api.openai.com/v1",
 		"api_key": "sk-test-key",
@@ -416,7 +468,7 @@ func TestSaveProtectionConfig_PreservesBotModelConfig(t *testing.T) {
 	}
 
 	// 2. 验证 bot 模型配置已保存
-	getResult := GetBotModelConfig("openclaw", "")
+	getResult := GetBotModelConfig("openclaw", "openclaw:test-1")
 	if getResult["success"] != true {
 		t.Fatalf("GetBotModelConfig failed: %v", getResult)
 	}
@@ -429,6 +481,7 @@ func TestSaveProtectionConfig_PreservesBotModelConfig(t *testing.T) {
 	// 模拟 Flutter ProtectionDatabaseService.saveProtectionConfig 的行为
 	protInput := `{
 		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
 		"enabled": true,
 		"audit_only": false,
 		"sandbox_enabled": true,
@@ -441,7 +494,7 @@ func TestSaveProtectionConfig_PreservesBotModelConfig(t *testing.T) {
 	}
 
 	// 4. 验证 bot 模型配置没有被擦除
-	getResult = GetBotModelConfig("openclaw", "")
+	getResult = GetBotModelConfig("openclaw", "openclaw:test-1")
 	if getResult["success"] != true {
 		t.Fatalf("GetBotModelConfig after SaveProtectionConfig failed: %v", getResult)
 	}

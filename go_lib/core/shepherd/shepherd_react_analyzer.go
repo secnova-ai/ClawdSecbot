@@ -114,7 +114,9 @@ func (s *analysisSessionStore) Delete(id string) {
 type ToolCallReActAnalyzer struct {
 	mu sync.RWMutex
 
-	language string
+	language  string
+	assetName string
+	assetID   string
 
 	chatModel   model.ChatModel
 	modelConfig *repository.SecurityModelConfig
@@ -190,6 +192,14 @@ func (a *ToolCallReActAnalyzer) Close() {
 func (a *ToolCallReActAnalyzer) SetLanguage(language string) {
 	a.mu.Lock()
 	a.language = normalizeShepherdLanguage(language)
+	a.mu.Unlock()
+}
+
+// SetAssetContext sets asset identity used for security event attribution.
+func (a *ToolCallReActAnalyzer) SetAssetContext(assetName, assetID string) {
+	a.mu.Lock()
+	a.assetName = strings.TrimSpace(assetName)
+	a.assetID = strings.TrimSpace(assetID)
 	a.mu.Unlock()
 }
 
@@ -331,6 +341,8 @@ func (a *ToolCallReActAnalyzer) Analyze(ctx context.Context, contextMessages []C
 			ActionDesc: heuristic.Reason,
 			RiskType:   heuristic.RiskLevel,
 			Source:     "heuristic",
+			AssetName:  a.assetName,
+			AssetID:    a.assetID,
 		})
 
 		return heuristic, nil
@@ -343,6 +355,8 @@ func (a *ToolCallReActAnalyzer) Analyze(ctx context.Context, contextMessages []C
 	skillMw := a.skillMiddleware
 	fsMw := a.filesystemMiddleware
 	language := a.language
+	assetName := a.assetName
+	assetID := a.assetID
 	a.mu.RUnlock()
 
 	if chatModel == nil || skillMw == nil || fsMw == nil {
@@ -354,7 +368,7 @@ func (a *ToolCallReActAnalyzer) Analyze(ctx context.Context, contextMessages []C
 		NewGuardSearchContextTool(a.sessions),
 		NewGuardRecentMessagesTool(a.sessions),
 		NewGuardRecentToolCallsTool(a.sessions),
-		NewRecordSecurityEventTool(),
+		NewRecordSecurityEventTool(assetName, assetID),
 		newScanSkillSecurityTool(modelConfig),
 	}
 

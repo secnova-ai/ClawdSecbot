@@ -126,14 +126,60 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
   // 内置安全技能列表
   List<Map<String, dynamic>> _bundledSkills = [];
 
+  // Whether this plugin requires explicit bot model configuration.
+  bool _requiresBotModelConfig = true;
+
+  int _tabCountFor(bool requiresBotModelConfig) {
+    if (BuildConfig.isAppStore) {
+      return requiresBotModelConfig ? 3 : 2;
+    }
+    return requiresBotModelConfig ? 4 : 3;
+  }
+
+  int get _tabCount => _tabCountFor(_requiresBotModelConfig);
+
+  int? get _botTabIndex {
+    if (!_requiresBotModelConfig) return null;
+    return BuildConfig.isAppStore ? 2 : 3;
+  }
+
+  void _updateTabControllerForRequirement(bool requiresBotModelConfig) {
+    final expectedLength = _tabCountFor(requiresBotModelConfig);
+    if (_requiresBotModelConfig == requiresBotModelConfig &&
+        _tabController.length == expectedLength) {
+      return;
+    }
+
+    final previousController = _tabController;
+    final previousIndex = previousController.index;
+
+    _requiresBotModelConfig = requiresBotModelConfig;
+    int nextIndex = previousIndex;
+    if (nextIndex >= expectedLength) {
+      nextIndex = expectedLength - 1;
+    }
+    if (nextIndex < 0) {
+      nextIndex = 0;
+    }
+
+    _tabController = TabController(
+      length: expectedLength,
+      vsync: this,
+      initialIndex: nextIndex,
+    );
+
+    // Delay old controller disposal until widgets have switched to the new
+    // controller, otherwise TabBar/TabBarView may still hold dependents.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      previousController.dispose();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
-    // AppStore版显示3个tab（智能规则、Token限制、Bot模型），Personal版显示4个tab（智能规则、Token限制、权限设置、Bot模型）
-    _tabController = TabController(
-      length: BuildConfig.isAppStore ? 3 : 4,
-      vsync: this,
-    );
+    // 默认按“需要 bot 模型配置”初始化，加载配置后再按插件能力动态调整。
+    _tabController = TabController(length: _tabCount, vsync: this);
     _loadConfig();
   }
 
@@ -205,12 +251,18 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       // Load Shepherd Rules
       final rules = await PluginService().loadAndSyncShepherdRules(
         widget.assetName,
+        widget.assetID,
       );
       _sensitiveActions.clear();
       _sensitiveActions.addAll(rules['sensitiveActions']!);
 
       // Load bundled ReAct skills
       _bundledSkills = PluginService().listBundledReActSkills();
+
+      // Resolve whether this plugin requires bot model config.
+      final requiresBotModelConfig = await PluginService()
+          .requiresBotModelConfig(widget.assetName);
+      _updateTabControllerForRequirement(requiresBotModelConfig);
 
       setState(() {
         _isLoading = false;
@@ -220,6 +272,11 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       _config = ProtectionConfig.defaultConfig(
         widget.assetName,
       ).copyWith(assetID: widget.assetID);
+      try {
+        final requiresBotModelConfig = await PluginService()
+            .requiresBotModelConfig(widget.assetName);
+        _updateTabControllerForRequirement(requiresBotModelConfig);
+      } catch (_) {}
       setState(() {
         _isLoading = false;
       });
@@ -396,29 +453,35 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     try {
       final l10n = AppLocalizations.of(context)!;
 
-      // 1. 保存 Bot 模型配置到数据库（deferProxyRestart=true，延迟重启）
-      //    先保存 Bot 模型，但不触发代理重启，等防护配置也保存后再统一重启
-      final botFormState = _botModelFormKey.currentState;
-      final botTabIndex = BuildConfig.isAppStore ? 2 : 3;
-      if (botFormState == null || !botFormState.hasRequiredConfig) {
-        if (mounted) {
+      bool botModelSaved = false;
+      final botTabIndex = _botTabIndex;
+      if (_requiresBotModelConfig) {
+        // 1. 保存 Bot 模型配置到数据库（deferProxyRestart=true，延迟重启）
+        //    先保存 Bot 模型，但不触发代理重启，等防护配置也保存后再统一重启
+        final botFormState = _botModelFormKey.currentState;
+        if (botFormState == null || !botFormState.hasRequiredConfig) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(l10n.modelConfigFillRequired)),
+            );
+            if (botTabIndex != null) {
+              _tabController.animateTo(botTabIndex);
+            }
+          }
+          return;
+        }
+        final botSaved = await botFormState.saveConfig(deferProxyRestart: true);
+        if (!botSaved && mounted) {
           ScaffoldMessenger.of(
             context,
-          ).showSnackBar(SnackBar(content: Text(l10n.modelConfigFillRequired)));
-          _tabController.animateTo(botTabIndex);
+          ).showSnackBar(SnackBar(content: Text(l10n.modelConfigSaveFailed)));
+          if (botTabIndex != null) {
+            _tabController.animateTo(botTabIndex);
+          }
+          return;
         }
-        return;
+        botModelSaved = true;
       }
-      bool botModelSaved = false;
-      final botSaved = await botFormState.saveConfig(deferProxyRestart: true);
-      if (!botSaved && mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(l10n.modelConfigSaveFailed)));
-        _tabController.animateTo(botTabIndex);
-        return;
-      }
-      botModelSaved = true;
 
       // When opening protection (not edit mode), set enabled=true
       // When editing, preserve the current enabled state
@@ -431,7 +494,14 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       );
 
       // Shepherd rules are persisted by Go JSON file directly.
-      await PluginService().updateShepherdRules(_sensitiveActions);
+      final ruleAssetID = _config.assetID.isNotEmpty
+          ? _config.assetID
+          : widget.assetID;
+      await PluginService().updateShepherdRules(
+        widget.assetName,
+        ruleAssetID,
+        _sensitiveActions,
+      );
 
       final newConfig = _config.copyWith(
         assetID: _config.assetID.isNotEmpty ? _config.assetID : widget.assetID,
@@ -466,16 +536,34 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
         ),
       );
 
-      final botModelConfig = await ModelConfigDatabaseService()
-          .getBotModelConfig(widget.assetName, newConfig.assetID);
-      if (botModelConfig == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text(l10n.modelConfigSaveFailed)));
-          _tabController.animateTo(botTabIndex);
+      BotModelConfig? botModelConfig;
+      if (_requiresBotModelConfig) {
+        botModelConfig = await ModelConfigDatabaseService().getBotModelConfig(
+          widget.assetName,
+          newConfig.assetID,
+        );
+        if (botModelConfig == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(l10n.modelConfigSaveFailed)));
+            if (botTabIndex != null) {
+              _tabController.animateTo(botTabIndex);
+            }
+          }
+          return;
         }
-        return;
+      } else {
+        try {
+          botModelConfig = await ModelConfigDatabaseService().getBotModelConfig(
+            widget.assetName,
+            newConfig.assetID,
+          );
+        } catch (e) {
+          appLogger.debug(
+            '[ProtectionConfig] Optional bot model config load skipped: $e',
+          );
+        }
       }
 
       final securityModelConfig = await _ensureSecurityModelConfigured(
@@ -621,20 +709,17 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                       ? const Center(child: CircularProgressIndicator())
                       : TabBarView(
                           controller: _tabController,
-                          children: BuildConfig.isAppStore
-                              ? [
-                                  // AppStore版：智能规则、Token限制、Bot模型
-                                  _buildSecurityPromptTab(l10n),
-                                  _buildTokenLimitTab(l10n),
-                                  _buildBotModelTab(l10n),
-                                ]
-                              : [
-                                  // Personal版：智能规则、Token限制、权限设置、Bot模型
-                                  _buildSecurityPromptTab(l10n),
-                                  _buildTokenLimitTab(l10n),
-                                  _buildPermissionTab(l10n),
-                                  _buildBotModelTab(l10n),
-                                ],
+                          children: [
+                            // 智能规则、Token限制
+                            _buildSecurityPromptTab(l10n),
+                            _buildTokenLimitTab(l10n),
+                            // Personal版：权限设置
+                            if (!BuildConfig.isAppStore)
+                              _buildPermissionTab(l10n),
+                            // 按插件能力决定是否展示 Bot 模型
+                            if (_requiresBotModelConfig)
+                              _buildBotModelTab(l10n),
+                          ],
                         ),
                 ),
 
@@ -745,6 +830,36 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
   }
 
   Widget _buildTabs(AppLocalizations l10n) {
+    Widget buildLabeledTab({required IconData icon, required String label}) {
+      return Tab(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                softWrap: true,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final tabs = <Widget>[
+      buildLabeledTab(icon: LucideIcons.brain, label: l10n.securityPromptTab),
+      buildLabeledTab(icon: LucideIcons.coins, label: l10n.tokenLimitTab),
+      if (!BuildConfig.isAppStore)
+        buildLabeledTab(icon: LucideIcons.shield, label: l10n.permissionTab),
+      if (_requiresBotModelConfig)
+        buildLabeledTab(icon: LucideIcons.bot, label: l10n.botModelTab),
+    ];
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
@@ -761,139 +876,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
         labelColor: Colors.white,
         unselectedLabelColor: Colors.white54,
         labelStyle: AppFonts.inter(fontSize: 13, fontWeight: FontWeight.w500),
-        tabs: BuildConfig.isAppStore
-            ? [
-                // AppStore版：显示智能规则、Token限制、Bot模型
-                Tab(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(LucideIcons.brain, size: 16),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          l10n.securityPromptTab,
-                          textAlign: TextAlign.center,
-                          softWrap: true,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Tab(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(LucideIcons.coins, size: 16),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          l10n.tokenLimitTab,
-                          textAlign: TextAlign.center,
-                          softWrap: true,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Tab(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(LucideIcons.bot, size: 16),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          l10n.botModelTab,
-                          textAlign: TextAlign.center,
-                          softWrap: true,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ]
-            : [
-                // Personal版：显示智能规则、Token限制、权限设置、Bot模型
-                Tab(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(LucideIcons.brain, size: 16),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          l10n.securityPromptTab,
-                          textAlign: TextAlign.center,
-                          softWrap: true,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Tab(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(LucideIcons.coins, size: 16),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          l10n.tokenLimitTab,
-                          textAlign: TextAlign.center,
-                          softWrap: true,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Tab(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(LucideIcons.shield, size: 16),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          l10n.permissionTab,
-                          textAlign: TextAlign.center,
-                          softWrap: true,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Tab(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(LucideIcons.bot, size: 16),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          l10n.botModelTab,
-                          textAlign: TextAlign.center,
-                          softWrap: true,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+        tabs: tabs,
       ),
     );
   }

@@ -31,13 +31,15 @@ func GetApiStatistics(jsonStr string) map[string]interface{} {
 	var input struct {
 		DurationSeconds int    `json:"duration_seconds"`
 		AssetName       string `json:"asset_name,omitempty"`
+		AssetID         string `json:"asset_id,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &input); err != nil {
 		return errorMessageResult("invalid JSON: " + err.Error())
 	}
 
 	repo := repository.NewMetricsRepository(nil)
-	stats, err := repo.GetApiStatistics(input.DurationSeconds, input.AssetName)
+	_ = input.AssetName
+	stats, err := repo.GetApiStatistics(input.DurationSeconds, input.AssetID)
 	if err != nil {
 		logging.Error("Failed to get api statistics: %v", err)
 		return errorResult(err)
@@ -84,9 +86,10 @@ func CleanOldApiMetrics(jsonStr string) map[string]interface{} {
 }
 
 // GetDailyTokenUsage 获取每日token使用量
-func GetDailyTokenUsage(assetName string) map[string]interface{} {
+func GetDailyTokenUsage(assetName, assetID string) map[string]interface{} {
+	_ = assetName
 	repo := repository.NewMetricsRepository(nil)
-	usage, err := repo.GetDailyTokenUsage(assetName)
+	usage, err := repo.GetDailyTokenUsage(assetID)
 	if err != nil {
 		logging.Error("Failed to get daily token usage: %v", err)
 		return errorResult(err)

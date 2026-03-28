@@ -51,6 +51,7 @@ import (
 	"go_lib/core/shepherd"
 
 	// Import all plugins to trigger init() registration
+	_ "go_lib/plugins/nullclaw"
 	_ "go_lib/plugins/openclaw"
 )
 
@@ -314,8 +315,8 @@ func ClearProtectionStatisticsFFI(assetNameC, assetIDC *C.char) *C.char {
 }
 
 //export GetShepherdSensitiveActionsFFI
-func GetShepherdSensitiveActionsFFI(assetNameC *C.char) *C.char {
-	return jsonToCString(service.GetShepherdSensitiveActions(C.GoString(assetNameC)))
+func GetShepherdSensitiveActionsFFI(assetNameC, assetIDC *C.char) *C.char {
+	return jsonToCString(service.GetShepherdSensitiveActions(C.GoString(assetNameC), C.GoString(assetIDC)))
 }
 
 //export SaveShepherdSensitiveActionsFFI
@@ -357,7 +358,12 @@ func GetAuditLogCountFFI(jsonC *C.char) *C.char {
 
 //export GetAuditLogStatisticsFFI
 func GetAuditLogStatisticsFFI() *C.char {
-	return jsonToCString(service.GetAuditLogStatistics())
+	return jsonToCString(service.GetAuditLogStatistics(`{}`))
+}
+
+//export GetAuditLogStatisticsByFilterFFI
+func GetAuditLogStatisticsByFilterFFI(jsonC *C.char) *C.char {
+	return jsonToCString(service.GetAuditLogStatistics(C.GoString(jsonC)))
 }
 
 //export GetAuditLogAssetsFFI
@@ -377,7 +383,12 @@ func CleanOldAuditLogsFFI(jsonC *C.char) *C.char {
 
 //export ClearAllAuditLogsFFI
 func ClearAllAuditLogsFFI() *C.char {
-	return jsonToCString(service.ClearAllAuditLogs())
+	return jsonToCString(service.ClearAllAuditLogs(`{}`))
+}
+
+//export ClearAllAuditLogsByFilterFFI
+func ClearAllAuditLogsByFilterFFI(jsonC *C.char) *C.char {
+	return jsonToCString(service.ClearAllAuditLogs(C.GoString(jsonC)))
 }
 
 //export ClearAuditLogsWithFilterFFI
@@ -405,6 +416,11 @@ func GetSecurityEventCountFFI() *C.char {
 //export ClearAllSecurityEventsFFI
 func ClearAllSecurityEventsFFI() *C.char {
 	return jsonToCString(service.ClearAllSecurityEvents())
+}
+
+//export ClearSecurityEventsFFI
+func ClearSecurityEventsFFI(jsonC *C.char) *C.char {
+	return jsonToCString(service.ClearSecurityEvents(C.GoString(jsonC)))
 }
 
 //export GetPendingSecurityEvents
@@ -440,8 +456,8 @@ func CleanOldApiMetricsFFI(jsonC *C.char) *C.char {
 }
 
 //export GetDailyTokenUsageFFI
-func GetDailyTokenUsageFFI(assetNameC *C.char) *C.char {
-	return jsonToCString(service.GetDailyTokenUsage(C.GoString(assetNameC)))
+func GetDailyTokenUsageFFI(assetNameC, assetIDC *C.char) *C.char {
+	return jsonToCString(service.GetDailyTokenUsage(C.GoString(assetNameC), C.GoString(assetIDC)))
 }
 
 // ==================== 模型配置 FFI ====================
@@ -770,6 +786,8 @@ func RegisterMessageCallback(callback C.DartCallback) *C.char {
 			"risk_type":   event.RiskType,
 			"detail":      event.Detail,
 			"source":      event.Source,
+			"asset_name":  event.AssetName,
+			"asset_id":    event.AssetID,
 		})
 	})
 	return jsonToCString(map[string]interface{}{"success": true, "mode": "callback"})
@@ -967,13 +985,20 @@ func WaitForProtectionLogs(sessionID *C.char, timeoutMs C.int) *C.char {
 // ==================== ShepherdGate FFI (core/shepherd) ====================
 
 //export UpdateShepherdRulesFFI
-func UpdateShepherdRulesFFI(rulesJSON *C.char) *C.char {
-	return C.CString(proxy.UpdateShepherdRulesInternal(C.GoString(rulesJSON)))
+func UpdateShepherdRulesFFI(assetNameC, assetIDC, rulesJSON *C.char) *C.char {
+	return C.CString(proxy.UpdateShepherdRulesByAssetInternal(
+		C.GoString(assetNameC),
+		C.GoString(assetIDC),
+		C.GoString(rulesJSON),
+	))
 }
 
 //export GetShepherdRulesFFI
-func GetShepherdRulesFFI() *C.char {
-	return C.CString(proxy.GetShepherdRulesInternal())
+func GetShepherdRulesFFI(assetNameC, assetIDC *C.char) *C.char {
+	return C.CString(proxy.GetShepherdRulesByAssetInternal(
+		C.GoString(assetNameC),
+		C.GoString(assetIDC),
+	))
 }
 
 //export ListBundledReActSkillsFFI
@@ -1073,14 +1098,39 @@ func SyncGatewaySandboxByAsset(assetIDC *C.char) *C.char {
 	return C.CString(core.SyncGatewaySandboxByAssetAndPlugin("", C.GoString(assetIDC)))
 }
 
+//export SyncGatewaySandboxByAssetName
+func SyncGatewaySandboxByAssetName(assetNameC, assetIDC *C.char) *C.char {
+	return C.CString(core.SyncGatewaySandboxByAssetAndPlugin(C.GoString(assetNameC), C.GoString(assetIDC)))
+}
+
 //export HasInitialBackupFFI
 func HasInitialBackupFFI() *C.char {
 	return C.CString(core.HasInitialBackupByPlugin(""))
 }
 
+//export HasInitialBackupByAssetFFI
+func HasInitialBackupByAssetFFI(assetNameC *C.char) *C.char {
+	return C.CString(core.HasInitialBackupByPlugin(C.GoString(assetNameC)))
+}
+
 //export RestoreToInitialConfigFFI
 func RestoreToInitialConfigFFI() *C.char {
 	return C.CString(core.RestoreToInitialConfigByPlugin(""))
+}
+
+//export RestoreToInitialConfigByAssetFFI
+func RestoreToInitialConfigByAssetFFI(assetNameC *C.char) *C.char {
+	return C.CString(core.RestoreToInitialConfigByPlugin(C.GoString(assetNameC)))
+}
+
+//export NotifyPluginAppExitFFI
+func NotifyPluginAppExitFFI(assetNameC, assetIDC *C.char) *C.char {
+	return C.CString(core.NotifyAppExitByPlugin(C.GoString(assetNameC), C.GoString(assetIDC)))
+}
+
+//export RestoreBotDefaultStateFFI
+func RestoreBotDefaultStateFFI(assetNameC, assetIDC *C.char) *C.char {
+	return C.CString(core.RestoreBotDefaultStateByPlugin(C.GoString(assetNameC), C.GoString(assetIDC)))
 }
 
 func main() {}

@@ -290,15 +290,35 @@ func sanitizeFileName(name string) string {
 }
 
 func buildGatewayInstanceKey(assetName, assetID string) string {
-	name := strings.TrimSpace(assetName)
-	if name == "" {
-		name = openclawAssetName
-	}
+	_ = assetName
 	id := strings.TrimSpace(assetID)
-	if id == "" {
-		return name
+	if id != "" {
+		return id
 	}
-	return name + ":" + id
+	return openclawAssetName
+}
+
+func buildGatewayRuntimeStateKeys(assetName, assetID string) []string {
+	keys := make([]string, 0, 2)
+	appendKey := func(key string) {
+		key = strings.TrimSpace(key)
+		if key == "" || containsString(keys, key) {
+			return
+		}
+		keys = append(keys, key)
+	}
+
+	appendKey(buildGatewayInstanceKey(assetName, assetID))
+	appendKey(assetName)
+
+	return keys
+}
+
+func cleanupGatewayManagedRuntimeState(assetName, assetID string) {
+	for _, key := range buildGatewayRuntimeStateKeys(assetName, assetID) {
+		sandbox.RemoveProcessMonitor(key)
+		sandbox.RemoveSandboxManagerByKey(key)
+	}
 }
 
 func writeIfChanged(path string, oldBytes []byte, newBytes []byte) (bool, error) {

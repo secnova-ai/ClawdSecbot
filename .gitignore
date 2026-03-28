@@ -92,6 +92,9 @@ skills/
 .dart_tool/
 .openclaw/
 docs/
+.gocache-linux/
+.gocache-windows/
 go_lib/go_lib
 .gocache-linux/
 .gocache-windows
+AGENTS.md

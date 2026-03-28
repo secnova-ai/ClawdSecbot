@@ -1,11 +1,10 @@
-// Package repository 提供数据库访问层
-// 封装了SQLite数据库的连接管理和表结构初始化
+// Package repository provides the database access layer.
+// It manages SQLite connections and schema initialization.
 package repository
 
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 	"sync"
 
 	"go_lib/core/logging"
@@ -14,20 +13,27 @@ import (
 )
 
 var (
-	// globalDB 全局数据库连接实例
+	// globalDB is the shared database connection.
 	globalDB *sql.DB
-	// dbMutex 保护数据库初始化的互斥锁
+	// dbMutex guards database initialization and shutdown.
 	dbMutex sync.RWMutex
 )
 
-// InitDB 初始化数据库连接
-// dbPath 为SQLite数据库文件的完整路径（与Flutter端使用同一文件）
-// 该方法是幂等的，重复调用会先关闭旧连接再重新打开
+// InitDB initializes the database connection.
+// dbPath must be the full SQLite database path shared with Flutter.
+// The method is idempotent and reopens the connection on repeated calls.
 func InitDB(dbPath string) error {
+	_, err := InitDBWithVersion(dbPath, "", "")
+	return err
+}
+
+// InitDBWithVersion initializes the database and optionally runs versioned
+// startup migrations when currentVersion is provided.
+func InitDBWithVersion(dbPath, currentVersion, versionFilePath string) (*DBInitSummary, error) {
 	dbMutex.Lock()
 	defer dbMutex.Unlock()
 
-	// 如果已有连接，先关闭
+	// Close the previous shared connection before reopening.
 	if globalDB != nil {
 		globalDB.Close()
 		globalDB = nil
@@ -38,104 +44,49 @@ func InitDB(dbPath string) error {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		logging.Error("Failed to open database: %v", err)
-		return fmt.Errorf("failed to open database: %w", err)
+		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// 启用WAL模式，支持与Flutter端的并发读写
+	// Enable WAL mode for concurrent access with the Flutter side.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		logging.Warning("Failed to enable WAL mode: %v", err)
 	}
 
-	// Set busy timeout to 5 seconds to avoid SQLITE_BUSY errors on concurrent access
+	// Set busy timeout to reduce SQLITE_BUSY on concurrent access.
 	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
 		logging.Warning("Failed to set busy_timeout: %v", err)
 	}
 
-	// 启用外键约束
+	// Enable foreign key constraints.
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
 		logging.Warning("Failed to enable foreign keys: %v", err)
 	}
 
-	// 验证连接可用
+	// Verify the connection is usable before exposing it globally.
 	if err := db.Ping(); err != nil {
 		db.Close()
 		logging.Error("Database ping failed: %v", err)
-		return fmt.Errorf("database ping failed: %w", err)
+		return nil, fmt.Errorf("database ping failed: %w", err)
 	}
 
 	globalDB = db
 
-	// 创建资产相关的表结构（幂等）
-	if err := createAssetTables(db); err != nil {
+	summary, err := initializeDatabaseState(db, currentVersion, versionFilePath)
+	if err != nil {
 		globalDB.Close()
 		globalDB = nil
-		logging.Error("Failed to create asset tables: %v", err)
-		return fmt.Errorf("failed to create tables: %w", err)
+		logging.Error("Failed to initialize database state: %v", err)
+		return nil, err
 	}
-
-	// 创建安全模型配置表（幂等）
-	if err := CreateSecurityModelConfigTable(db); err != nil {
-		globalDB.Close()
-		globalDB = nil
-		logging.Error("Failed to create security model config table: %v", err)
-		return fmt.Errorf("failed to create security model config table: %w", err)
-	}
-
-	// 创建保护相关的表结构（幂等）
-	if err := createProtectionTables(db); err != nil {
-		globalDB.Close()
-		globalDB = nil
-		logging.Error("Failed to create protection tables: %v", err)
-		return fmt.Errorf("failed to create protection tables: %w", err)
-	}
-
-	// 创建审计日志相关的表结构（幂等）
-	if err := createAuditLogTables(db); err != nil {
-		globalDB.Close()
-		globalDB = nil
-		logging.Error("Failed to create audit log tables: %v", err)
-		return fmt.Errorf("failed to create audit log tables: %w", err)
-	}
-
-	// 创建API指标相关的表结构（幂等）
-	if err := createMetricsTables(db); err != nil {
-		globalDB.Close()
-		globalDB = nil
-		logging.Error("Failed to create metrics tables: %v", err)
-		return fmt.Errorf("failed to create metrics tables: %w", err)
-	}
-
-	// 创建应用权限表（幂等）
-	if err := createAppPermissionsTables(db); err != nil {
-		globalDB.Close()
-		globalDB = nil
-		logging.Error("Failed to create app permissions tables: %v", err)
-		return fmt.Errorf("failed to create app permissions tables: %w", err)
-	}
-
-	// 创建应用设置表（幂等）
-	if err := CreateAppSettingsTable(db); err != nil {
-		globalDB.Close()
-		globalDB = nil
-		logging.Error("Failed to create app settings table: %v", err)
-		return fmt.Errorf("failed to create app settings table: %w", err)
-	}
-
-	// 创建安全事件表（幂等）
-	if err := createSecurityEventTables(db); err != nil {
-		globalDB.Close()
-		globalDB = nil
-		logging.Error("Failed to create security event tables: %v", err)
-		return fmt.Errorf("failed to create security event tables: %w", err)
-	}
+	summary.DBPath = dbPath
 
 	logging.Info("Database initialized successfully")
-	return nil
+	return summary, nil
 }
 
-// createProtectionTables 创建保护相关的表结构
+// createProtectionTables creates protection-related tables.
 func createProtectionTables(db *sql.DB) error {
-	// 保护状态表（全局唯一，id=1）
+	// protection_state is globally unique with id=1.
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS protection_state (
 			id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -149,12 +100,12 @@ func createProtectionTables(db *sql.DB) error {
 		return fmt.Errorf("failed to create protection_state table: %w", err)
 	}
 
-	// 保护配置表（按资产名称+实例ID）
+	// protection_config is unique by asset instance.
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS protection_config (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			asset_name TEXT NOT NULL,
-			asset_id TEXT NOT NULL DEFAULT '',
+			asset_id TEXT NOT NULL,
 			enabled INTEGER NOT NULL DEFAULT 0,
 			audit_only INTEGER NOT NULL DEFAULT 0,
 			sandbox_enabled INTEGER NOT NULL DEFAULT 0,
@@ -169,23 +120,18 @@ func createProtectionTables(db *sql.DB) error {
 			bot_model_config TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
-			UNIQUE(asset_name, asset_id)
+			UNIQUE(asset_id)
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create protection_config table: %w", err)
 	}
 
-	// 确保 bot_model_config 列存在（新增列，已有表需要 ALTER TABLE）
-	migrateAddColumn(db, "protection_config", "bot_model_config", "TEXT")
-	// 确保 asset_id 列存在（多实例支持）
-	migrateAddColumn(db, "protection_config", "asset_id", "TEXT NOT NULL DEFAULT ''")
-
-	// 保护统计表（按资产名称+实例ID）
+	// protection_statistics is unique by asset instance.
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS protection_statistics (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			asset_name TEXT NOT NULL,
-			asset_id TEXT NOT NULL DEFAULT '',
+			asset_id TEXT NOT NULL,
 			analysis_count INTEGER NOT NULL DEFAULT 0,
 			message_count INTEGER NOT NULL DEFAULT 0,
 			warning_count INTEGER NOT NULL DEFAULT 0,
@@ -199,19 +145,17 @@ func createProtectionTables(db *sql.DB) error {
 			audit_prompt_tokens INTEGER NOT NULL DEFAULT 0,
 			audit_completion_tokens INTEGER NOT NULL DEFAULT 0,
 			updated_at TEXT NOT NULL,
-			UNIQUE(asset_name, asset_id)
+			UNIQUE(asset_id)
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create protection_statistics table: %w", err)
 	}
 
-	// 确保 asset_id 列存在（多实例支持）
-	migrateAddColumn(db, "protection_statistics", "asset_id", "TEXT NOT NULL DEFAULT ''")
-
-	// Shepherd规则表（全局唯一，id=1）
+	// shepherd_rules are isolated by asset_id.
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS shepherd_rules (
-			id INTEGER PRIMARY KEY CHECK (id = 1),
+			asset_id TEXT PRIMARY KEY,
+			asset_name TEXT NOT NULL,
 			sensitive_actions TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)
@@ -223,7 +167,7 @@ func createProtectionTables(db *sql.DB) error {
 	return nil
 }
 
-// createAuditLogTables 创建审计日志相关的表结构
+// createAuditLogTables creates audit log tables.
 func createAuditLogTables(db *sql.DB) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS audit_logs (
@@ -262,11 +206,8 @@ func createAuditLogTables(db *sql.DB) error {
 		return fmt.Errorf("failed to create audit_logs has_risk index: %w", err)
 	}
 
-	migrateAddColumn(db, "audit_logs", "asset_name", "TEXT NOT NULL DEFAULT ''")
-	migrateAddColumn(db, "audit_logs", "asset_id", "TEXT NOT NULL DEFAULT ''")
-
 	if _, err := db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_audit_logs_asset ON audit_logs(asset_name, asset_id)
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_asset ON audit_logs(asset_id, timestamp)
 	`); err != nil {
 		return fmt.Errorf("failed to create audit_logs asset index: %w", err)
 	}
@@ -275,7 +216,7 @@ func createAuditLogTables(db *sql.DB) error {
 	return nil
 }
 
-// createMetricsTables 创建API指标相关的表结构
+// createMetricsTables creates API metrics tables.
 func createMetricsTables(db *sql.DB) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS api_metrics (
@@ -288,7 +229,8 @@ func createMetricsTables(db *sql.DB) error {
 			model TEXT,
 			is_blocked INTEGER NOT NULL DEFAULT 0,
 			risk_level TEXT,
-			asset_name TEXT
+			asset_name TEXT,
+			asset_id TEXT NOT NULL
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create api_metrics table: %w", err)
@@ -306,11 +248,17 @@ func createMetricsTables(db *sql.DB) error {
 		return fmt.Errorf("failed to create api_metrics asset index: %w", err)
 	}
 
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_api_metrics_asset_id ON api_metrics(asset_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create api_metrics asset_id index: %w", err)
+	}
+
 	logging.Info("Metrics tables created/verified successfully")
 	return nil
 }
 
-// createAppPermissionsTables 创建应用权限表
+// createAppPermissionsTables creates application permission tables.
 func createAppPermissionsTables(db *sql.DB) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS app_permissions (
@@ -327,7 +275,7 @@ func createAppPermissionsTables(db *sql.DB) error {
 	return nil
 }
 
-// createSecurityEventTables 创建安全事件相关的表结构
+// createSecurityEventTables creates security event tables.
 func createSecurityEventTables(db *sql.DB) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS security_events (
@@ -337,7 +285,9 @@ func createSecurityEventTables(db *sql.DB) error {
 			action_desc TEXT NOT NULL,
 			risk_type TEXT,
 			detail TEXT,
-			source TEXT NOT NULL
+			source TEXT NOT NULL,
+			asset_name TEXT NOT NULL DEFAULT '',
+			asset_id TEXT NOT NULL DEFAULT ''
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create security_events table: %w", err)
@@ -355,19 +305,31 @@ func createSecurityEventTables(db *sql.DB) error {
 		return fmt.Errorf("failed to create security_events event_type index: %w", err)
 	}
 
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_security_events_asset_id ON security_events(asset_id, timestamp)
+	`); err != nil {
+		return fmt.Errorf("failed to create security_events asset_id index: %w", err)
+	}
+
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_security_events_asset_name ON security_events(asset_name, timestamp)
+	`); err != nil {
+		return fmt.Errorf("failed to create security_events asset_name index: %w", err)
+	}
+
 	logging.Info("Security event tables created/verified successfully")
 	return nil
 }
 
-// GetDB 获取全局数据库连接
-// 如果数据库未初始化，返回nil
+// GetDB returns the shared database connection.
+// It returns nil when the database has not been initialized.
 func GetDB() *sql.DB {
 	dbMutex.RLock()
 	defer dbMutex.RUnlock()
 	return globalDB
 }
 
-// CloseDB 关闭数据库连接
+// CloseDB closes the shared database connection.
 func CloseDB() error {
 	dbMutex.Lock()
 	defer dbMutex.Unlock()
@@ -380,10 +342,10 @@ func CloseDB() error {
 	return nil
 }
 
-// createAssetTables 创建资产扫描相关的表结构
-// 使用 IF NOT EXISTS 保证幂等性，与Flutter端创建的表结构完全一致
+// createAssetTables creates asset scanning tables.
+// IF NOT EXISTS keeps it idempotent and aligned with the Flutter-side schema.
 func createAssetTables(db *sql.DB) error {
-	// 扫描记录表
+	// scans stores each scan session.
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS scans (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -396,7 +358,7 @@ func createAssetTables(db *sql.DB) error {
 		return fmt.Errorf("failed to create scans table: %w", err)
 	}
 
-	// 资产表
+	// assets stores scanned asset payloads.
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS assets (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -408,7 +370,7 @@ func createAssetTables(db *sql.DB) error {
 		return fmt.Errorf("failed to create assets table: %w", err)
 	}
 
-	// 风险表
+	// risks stores scanned risk payloads.
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS risks (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -420,7 +382,7 @@ func createAssetTables(db *sql.DB) error {
 		return fmt.Errorf("failed to create risks table: %w", err)
 	}
 
-	// skill_scans table
+	// skill_scans stores skill scan results.
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS skill_scans (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -429,27 +391,68 @@ func createAssetTables(db *sql.DB) error {
 			scanned_at TEXT NOT NULL,
 			safe INTEGER NOT NULL,
 			issues TEXT,
+			trusted INTEGER NOT NULL DEFAULT 0,
 			risk_level TEXT
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create skill_scans table: %w", err)
 	}
 
-	// Add trusted column if it doesn't exist (migration for existing databases)
-	if _, err := db.Exec(`ALTER TABLE skill_scans ADD COLUMN trusted INTEGER DEFAULT 0`); err != nil {
-		// Column might already exist, ignore error
-		if !strings.Contains(err.Error(), "duplicate column") {
-			logging.Warning("Failed to add trusted column: %v", err)
-		}
-	}
-
-	// Add risk_level column if it doesn't exist (migration for existing databases)
-	if _, err := db.Exec(`ALTER TABLE skill_scans ADD COLUMN risk_level TEXT`); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column") {
-			logging.Warning("Failed to add risk_level column: %v", err)
-		}
-	}
-
 	logging.Info("Asset tables created/verified successfully")
+	return nil
+}
+
+func ensureAllTables(db *sql.DB) error {
+	if err := createAssetTables(db); err != nil {
+		return fmt.Errorf("failed to create asset tables: %w", err)
+	}
+
+	if err := CreateSecurityModelConfigTable(db); err != nil {
+		return fmt.Errorf("failed to create security model config table: %w", err)
+	}
+
+	if err := createProtectionTables(db); err != nil {
+		return fmt.Errorf("failed to create protection tables: %w", err)
+	}
+
+	if err := createAuditLogTables(db); err != nil {
+		return fmt.Errorf("failed to create audit log tables: %w", err)
+	}
+
+	if err := createMetricsTables(db); err != nil {
+		return fmt.Errorf("failed to create metrics tables: %w", err)
+	}
+
+	if err := createAppPermissionsTables(db); err != nil {
+		return fmt.Errorf("failed to create app permissions tables: %w", err)
+	}
+
+	if err := CreateAppSettingsTable(db); err != nil {
+		return fmt.Errorf("failed to create app settings table: %w", err)
+	}
+
+	if err := createSecurityEventTables(db); err != nil {
+		return fmt.Errorf("failed to create security event tables: %w", err)
+	}
+
+	if err := createAppMetadataTable(db); err != nil {
+		return fmt.Errorf("failed to create app metadata table: %w", err)
+	}
+
+	return nil
+}
+
+func createAppMetadataTable(db *sql.DB) error {
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS app_metadata (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)
+	`); err != nil {
+		return err
+	}
+
+	logging.Info("App metadata table created/verified successfully")
 	return nil
 }

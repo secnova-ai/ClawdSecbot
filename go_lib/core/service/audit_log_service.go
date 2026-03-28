@@ -83,23 +83,7 @@ func GetAuditLogCount(jsonStr string) map[string]interface{} {
 }
 
 // GetAuditLogStatistics 获取审计日志统计
-func GetAuditLogStatistics() map[string]interface{} {
-	return GetAuditLogStatisticsWithFilter("{}")
-}
-
-func GetAuditLogAssets() map[string]interface{} {
-	repo := repository.NewAuditLogRepository(nil)
-	assets, err := repo.GetAuditLogAssets()
-	if err != nil {
-		logging.Error("Failed to get audit log assets: %v", err)
-		return errorResult(err)
-	}
-
-	return successDataResult(assets)
-}
-
-// GetAuditLogStatisticsWithFilter 获取审计日志统计（支持按资产过滤）
-func GetAuditLogStatisticsWithFilter(jsonStr string) map[string]interface{} {
+func GetAuditLogStatistics(jsonStr string) map[string]interface{} {
 	var input struct {
 		AssetName string `json:"asset_name,omitempty"`
 		AssetID   string `json:"asset_id,omitempty"`
@@ -118,6 +102,22 @@ func GetAuditLogStatisticsWithFilter(jsonStr string) map[string]interface{} {
 	}
 
 	return successDataResult(stats)
+}
+
+func GetAuditLogAssets() map[string]interface{} {
+	repo := repository.NewAuditLogRepository(nil)
+	assets, err := repo.GetAuditLogAssets()
+	if err != nil {
+		logging.Error("Failed to get audit log assets: %v", err)
+		return errorResult(err)
+	}
+
+	return successDataResult(assets)
+}
+
+// GetAuditLogStatisticsWithFilter 获取审计日志统计（支持按资产过滤）
+func GetAuditLogStatisticsWithFilter(jsonStr string) map[string]interface{} {
+	return GetAuditLogStatistics(jsonStr)
 }
 
 // CleanOldAuditLogs 清理旧审计日志
@@ -139,9 +139,17 @@ func CleanOldAuditLogs(jsonStr string) map[string]interface{} {
 }
 
 // ClearAllAuditLogs 清空所有审计日志
-func ClearAllAuditLogs() map[string]interface{} {
+func ClearAllAuditLogs(jsonStr string) map[string]interface{} {
+	var input struct {
+		AssetName string `json:"asset_name"`
+		AssetID   string `json:"asset_id"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &input); err != nil {
+		return errorMessageResult("invalid JSON: " + err.Error())
+	}
+
 	repo := repository.NewAuditLogRepository(nil)
-	if err := repo.ClearAllAuditLogs(); err != nil {
+	if err := repo.ClearAllAuditLogs(input.AssetName, input.AssetID); err != nil {
 		logging.Error("Failed to clear all audit logs: %v", err)
 		return errorResult(err)
 	}

@@ -1,32 +1,70 @@
-// Package service 提供数据库FFI业务逻辑层
-// 该层位于core和repository之间，负责JSON解析、调用repository方法、格式化响应
-// 所有函数返回 map[string]interface{}，由插件层的CGo导出函数调用
+// Package service provides the database FFI service layer.
+// This layer sits between core and repository, handling JSON parsing,
+// repository calls, and response formatting.
 package service
 
 import (
+	"encoding/json"
+	"fmt"
+
+	"go_lib/core"
 	"go_lib/core/logging"
 	"go_lib/core/repository"
 )
 
-// ========== 数据库生命周期管理 ==========
+// ========== Database lifecycle management ==========
 
-// InitializeDatabase 初始化数据库连接
-// dbPath 为SQLite数据库文件的完整路径
-func InitializeDatabase(dbPath string) map[string]interface{} {
-	logging.Info("Initializing database: %s", dbPath)
+type InitializeDatabaseRequest struct {
+	CurrentVersion string `json:"current_version"`
+}
 
-	if err := repository.InitDB(dbPath); err != nil {
+// InitializeDatabase initializes the database connection.
+// Request must use JSON input and include current_version.
+func InitializeDatabase(requestJSON string) map[string]interface{} {
+	var request InitializeDatabaseRequest
+	if err := json.Unmarshal([]byte(requestJSON), &request); err != nil {
+		logging.Error("Failed to parse InitializeDatabase request: %v", err)
+		return errorResult(fmt.Errorf("invalid InitializeDatabase request: %w", err))
+	}
+
+	if request.CurrentVersion == "" {
+		return errorResult(fmt.Errorf("current_version is required"))
+	}
+
+	pm := core.GetPathManager()
+	if !pm.IsInitialized() {
+		return errorResult(fmt.Errorf("path manager is not initialized"))
+	}
+
+	logging.Info(
+		"Initializing database: db_path=%s current_version=%s version_file=%s",
+		pm.GetDBPath(),
+		request.CurrentVersion,
+		pm.GetVersionFilePath(),
+	)
+
+	summary, err := repository.InitDBWithVersion(
+		pm.GetDBPath(),
+		request.CurrentVersion,
+		pm.GetVersionFilePath(),
+	)
+	if err != nil {
 		logging.Error("Failed to initialize database: %v", err)
 		return errorResult(err)
 	}
 
-	return map[string]interface{}{
-		"success": true,
-		"path":    dbPath,
-	}
+	return successDataResult(map[string]interface{}{
+		"path":              pm.GetDBPath(),
+		"current_version":   summary.CurrentVersion,
+		"previous_version":  summary.PreviousVersion,
+		"version_source":    summary.VersionSource,
+		"fresh_install":     summary.FreshInstall,
+		"upgraded":          summary.Upgraded,
+		"version_file_path": pm.GetVersionFilePath(),
+	})
 }
 
-// CloseDatabase 关闭数据库连接
+// CloseDatabase closes the database connection.
 func CloseDatabase() map[string]interface{} {
 	logging.Info("Closing database")
 

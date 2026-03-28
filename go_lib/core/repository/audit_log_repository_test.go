@@ -15,6 +15,8 @@ func TestAuditLog_SaveAndGet(t *testing.T) {
 		ID:             "log-001",
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 		RequestID:      "req-001",
+		AssetName:      "openclaw",
+		AssetID:        "openclaw:a1",
 		Model:          "gpt-4",
 		RequestContent: "test request",
 		HasRisk:        true,
@@ -52,9 +54,9 @@ func TestAuditLog_BatchSave(t *testing.T) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	logs := []*AuditLog{
-		{ID: "log-001", Timestamp: now, RequestID: "req-1", Action: "ALLOW"},
-		{ID: "log-002", Timestamp: now, RequestID: "req-2", Action: "WARN", HasRisk: true},
-		{ID: "log-003", Timestamp: now, RequestID: "req-3", Action: "BLOCK", HasRisk: true},
+		{ID: "log-001", Timestamp: now, RequestID: "req-1", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "ALLOW"},
+		{ID: "log-002", Timestamp: now, RequestID: "req-2", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "WARN", HasRisk: true},
+		{ID: "log-003", Timestamp: now, RequestID: "req-3", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "BLOCK", HasRisk: true},
 	}
 
 	err := repo.SaveAuditLogsBatch(logs)
@@ -87,10 +89,10 @@ func TestAuditLog_Statistics(t *testing.T) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	logs := []*AuditLog{
-		{ID: "1", Timestamp: now, RequestID: "r1", Action: "ALLOW"},
-		{ID: "2", Timestamp: now, RequestID: "r2", Action: "WARN", HasRisk: true},
-		{ID: "3", Timestamp: now, RequestID: "r3", Action: "BLOCK", HasRisk: true},
-		{ID: "4", Timestamp: now, RequestID: "r4", Action: "ALLOW"},
+		{ID: "1", Timestamp: now, RequestID: "r1", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "ALLOW"},
+		{ID: "2", Timestamp: now, RequestID: "r2", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "WARN", HasRisk: true},
+		{ID: "3", Timestamp: now, RequestID: "r3", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "BLOCK", HasRisk: true},
+		{ID: "4", Timestamp: now, RequestID: "r4", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "ALLOW"},
 	}
 	_ = repo.SaveAuditLogsBatch(logs)
 
@@ -178,8 +180,8 @@ func TestAuditLog_Filter(t *testing.T) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	logs := []*AuditLog{
-		{ID: "1", Timestamp: now, RequestID: "r1", Action: "ALLOW", RequestContent: "hello world"},
-		{ID: "2", Timestamp: now, RequestID: "r2", Action: "WARN", HasRisk: true, RequestContent: "rm -rf /"},
+		{ID: "1", Timestamp: now, RequestID: "r1", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "ALLOW", RequestContent: "hello world"},
+		{ID: "2", Timestamp: now, RequestID: "r2", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "WARN", HasRisk: true, RequestContent: "rm -rf /"},
 	}
 	_ = repo.SaveAuditLogsBatch(logs)
 
@@ -209,9 +211,9 @@ func TestAuditLog_ClearAll(t *testing.T) {
 	repo := NewAuditLogRepository(db)
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	_ = repo.SaveAuditLog(&AuditLog{ID: "1", Timestamp: now, RequestID: "r1", Action: "ALLOW"})
+	_ = repo.SaveAuditLog(&AuditLog{ID: "1", Timestamp: now, RequestID: "r1", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "ALLOW"})
 
-	err := repo.ClearAllAuditLogs()
+	err := repo.ClearAllAuditLogs("", "")
 	if err != nil {
 		t.Fatalf("ClearAllAuditLogs failed: %v", err)
 	}
@@ -219,5 +221,40 @@ func TestAuditLog_ClearAll(t *testing.T) {
 	count, _ := repo.GetAuditLogCount(false, "", "")
 	if count != 0 {
 		t.Errorf("Expected 0 logs after clear, got %d", count)
+	}
+}
+
+func TestAuditLog_FilterByAssetID(t *testing.T) {
+	db := setupProtectionTestDB(t)
+	defer db.Close()
+
+	repo := NewAuditLogRepository(db)
+	now := time.Now().UTC().Format(time.RFC3339)
+	_ = repo.SaveAuditLogsBatch([]*AuditLog{
+		{ID: "open-1", Timestamp: now, RequestID: "r-open-1", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "ALLOW"},
+		{ID: "null-1", Timestamp: now, RequestID: "r-null-1", AssetName: "nullclaw", AssetID: "nullclaw:b1", Action: "WARN", HasRisk: true},
+	})
+
+	logs, err := repo.GetAuditLogs(&AuditLogFilter{
+		Limit:     10,
+		AssetName: "wrong_name_should_be_ignored",
+		AssetID:   "nullclaw:b1",
+	})
+	if err != nil {
+		t.Fatalf("GetAuditLogs by asset failed: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("Expected 1 log for nullclaw:b1, got %d", len(logs))
+	}
+	if logs[0].AssetID != "nullclaw:b1" {
+		t.Fatalf("Expected asset_id nullclaw:b1, got %s", logs[0].AssetID)
+	}
+
+	count, err := repo.GetAuditLogCount(false, "wrong_name_should_be_ignored", "nullclaw:b1")
+	if err != nil {
+		t.Fatalf("GetAuditLogCount by asset failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("Expected count=1 for nullclaw:b1, got %d", count)
 	}
 }

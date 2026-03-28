@@ -20,10 +20,25 @@ import '../utils/app_logger.dart';
 ///
 /// 由 [ProtectionService] 协调：通过 setProxySession / startProxyLogPolling / stopProxyLogPolling 与代理生命周期联动。
 class ProtectionMonitorService {
-  static final ProtectionMonitorService _instance =
-      ProtectionMonitorService._internal();
-  factory ProtectionMonitorService() => _instance;
-  ProtectionMonitorService._internal();
+  static const String defaultInstanceKey = '__global__';
+  static final Map<String, ProtectionMonitorService> _instances = {};
+
+  static String normalizeInstanceKey(String? instanceKey) {
+    final key = instanceKey?.trim() ?? '';
+    return key.isEmpty ? defaultInstanceKey : key;
+  }
+
+  factory ProtectionMonitorService([String instanceKey = defaultInstanceKey]) {
+    final normalizedKey = normalizeInstanceKey(instanceKey);
+    return _instances.putIfAbsent(
+      normalizedKey,
+      () => ProtectionMonitorService._internal(normalizedKey),
+    );
+  }
+
+  ProtectionMonitorService._internal(this._instanceKey);
+
+  final String _instanceKey;
 
   final StreamController<String> _logController =
       StreamController<String>.broadcast();
@@ -106,13 +121,35 @@ class ProtectionMonitorService {
   int get baselineAuditCompletionTokens => _baselineAuditCompletionTokens;
 
   void setAssetName(String? name, [String assetID = '']) {
-    _assetName = name;
-    _assetID = assetID;
+    final normalizedName = name?.trim();
+    final normalizedAssetID = assetID.trim();
+    final changed =
+        _assetName != normalizedName || _assetID != normalizedAssetID;
+    _assetName = normalizedName;
+    _assetID = normalizedAssetID;
+    if (changed) {
+      resetMemoryState();
+    }
   }
 
   void setProxySession(String? sessionId, bool isRunning) {
     _proxySessionID = sessionId;
     _isProxyRunning = isRunning;
+  }
+
+  bool _matchesCurrentAsset(SecurityEvent event) {
+    if (_assetID.isEmpty) {
+      return false;
+    }
+    return event.assetID == _assetID;
+  }
+
+  bool _matchesCurrentMetrics(Map<String, dynamic> metrics) {
+    final metricAssetID = (metrics['asset_id'] ?? '').toString().trim();
+    if (_assetID.isEmpty) {
+      return false;
+    }
+    return metricAssetID == _assetID;
   }
 
   int _deltaWithReset(int current, int previous) {
@@ -129,16 +166,23 @@ class ProtectionMonitorService {
 
   void startProxyLogPolling() {
     _proxyLogPollTimer?.cancel();
-    int syncCounter = 25;
+    // 200ms * 25 = 5s: 审计日志保持低频 DB 同步，减少写放大。
+    int auditSyncCounter = 25;
+    // 200ms * 5 = 1s: 安全事件提升为近实时刷新。
+    int securityEventSyncCounter = 5;
     _proxyLogPollTimer = Timer.periodic(const Duration(milliseconds: 200), (
       timer,
     ) {
       if (_proxySessionID != null && _isProxyRunning) {
         _pollProxyLogs(_proxySessionID!);
-        syncCounter++;
-        if (syncCounter >= 25) {
-          syncCounter = 0;
+        auditSyncCounter++;
+        if (auditSyncCounter >= 25) {
+          auditSyncCounter = 0;
           syncPendingAuditLogs();
+        }
+        securityEventSyncCounter++;
+        if (securityEventSyncCounter >= 5) {
+          securityEventSyncCounter = 0;
           syncPendingSecurityEvents();
         }
       }
@@ -198,7 +242,11 @@ class ProtectionMonitorService {
         _metricsSubscription = _messageBridgeService!.metricsStream
             .handleError(_handleBridgeError)
             .listen((metrics) {
-              scheduleMicrotask(() => _updateMetricsFromBridge(metrics));
+              scheduleMicrotask(() {
+                if (_matchesCurrentMetrics(metrics)) {
+                  _updateMetricsFromBridge(metrics);
+                }
+              });
             });
         _messageBridgeService!.errorStream
             .handleError((error, stackTrace) => _handleBridgeError(error))
@@ -211,7 +259,8 @@ class ProtectionMonitorService {
               scheduleMicrotask(() {
                 try {
                   final event = SecurityEvent.fromJson(payload);
-                  if (!_securityEventController.isClosed) {
+                  if (_matchesCurrentAsset(event) &&
+                      !_securityEventController.isClosed) {
                     _securityEventController.add([event]);
                   }
                 } catch (e) {
@@ -346,7 +395,11 @@ class ProtectionMonitorService {
       if (hasTokenChanges) {
         unawaited(
           MetricsDatabaseService()
-              .saveApiMetrics(apiMetrics, assetName: _assetName)
+              .saveApiMetrics(
+                apiMetrics,
+                assetName: _assetName,
+                assetID: _assetID,
+              )
               .catchError((Object e) {
                 appLogger.error(
                   '[ProtectionMonitor] Failed to save API metrics',
@@ -496,6 +549,7 @@ class ProtectionMonitorService {
       return await MetricsDatabaseService().getApiStatistics(
         duration: duration,
         assetName: _assetName,
+        assetID: _assetID,
       );
     } catch (e) {
       appLogger.error('[ProtectionMonitor] Get API statistics failed', e);
@@ -549,7 +603,7 @@ class ProtectionMonitorService {
       _metricsController.add(metrics);
       unawaited(
         MetricsDatabaseService()
-            .saveApiMetrics(metrics, assetName: _assetName)
+            .saveApiMetrics(metrics, assetName: _assetName, assetID: _assetID)
             .catchError((Object e) {
               appLogger.error(
                 '[ProtectionMonitor] Failed to save API metrics',
@@ -681,7 +735,11 @@ class ProtectionMonitorService {
         if (hasTokenChanges) {
           unawaited(
             MetricsDatabaseService()
-                .saveApiMetrics(metrics, assetName: _assetName)
+                .saveApiMetrics(
+                  metrics,
+                  assetName: _assetName,
+                  assetID: _assetID,
+                )
                 .catchError((Object e) {
                   appLogger.error(
                     '[ProtectionMonitor] Failed to save API metrics',
@@ -764,10 +822,7 @@ class ProtectionMonitorService {
     }
   }
 
-  void clearAuditLogsBufferWithFilter({
-    String? assetName,
-    String? assetID,
-  }) {
+  void clearAuditLogsBufferWithFilter({String? assetName, String? assetID}) {
     final hasAssetFilter =
         (assetName != null && assetName.isNotEmpty) ||
         (assetID != null && assetID.isNotEmpty);
@@ -778,10 +833,11 @@ class ProtectionMonitorService {
 
     try {
       final dylib = _getDylib();
-      final clearLogs = dylib.lookupFunction<
-        ClearAuditLogsWithFilterC,
-        ClearAuditLogsWithFilterDart
-      >('ClearAuditLogsWithFilter');
+      final clearLogs = dylib
+          .lookupFunction<
+            ClearAuditLogsWithFilterC,
+            ClearAuditLogsWithFilterDart
+          >('ClearAuditLogsWithFilter');
       final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
         'FreeString',
       );
@@ -810,12 +866,20 @@ class ProtectionMonitorService {
     DateTime? endTime,
     String? searchQuery,
   }) async {
+    final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
+        ? assetID.trim()
+        : (_assetID.isNotEmpty ? _assetID : null);
+    final effectiveAssetName =
+        (assetName != null && assetName.trim().isNotEmpty)
+        ? assetName.trim()
+        : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
+
     return await AuditLogDatabaseService().getAuditLogs(
       limit: limit,
       offset: offset,
       riskOnly: riskOnly,
-      assetName: assetName,
-      assetID: assetID,
+      assetName: effectiveAssetName,
+      assetID: effectiveAssetID,
       startTime: startTime,
       endTime: endTime,
       searchQuery: searchQuery,
@@ -827,10 +891,17 @@ class ProtectionMonitorService {
     String? assetName,
     String? assetID,
   }) async {
+    final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
+        ? assetID.trim()
+        : (_assetID.isNotEmpty ? _assetID : null);
+    final effectiveAssetName =
+        (assetName != null && assetName.trim().isNotEmpty)
+        ? assetName.trim()
+        : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
     return await AuditLogDatabaseService().getAuditLogCount(
       riskOnly: riskOnly,
-      assetName: assetName,
-      assetID: assetID,
+      assetName: effectiveAssetName,
+      assetID: effectiveAssetID,
     );
   }
 
@@ -838,9 +909,16 @@ class ProtectionMonitorService {
     String? assetName,
     String? assetID,
   }) async {
+    final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
+        ? assetID.trim()
+        : (_assetID.isNotEmpty ? _assetID : null);
+    final effectiveAssetName =
+        (assetName != null && assetName.trim().isNotEmpty)
+        ? assetName.trim()
+        : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
     return await AuditLogDatabaseService().getAuditLogStatistics(
-      assetName: assetName,
-      assetID: assetID,
+      assetName: effectiveAssetName,
+      assetID: effectiveAssetID,
     );
   }
 
@@ -848,13 +926,17 @@ class ProtectionMonitorService {
     await AuditLogDatabaseService().clearAllAuditLogs();
   }
 
-  Future<void> clearAuditLogs({
-    String? assetName,
-    String? assetID,
-  }) async {
+  Future<void> clearAuditLogs({String? assetName, String? assetID}) async {
+    final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
+        ? assetID.trim()
+        : (_assetID.isNotEmpty ? _assetID : null);
+    final effectiveAssetName =
+        (assetName != null && assetName.trim().isNotEmpty)
+        ? assetName.trim()
+        : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
     await AuditLogDatabaseService().clearAuditLogs(
-      assetName: assetName,
-      assetID: assetID,
+      assetName: effectiveAssetName,
+      assetID: effectiveAssetID,
     );
   }
 
@@ -880,8 +962,9 @@ class ProtectionMonitorService {
           .map((e) => SecurityEvent.fromJson(e as Map<String, dynamic>))
           .toList();
       await SecurityEventDatabaseService().saveSecurityEventsBatch(events);
-      if (!_securityEventController.isClosed) {
-        _securityEventController.add(events);
+      final matchedEvents = events.where(_matchesCurrentAsset).toList();
+      if (matchedEvents.isNotEmpty && !_securityEventController.isClosed) {
+        _securityEventController.add(matchedEvents);
       }
       return events.length;
     } catch (e) {
@@ -895,9 +978,13 @@ class ProtectionMonitorService {
     int limit = 100,
     int offset = 0,
   }) async {
+    if (_assetID.isEmpty) {
+      return [];
+    }
     return await SecurityEventDatabaseService().getSecurityEvents(
       limit: limit,
       offset: offset,
+      assetID: _assetID,
     );
   }
 
@@ -908,10 +995,16 @@ class ProtectionMonitorService {
 
   /// 清空所有安全事件
   Future<void> clearAllSecurityEvents() async {
-    await SecurityEventDatabaseService().clearAllSecurityEvents();
+    if (_assetID.isEmpty) {
+      appLogger.warning(
+        '[ProtectionMonitor] Skip clear security events: missing asset_id',
+      );
+      return;
+    }
+    await SecurityEventDatabaseService().clearSecurityEvents(assetID: _assetID);
   }
 
-  void dispose() {
+  void dispose({bool removeInstance = true}) {
     stopProxyLogPolling();
     _logSubscription?.cancel();
     _metricsSubscription?.cancel();
@@ -922,5 +1015,8 @@ class ProtectionMonitorService {
     _resultController.close();
     _metricsController.close();
     _securityEventController.close();
+    if (removeInstance) {
+      _instances.remove(_instanceKey);
+    }
   }
 }

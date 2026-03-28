@@ -1,15 +1,15 @@
 package service
 
-// ========== 响应格式化辅助函数 ==========
+// ========== Response formatting helpers ==========
 
-// successResult 成功响应（无数据）
+// successResult returns a success response without payload.
 func successResult() map[string]interface{} {
 	return map[string]interface{}{
 		"success": true,
 	}
 }
 
-// successDataResult 成功响应（带数据）
+// successDataResult returns a success response with payload.
 func successDataResult(data interface{}) map[string]interface{} {
 	return map[string]interface{}{
 		"success": true,
@@ -17,7 +17,7 @@ func successDataResult(data interface{}) map[string]interface{} {
 	}
 }
 
-// errorResult 错误响应
+// errorResult returns an error response from an error value.
 func errorResult(err error) map[string]interface{} {
 	return map[string]interface{}{
 		"success": false,
@@ -25,7 +25,7 @@ func errorResult(err error) map[string]interface{} {
 	}
 }
 
-// errorMessageResult 错误响应（直接传消息）
+// errorMessageResult returns an error response from a raw message.
 func errorMessageResult(msg string) map[string]interface{} {
 	return map[string]interface{}{
 		"success": false,

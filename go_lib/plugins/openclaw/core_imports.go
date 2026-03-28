@@ -60,8 +60,6 @@ var calculateSkillHash = skillscan.CalculateSkillHash
 
 // ==================== Function wrappers from core/shepherd ====================
 
-var GetGlobalUserRules = shepherd.GetGlobalUserRules
-var UpdateGlobalUserRules = shepherd.UpdateGlobalUserRules
 var GetSecurityEventBuffer = shepherd.GetSecurityEventBuffer
 
 // ==================== Function wrappers from core/proxy ====================

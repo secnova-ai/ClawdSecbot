@@ -1,5 +1,6 @@
-// Package repository 提供安全模型配置的数据库访问层
-// 安全模型配置全局唯一，用于 ShepherdGate 风险检测
+// Package repository provides the database access layer for security model
+// configuration. The configuration is globally unique and used by ShepherdGate
+// risk detection.
 package repository
 
 import (
@@ -10,8 +11,8 @@ import (
 	"go_lib/core/logging"
 )
 
-// SecurityModelConfig 安全模型配置，全局唯一（id=1）
-// 用于ShepherdGate风险检测的LLM配置
+// SecurityModelConfig is the globally unique security model configuration
+// stored with id=1. It defines the LLM settings used by ShepherdGate.
 type SecurityModelConfig struct {
 	Provider  string `json:"provider"`
 	Endpoint  string `json:"endpoint"`
@@ -21,12 +22,12 @@ type SecurityModelConfig struct {
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
-// SecurityModelConfigRepository 安全模型配置仓库
+// SecurityModelConfigRepository persists security model configuration.
 type SecurityModelConfigRepository struct {
 	db *sql.DB
 }
 
-// NewSecurityModelConfigRepository 创建安全模型配置仓库实例
+// NewSecurityModelConfigRepository creates a repository instance.
 func NewSecurityModelConfigRepository(db *sql.DB) *SecurityModelConfigRepository {
 	if db == nil {
 		db = GetDB()
@@ -34,8 +35,8 @@ func NewSecurityModelConfigRepository(db *sql.DB) *SecurityModelConfigRepository
 	return &SecurityModelConfigRepository{db: db}
 }
 
-// CreateSecurityModelConfigTable 创建安全模型配置表
-// 使用 IF NOT EXISTS 保证幂等性
+// CreateSecurityModelConfigTable creates the security model configuration table.
+// IF NOT EXISTS keeps the operation idempotent.
 func CreateSecurityModelConfigTable(db *sql.DB) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS security_model_config (
@@ -51,16 +52,11 @@ func CreateSecurityModelConfigTable(db *sql.DB) error {
 		return fmt.Errorf("failed to create security_model_config table: %w", err)
 	}
 
-	// 迁移:为旧版表添加secret_key列
-	migrateAddColumn(db, "security_model_config", "secret_key", "TEXT")
-	// 迁移:将旧版type列重命名为provider
-	migrateRenameColumn(db, "security_model_config", "type", "provider")
-
 	logging.Info("Security model config table created/verified successfully")
 	return nil
 }
 
-// Save 保存安全模型配置（全局唯一，INSERT OR REPLACE）
+// Save persists the globally unique security model configuration.
 func (r *SecurityModelConfigRepository) Save(config *SecurityModelConfig) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
@@ -80,8 +76,8 @@ func (r *SecurityModelConfigRepository) Save(config *SecurityModelConfig) error 
 	return nil
 }
 
-// Get 获取安全模型配置
-// 返回nil表示尚未配置
+// Get loads the security model configuration.
+// It returns nil when the configuration has not been set yet.
 func (r *SecurityModelConfigRepository) Get() (*SecurityModelConfig, error) {
 	if r.db == nil {
 		return nil, fmt.Errorf("database not initialized")

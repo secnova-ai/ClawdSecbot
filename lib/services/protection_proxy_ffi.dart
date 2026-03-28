@@ -116,12 +116,33 @@ typedef FreeStringDart = void Function(ffi.Pointer<Utf8>);
 typedef HasInitialBackupFFIC = ffi.Pointer<Utf8> Function();
 typedef HasInitialBackupFFIDart = ffi.Pointer<Utf8> Function();
 
+typedef HasInitialBackupByAssetFFIC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+typedef HasInitialBackupByAssetFFIDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+
 typedef RestoreToInitialConfigFFIC = ffi.Pointer<Utf8> Function();
 typedef RestoreToInitialConfigFFIDart = ffi.Pointer<Utf8> Function();
+
+typedef RestoreToInitialConfigByAssetFFIC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+typedef RestoreToInitialConfigByAssetFFIDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
 
 // --- 网关沙箱同步 ---
 typedef SyncGatewaySandboxC = ffi.Pointer<Utf8> Function();
 typedef SyncGatewaySandboxDart = ffi.Pointer<Utf8> Function();
+
+typedef SyncGatewaySandboxByAssetNameC =
+    ffi.Pointer<Utf8> Function(
+      ffi.Pointer<Utf8> assetName,
+      ffi.Pointer<Utf8> assetID,
+    );
+typedef SyncGatewaySandboxByAssetNameDart =
+    ffi.Pointer<Utf8> Function(
+      ffi.Pointer<Utf8> assetName,
+      ffi.Pointer<Utf8> assetID,
+    );
 
 /// 防护代理 FFI 的 Isolate 安全调用入口（静态方法可在后台 Isolate 中使用）。
 class ProtectionProxyFFI {
@@ -152,6 +173,50 @@ class ProtectionProxyFFI {
     return resultStr;
   }
 
+  /// 在后台 Isolate 中执行 StopProtectionProxy。
+  static String stopProtectionProxyInIsolate(String libPath) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final stopProxy = dylib
+        .lookupFunction<StopProtectionProxyC, StopProtectionProxyDart>(
+          'StopProtectionProxy',
+        );
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final resultPtr = stopProxy();
+    final resultStr = resultPtr.toDartString();
+    freeString(resultPtr);
+    return resultStr;
+  }
+
+  /// 在后台 Isolate 中执行按资产路由的 StopProtectionProxyByAsset。
+  static String stopProtectionProxyByAssetInIsolate(
+    String libPath,
+    String assetName,
+    String assetID,
+  ) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final stopProxy = dylib
+        .lookupFunction<
+          StopProtectionProxyByAssetC,
+          StopProtectionProxyByAssetDart
+        >('StopProtectionProxyByAsset');
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final assetNamePtr = assetName.toNativeUtf8();
+    final assetIDPtr = assetID.toNativeUtf8();
+    final resultPtr = stopProxy(assetNamePtr, assetIDPtr);
+    malloc.free(assetNamePtr);
+    malloc.free(assetIDPtr);
+
+    final resultStr = resultPtr.toDartString();
+    freeString(resultPtr);
+    return resultStr;
+  }
+
   /// 在后台 Isolate 中执行 SyncGatewaySandbox（网关完整重启，耗时较长）。
   /// [libPath] 为插件 dylib 路径。
   /// 返回 Go 层返回的 JSON 字符串。
@@ -166,6 +231,33 @@ class ProtectionProxyFFI {
     );
 
     final resultPtr = syncFunc();
+    final resultStr = resultPtr.toDartString();
+    freeString(resultPtr);
+    return resultStr;
+  }
+
+  /// 在后台 Isolate 中执行按资产路由的网关沙箱同步。
+  static String syncGatewaySandboxByAssetInIsolate(
+    String libPath,
+    String assetName,
+    String assetID,
+  ) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final syncFunc = dylib
+        .lookupFunction<
+          SyncGatewaySandboxByAssetNameC,
+          SyncGatewaySandboxByAssetNameDart
+        >('SyncGatewaySandboxByAssetName');
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final assetNamePtr = assetName.toNativeUtf8();
+    final assetIDPtr = assetID.toNativeUtf8();
+    final resultPtr = syncFunc(assetNamePtr, assetIDPtr);
+    malloc.free(assetNamePtr);
+    malloc.free(assetIDPtr);
+
     final resultStr = resultPtr.toDartString();
     freeString(resultPtr);
     return resultStr;
@@ -186,6 +278,30 @@ class ProtectionProxyFFI {
     );
 
     final resultPtr = restoreFunc();
+    final resultStr = resultPtr.toDartString();
+    freeString(resultPtr);
+    return resultStr;
+  }
+
+  /// 在后台 Isolate 中执行按资产路由的配置恢复。
+  static String restoreToInitialConfigByAssetInIsolate(
+    String libPath,
+    String assetName,
+  ) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final restoreFunc = dylib
+        .lookupFunction<
+          RestoreToInitialConfigByAssetFFIC,
+          RestoreToInitialConfigByAssetFFIDart
+        >('RestoreToInitialConfigByAssetFFI');
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final assetNamePtr = assetName.toNativeUtf8();
+    final resultPtr = restoreFunc(assetNamePtr);
+    malloc.free(assetNamePtr);
+
     final resultStr = resultPtr.toDartString();
     freeString(resultPtr);
     return resultStr;

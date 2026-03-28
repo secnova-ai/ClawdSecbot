@@ -55,7 +55,7 @@ class _ProtectionMonitorWindowAppState
     extends State<ProtectionMonitorWindowApp> {
   late String _locale;
   bool _isWindowShown = false;
-  final ProtectionService _protectionService = ProtectionService();
+  late final ProtectionService _protectionService;
 
   /// Linux 子进程：主进程通过 WindowMethodChannel 中继的日志/结果/统计流
   final StreamController<List<String>> _relayLogController =
@@ -78,6 +78,9 @@ class _ProtectionMonitorWindowAppState
   @override
   void initState() {
     super.initState();
+    _protectionService = ProtectionService.scoped(
+      'monitor_window::${widget.windowId}',
+    );
     _locale = widget.locale;
     _showWindowAfterFirstFrame();
 
@@ -267,7 +270,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
         ProtectionMonitorTranslationMixin,
         ProtectionMonitorLogProcessorMixin,
         WindowListener {
-  final ProtectionService _protectionService = ProtectionService();
+  late final ProtectionService _protectionService;
   final ScrollController _logScrollController = ScrollController();
   final ScrollController _horizontalScrollController = ScrollController();
   bool _useGroupedView = true;
@@ -398,6 +401,9 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
   @override
   void initState() {
     super.initState();
+    _protectionService = ProtectionService.scoped(
+      'monitor_window::${widget.windowId}',
+    );
     try {
       windowManager.addListener(this);
       if (Platform.isLinux || Platform.isWindows) {
@@ -658,7 +664,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
       await Future.delayed(const Duration(milliseconds: 50));
 
       // Step 4: 加载历史统计数据
-      _protectionService.loadStatisticsFromDatabase();
+      await _protectionService.loadStatisticsFromDatabase();
 
       // Step 4.1: 加载防护配置
       await _loadProtectionConfig();

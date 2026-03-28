@@ -62,6 +62,7 @@ func TestSaveBotModelConfig(t *testing.T) {
 
 	input := `{
 		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
 		"provider": "openai",
 		"base_url": "https://api.siliconflow.cn/v1",
 		"api_key": "sk-test",
@@ -81,13 +82,14 @@ func TestGetBotModelConfig(t *testing.T) {
 
 	SaveBotModelConfig(`{
 		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
 		"provider": "openai",
 		"base_url": "https://api.test.com/v1",
 		"api_key": "sk-test",
 		"model": "test-model"
 	}`)
 
-	result := GetBotModelConfig("openclaw", "")
+	result := GetBotModelConfig("openclaw", "openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
@@ -113,7 +115,7 @@ func TestGetBotModelConfig_NoLegacyFallback(t *testing.T) {
 
 	SaveBotModelConfig(`{
 		"asset_name": "openclaw",
-		"asset_id": "",
+		"asset_id": "openclaw:test-1",
 		"provider": "openai",
 		"base_url": "https://api.legacy.com/v1",
 		"api_key": "sk-legacy",
@@ -136,19 +138,20 @@ func TestDeleteBotModelConfig(t *testing.T) {
 
 	SaveBotModelConfig(`{
 		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
 		"provider": "openai",
 		"base_url": "https://test.com/v1",
 		"api_key": "sk-test",
 		"model": "test"
 	}`)
 
-	result := DeleteBotModelConfig("openclaw", "")
+	result := DeleteBotModelConfig("openclaw", "openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
 
 	// 验证已删除
-	check := GetBotModelConfig("openclaw", "")
+	check := GetBotModelConfig("openclaw", "openclaw:test-1")
 	if check["data"] != nil {
 		t.Error("Expected nil data after deletion")
 	}
@@ -162,6 +165,7 @@ func TestSaveBotModelConfig_NewProtectionConfig(t *testing.T) {
 	// 直接保存BotModelConfig（无现有ProtectionConfig）
 	input := `{
 		"asset_name": "Openclaw",
+		"asset_id": "openclaw:test-1",
 		"provider": "anthropic",
 		"base_url": "https://api.anthropic.com",
 		"api_key": "sk-ant-test",
@@ -173,7 +177,7 @@ func TestSaveBotModelConfig_NewProtectionConfig(t *testing.T) {
 	}
 
 	// 验证可以读回
-	getResult := GetBotModelConfig("Openclaw", "")
+	getResult := GetBotModelConfig("Openclaw", "openclaw:test-1")
 	if getResult["success"] != true {
 		t.Fatalf("GetBotModelConfig failed: %v", getResult)
 	}

@@ -1,0 +1,43 @@
+# Docker 构建上下文排除文件
+# 排除构建产物和临时文件
+
+# Build outputs (exclude downloads, include everything else)
+build/
+!build/downloads/
+*.tar
+
+# Version control
+.git/
+.gitignore
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+*.log
+
+# Documentation (not needed for Docker build)
+*.md
+mds/
+docs/
+
+# Large assets not needed for the website service
+assets/
+images/
+skills/
+
+# Mobile and desktop app source (not needed for website)
+android/
+ios/
+macos/
+windows/
+linux/
+web/
+
+# Other unnecessary directories
+logs/
+backups/
+_rules/
+node_modules/

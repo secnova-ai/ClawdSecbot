@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:io';
+import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import '../models/asset_model.dart';
@@ -9,6 +10,7 @@ import '../config/build_config.dart';
 import '../utils/app_logger.dart';
 import 'native_library_service.dart';
 import 'bookmark_service.dart';
+import 'protection_database_service.dart';
 
 // C function signatures
 
@@ -28,11 +30,8 @@ typedef SetConfigPathDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
 typedef SetAppStoreBuildC = ffi.Pointer<Utf8> Function(ffi.Int32);
 typedef SetAppStoreBuildDart = ffi.Pointer<Utf8> Function(int);
-
-typedef UpdateShepherdRulesC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef UpdateShepherdRulesDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef GetShepherdRulesC = ffi.Pointer<Utf8> Function();
-typedef GetShepherdRulesDart = ffi.Pointer<Utf8> Function();
+typedef GetPluginsC = ffi.Pointer<Utf8> Function();
+typedef GetPluginsDart = ffi.Pointer<Utf8> Function();
 
 // Database FFI signatures (used by model config methods)
 typedef SaveScanResultC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
@@ -59,6 +58,16 @@ typedef GetRiskySkillsDart = ffi.Pointer<Utf8> Function();
 typedef ListBundledReActSkillsC = ffi.Pointer<Utf8> Function();
 typedef ListBundledReActSkillsDart = ffi.Pointer<Utf8> Function();
 
+typedef NotifyPluginAppExitC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef NotifyPluginAppExitDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+
+typedef RestoreBotDefaultStateC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef RestoreBotDefaultStateDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+
 // Model config FFI signatures
 typedef SaveSecurityModelConfigC =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
@@ -83,6 +92,60 @@ typedef DeleteBotModelConfigDart =
 
 typedef FreeStringC = ffi.Void Function(ffi.Pointer<Utf8>);
 typedef FreeStringDart = void Function(ffi.Pointer<Utf8>);
+
+class _PluginLifecycleFFI {
+  _PluginLifecycleFFI._();
+
+  static String notifyPluginAppExitInIsolate(
+    String libPath,
+    String assetName,
+    String assetID,
+  ) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final func = dylib
+        .lookupFunction<NotifyPluginAppExitC, NotifyPluginAppExitDart>(
+          'NotifyPluginAppExitFFI',
+        );
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final assetNamePtr = assetName.toNativeUtf8();
+    final assetIDPtr = assetID.toNativeUtf8();
+    final resultPtr = func(assetNamePtr, assetIDPtr);
+    malloc.free(assetNamePtr);
+    malloc.free(assetIDPtr);
+
+    final result = resultPtr.toDartString();
+    freeString(resultPtr);
+    return result;
+  }
+
+  static String restoreBotDefaultStateInIsolate(
+    String libPath,
+    String assetName,
+    String assetID,
+  ) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final func = dylib
+        .lookupFunction<RestoreBotDefaultStateC, RestoreBotDefaultStateDart>(
+          'RestoreBotDefaultStateFFI',
+        );
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final assetNamePtr = assetName.toNativeUtf8();
+    final assetIDPtr = assetID.toNativeUtf8();
+    final resultPtr = func(assetNamePtr, assetIDPtr);
+    malloc.free(assetNamePtr);
+    malloc.free(assetIDPtr);
+
+    final result = resultPtr.toDartString();
+    freeString(resultPtr);
+    return result;
+  }
+}
 
 /// 插件服务：管理插件专有的业务逻辑（扫描/识别/风险评估/模型配置等）
 ///
@@ -185,57 +248,57 @@ class PluginService {
     }
   }
 
-  Future<Map<String, List<String>>> loadAndSyncShepherdRules(
-    String assetName,
-  ) async {
-    // Shepherd rules are fully persisted by Go JSON file.
-    final sensitiveActions = _loadShepherdRulesFromPlugin();
-
-    // Sync to Go only when we have concrete rules to avoid wiping runtime rules accidentally.
-    if (sensitiveActions.isNotEmpty) {
-      await updateShepherdRules(sensitiveActions);
-    } else {
-      appLogger.warning(
-        '[Plugin] Shepherd rules empty for asset=$assetName, skip runtime sync',
-      );
+  /// Returns whether the target plugin requires explicit bot model config.
+  ///
+  /// Fallback is `true` for safety when plugin metadata cannot be read.
+  Future<bool> requiresBotModelConfig(String assetName) async {
+    final normalizedAssetName = assetName.trim().toLowerCase();
+    if (normalizedAssetName.isEmpty) {
+      return true;
     }
 
-    return {'sensitiveActions': sensitiveActions};
-  }
-
-  List<String> _loadShepherdRulesFromPlugin() {
-    final lib = dylib;
-    if (lib == null) {
-      appLogger.warning(
-        '[Plugin] Plugin not initialized, cannot load shepherd rules',
+    final response = await _withPlugin('GetPluginsFFI', (lib) {
+      final getPlugins = lib.lookupFunction<GetPluginsC, GetPluginsDart>(
+        'GetPluginsFFI',
       );
-      return const [];
-    }
-
-    try {
-      final getRules = lib
-          .lookupFunction<GetShepherdRulesC, GetShepherdRulesDart>(
-            'GetShepherdRulesFFI',
-          );
-      final resultPtr = getRules();
+      final resultPtr = getPlugins();
       final result = resultPtr.toDartString();
       freeString!(resultPtr);
+      return jsonDecode(result) as Map<String, dynamic>;
+    });
 
-      final decoded = jsonDecode(result);
-      if (decoded is! Map<String, dynamic>) return const [];
-
-      final actions = decoded['SensitiveActions'];
-      if (actions is! List) return const [];
-
-      return actions
-          .whereType<String>()
-          .map((item) => item.trim())
-          .where((item) => item.isNotEmpty)
-          .toList(growable: false);
-    } catch (e) {
-      appLogger.error('[Plugin] Failed to load Shepherd rules', e);
-      return const [];
+    if (response['success'] != true) {
+      return true;
     }
+    final data = response['data'];
+    if (data is! List) {
+      return true;
+    }
+
+    for (final item in data.whereType<Map<String, dynamic>>()) {
+      final pluginAssetName = (item['asset_name'] as String? ?? '')
+          .trim()
+          .toLowerCase();
+      if (pluginAssetName != normalizedAssetName) {
+        continue;
+      }
+      final requires = item['requires_bot_model_config'];
+      if (requires is bool) {
+        return requires;
+      }
+      return true;
+    }
+
+    return true;
+  }
+
+  Future<Map<String, List<String>>> loadAndSyncShepherdRules(
+    String assetName,
+    String assetID,
+  ) async {
+    final sensitiveActions = await ProtectionDatabaseService()
+        .getShepherdSensitiveActions(assetName, assetID);
+    return {'sensitiveActions': sensitiveActions};
   }
 
   /// 通过FFI获取内置ReAct安全技能列表（name + description）
@@ -271,34 +334,66 @@ class PluginService {
     }
   }
 
-  Future<void> updateShepherdRules(List<String> sensitiveActions) async {
-    final lib = dylib;
-    if (lib == null) {
-      appLogger.warning(
-        '[Plugin] Plugin not initialized, cannot update shepherd rules',
-      );
-      return;
+  Future<void> updateShepherdRules(
+    String assetName,
+    String assetID,
+    List<String> sensitiveActions,
+  ) async {
+    await ProtectionDatabaseService().saveShepherdSensitiveActions(
+      assetName,
+      assetID,
+      sensitiveActions,
+    );
+  }
+
+  Future<Map<String, dynamic>> notifyPluginAppExit(
+    String assetName, [
+    String assetID = '',
+  ]) async {
+    final libPath = NativeLibraryService().libraryPath;
+    if (libPath == null) {
+      return {'success': false, 'error': 'Plugin library not initialized'};
     }
 
     try {
-      final updateRules = lib
-          .lookupFunction<UpdateShepherdRulesC, UpdateShepherdRulesDart>(
-            'UpdateShepherdRulesFFI',
-          );
-
-      final rulesMap = {'SensitiveActions': sensitiveActions};
-      final jsonStr = jsonEncode(rulesMap);
-      final jsonPtr = jsonStr.toNativeUtf8();
-
-      final resultPtr = updateRules(jsonPtr);
-      final result = resultPtr.toDartString();
-
-      freeString!(resultPtr);
-      malloc.free(jsonPtr);
-
-      appLogger.info('[Plugin] Updated Shepherd rules: $result');
+      final result = await Isolate.run(() {
+        return _PluginLifecycleFFI.notifyPluginAppExitInIsolate(
+          libPath,
+          assetName,
+          assetID,
+        );
+      });
+      return jsonDecode(result) as Map<String, dynamic>;
     } catch (e) {
-      appLogger.error('[Plugin] Failed to update Shepherd rules: $e');
+      appLogger.debug('[Plugin] NotifyPluginAppExitFFI failed: $e');
+      return {'success': false, 'error': 'NotifyPluginAppExitFFI failed: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> restoreBotDefaultState(
+    String assetName, [
+    String assetID = '',
+  ]) async {
+    final libPath = NativeLibraryService().libraryPath;
+    if (libPath == null) {
+      return {'success': false, 'error': 'Plugin library not initialized'};
+    }
+
+    try {
+      final result = await Isolate.run(() {
+        return _PluginLifecycleFFI.restoreBotDefaultStateInIsolate(
+          libPath,
+          assetName,
+          assetID,
+        );
+      });
+      return jsonDecode(result) as Map<String, dynamic>;
+    } catch (e) {
+      appLogger.debug('[Plugin] RestoreBotDefaultStateFFI failed: $e');
+      return {
+        'success': false,
+        'error': 'RestoreBotDefaultStateFFI failed: $e',
+      };
     }
   }
 

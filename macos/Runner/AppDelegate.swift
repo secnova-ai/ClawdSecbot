@@ -5,9 +5,19 @@ import desktop_multi_window
 @main
 class AppDelegate: FlutterAppDelegate {
   private var bookmarkHandler: SecurityScopedBookmarkHandler?
+  private var appExitChannel: FlutterMethodChannel?
   
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     return false  // 窗口关闭后不退出应用,保持托盘运行
+  }
+
+  override func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard let channel = appExitChannel else {
+      return .terminateNow
+    }
+
+    channel.invokeMethod("requestAppExit", arguments: nil)
+    return .terminateCancel
   }
 
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
@@ -18,6 +28,10 @@ class AppDelegate: FlutterAppDelegate {
     // Register security-scoped bookmark handler
     if let controller = mainFlutterWindow?.contentViewController as? FlutterViewController {
       bookmarkHandler = SecurityScopedBookmarkHandler(messenger: controller.engine.binaryMessenger)
+      appExitChannel = FlutterMethodChannel(
+        name: "com.clawdbot.guard/app_exit",
+        binaryMessenger: controller.engine.binaryMessenger
+      )
     }
     
     // 在应用完全启动后设置多窗口插件回调，确保引擎完全就绪

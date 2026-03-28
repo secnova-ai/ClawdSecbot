@@ -1,15 +1,15 @@
 import 'dart:io';
-import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../utils/app_logger.dart';
 
-/// 数据库服务：仅负责计算和提供数据库文件路径
+/// Database path contract service.
 ///
-/// 所有实际的数据库操作已迁移到Go层，通过FFI调用。
-/// 此服务仅保留 dbPath 的计算逻辑，供 NativeLibraryService 初始化Go DB时使用。
+/// Flutter only resolves the shared app data base directory.
+/// Core owns all derived runtime paths such as database, version file, logs,
+/// backups, and skill directories.
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
-  String? _dbPath;
+  String? _appDataDir;
 
   factory DatabaseService() {
     return _instance;
@@ -17,22 +17,20 @@ class DatabaseService {
 
   DatabaseService._internal();
 
-  /// 数据库文件路径
-  String? get dbPath => _dbPath;
+  /// Shared app data base directory passed to Go core.
+  String? get appDataDir => _appDataDir;
 
-  /// 初始化：计算数据库路径并确保目录存在
+  /// Initializes the shared app data directory and ensures it exists.
   Future<void> init() async {
-    if (_dbPath != null) return;
+    if (_appDataDir != null) return;
 
     final dir = await getApplicationSupportDirectory();
-    final dbPath = p.join(dir.path, 'bot_sec_manager.db');
-    _dbPath = dbPath;
-    appLogger.info('[Database] Database path: $dbPath');
+    _appDataDir = dir.path;
+    appLogger.info('[Database] App data dir: ${dir.path}');
 
-    // 确保目录存在
-    final dbFile = File(dbPath);
-    if (!await dbFile.parent.exists()) {
-      await dbFile.parent.create(recursive: true);
+    final baseDir = Directory(dir.path);
+    if (!await baseDir.exists()) {
+      await baseDir.create(recursive: true);
     }
   }
 }

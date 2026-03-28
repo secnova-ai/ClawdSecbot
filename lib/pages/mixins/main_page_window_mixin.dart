@@ -5,6 +5,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import '../../models/protection_analysis_model.dart';
+import '../../services/protection_database_service.dart';
 import '../../models/security_event_model.dart';
 import '../../services/protection_service.dart';
 import '../../utils/app_logger.dart';
@@ -38,10 +39,12 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
   final Map<String, StreamSubscription<String>> _relayLogSubscriptions = {};
   final Map<String, StreamSubscription<ProtectionAnalysisResult>>
   _relayResultSubscriptions = {};
+  final Map<String, ProtectionService> _relayServices = {};
   final Map<String, StreamSubscription<List<SecurityEvent>>>
   _relaySecurityEventSubscriptions = {};
   final Map<String, Timer> _relayTimers = {};
   final Map<String, Timer> _relayStatsTimers = {};
+  final Map<String, bool> _relayStatsInFlight = {};
 
   // ============ 主窗口方法 ============
 
@@ -198,7 +201,7 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
       final controller = await createFuture;
       protectionMonitorWindows[windowKey] = controller;
       if (Platform.isLinux) {
-        _startRelayForWindowKey(windowKey, controller);
+        _startRelayForWindowKey(windowKey, assetName, assetID, controller);
       }
     } catch (e) {
       appLogger.error('[MainPage] Open protection monitor failed', e);
@@ -208,9 +211,18 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
   }
 
   /// 启动 Linux 子窗口日志/结果/统计中继
-  void _startRelayForWindowKey(String windowKey, WindowController controller) {
+  void _startRelayForWindowKey(
+    String windowKey,
+    String assetName,
+    String assetID,
+    WindowController controller,
+  ) {
     if (!mounted) return;
-    final service = ProtectionService();
+    final service = _relayServices.putIfAbsent(
+      windowKey,
+      () => ProtectionService.scoped('monitor_relay::$windowKey'),
+    );
+    service.setAssetName(assetName, assetID);
 
     _relayLogBuffers[windowKey] = [];
 
@@ -262,18 +274,37 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
       if (!mounted) return;
       final ctrl = protectionMonitorWindows[windowKey];
       if (ctrl == null) return;
-      final stats = {
-        'analysisCount': service.analysisCount,
-        'blockedCount': service.blockedCount,
-        'warningCount': service.warningCount,
-        'totalPromptTokens': service.totalPromptTokens,
-        'totalCompletionTokens': service.totalCompletionTokens,
-        'totalToolCalls': service.totalToolCalls,
-        'auditPromptTokens': service.auditPromptTokens,
-        'auditCompletionTokens': service.auditCompletionTokens,
-        'requestCount': service.requestCount,
-      };
-      ctrl.invokeMethod('relayStats', jsonEncode(stats)).catchError((_) {});
+      if (_relayStatsInFlight[windowKey] == true) return;
+      _relayStatsInFlight[windowKey] = true;
+      ProtectionDatabaseService()
+          .getProtectionStatistics(assetName, assetID)
+          .then((stats) {
+            if (!mounted) return;
+            final currentCtrl = protectionMonitorWindows[windowKey];
+            if (currentCtrl == null) return;
+            final payload = {
+              'analysisCount': stats?.analysisCount ?? 0,
+              'blockedCount': stats?.blockedCount ?? 0,
+              'warningCount': stats?.warningCount ?? 0,
+              'totalPromptTokens': stats?.totalPromptTokens ?? 0,
+              'totalCompletionTokens': stats?.totalCompletionTokens ?? 0,
+              'totalToolCalls': stats?.totalToolCalls ?? 0,
+              'auditPromptTokens': stats?.auditPromptTokens ?? 0,
+              'auditCompletionTokens': stats?.auditCompletionTokens ?? 0,
+              'requestCount': stats?.requestCount ?? 0,
+            };
+            currentCtrl
+                .invokeMethod('relayStats', jsonEncode(payload))
+                .catchError((_) {});
+          })
+          .catchError((e) {
+            appLogger.warning(
+              '[MainPage] Relay stats query failed for $windowKey: $e',
+            );
+          })
+          .whenComplete(() {
+            _relayStatsInFlight[windowKey] = false;
+          });
     });
   }
 
@@ -284,7 +315,9 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
     _relaySecurityEventSubscriptions.remove(windowKey)?.cancel();
     _relayTimers.remove(windowKey)?.cancel();
     _relayStatsTimers.remove(windowKey)?.cancel();
+    _relayStatsInFlight.remove(windowKey);
     _relayLogBuffers.remove(windowKey);
+    _relayServices.remove(windowKey)?.dispose();
   }
 
   /// 关闭所有监控窗口

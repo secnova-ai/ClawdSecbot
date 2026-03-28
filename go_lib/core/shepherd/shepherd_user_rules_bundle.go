@@ -126,17 +126,10 @@ func calculateBundledShepherdRulesVersion() (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func ensureGlobalUserRulesLoaded() error {
-	globalRulesMu.RLock()
-	if globalRulesLoaded {
-		globalRulesMu.RUnlock()
-		return nil
-	}
-	globalRulesMu.RUnlock()
-
+func loadDefaultUserRules() (*UserRules, error) {
 	rulesFile, err := ensureBundledShepherdRulesReleased("")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	rules, err := loadUserRulesFromFile(rulesFile)
@@ -144,22 +137,20 @@ func ensureGlobalUserRulesLoaded() error {
 		logging.Warning("[ShepherdGate] Failed to read user rules file, fallback to bundled defaults: %v", err)
 		rules, err = loadBundledDefaultUserRules()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if saveErr := saveUserRulesToFile(rulesFile, rules); saveErr != nil {
 			logging.Warning("[ShepherdGate] Failed to repair user rules file: %v", saveErr)
 		}
 	}
 
-	globalRulesMu.Lock()
-	if !globalRulesLoaded {
-		globalUserRules = cloneUserRules(rules)
-		globalRulesFile = rulesFile
-		globalRulesLoaded = true
-		logging.Info("ShepherdGate: User rules loaded from JSON. Sensitive: %d", len(globalUserRules.SensitiveActions))
-	}
-	globalRulesMu.Unlock()
-	return nil
+	logging.Info("ShepherdGate: Default user rules loaded. Sensitive: %d", len(rules.SensitiveActions))
+	return cloneUserRules(rules), nil
+}
+
+// GetDefaultUserRules returns bundled default user rules.
+func GetDefaultUserRules() (*UserRules, error) {
+	return loadDefaultUserRules()
 }
 
 func loadBundledDefaultUserRules() (*UserRules, error) {
@@ -252,49 +243,4 @@ func cloneUserRules(rules *UserRules) *UserRules {
 	cloned := make([]string, len(rules.SensitiveActions))
 	copy(cloned, rules.SensitiveActions)
 	return &UserRules{SensitiveActions: cloned}
-}
-
-// GetGlobalUserRules returns a copy of current global user rules.
-func GetGlobalUserRules() *UserRules {
-	if err := ensureGlobalUserRulesLoaded(); err != nil {
-		logging.Warning("[ShepherdGate] Failed to ensure user rules loaded: %v", err)
-	}
-	globalRulesMu.RLock()
-	defer globalRulesMu.RUnlock()
-	return cloneUserRules(globalUserRules)
-}
-
-// UpdateGlobalUserRules updates and persists global user rules from external source (FFI).
-func UpdateGlobalUserRules(sensitiveActions []string) error {
-	if err := ensureGlobalUserRulesLoaded(); err != nil {
-		return err
-	}
-
-	updated := &UserRules{
-		SensitiveActions: normalizeSensitiveActions(sensitiveActions),
-	}
-
-	globalRulesMu.Lock()
-	globalUserRules = updated
-	rulesFile := globalRulesFile
-	globalRulesLoaded = true
-	globalRulesMu.Unlock()
-
-	if strings.TrimSpace(rulesFile) == "" {
-		var err error
-		rulesFile, err = ensureBundledShepherdRulesReleased("")
-		if err != nil {
-			return err
-		}
-		globalRulesMu.Lock()
-		globalRulesFile = rulesFile
-		globalRulesMu.Unlock()
-	}
-
-	if err := saveUserRulesToFile(rulesFile, updated); err != nil {
-		return err
-	}
-
-	logging.Info("ShepherdGate: Global User Rules updated and saved. Sensitive: %d", len(updated.SensitiveActions))
-	return nil
 }

@@ -8,7 +8,6 @@ import 'native_library_service.dart';
 // FFI type definitions
 typedef _OneArgC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef _OneArgDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-
 typedef _NoArgC = ffi.Pointer<Utf8> Function();
 typedef _NoArgDart = ffi.Pointer<Utf8> Function();
 
@@ -254,9 +253,8 @@ class AuditLogDatabaseService {
   }
 
   /// Clear all audit logs
-  Future<void> clearAllAuditLogs() async {
-    _callFFINoArg('ClearAllAuditLogsFFI');
-  }
+  Future<void> clearAllAuditLogs() async =>
+      _callFFINoArg('ClearAllAuditLogsFFI');
 
   /// Clear audit logs for the current asset tab. Falls back to clearing all
   /// logs when no asset filter is provided.

@@ -897,6 +897,22 @@
   "restoreConfig": "Restore Initial Config",
   "restoreConfigConfirmTitle": "Restore Initial Configuration",
   "restoreConfigConfirmMessage": "Are you sure you want to restore to initial configuration? This will:\n\n1. Stop current protection\n2. Restore openclaw.json to the state before first protection\n3. Restart openclaw gateway\n\nThis action cannot be undone.",
+  "exitRestoreTitle": "Restore Bot Service Before Exit",
+  "exitRestoreMessage": "There are currently {count} Bot asset(s) still routing traffic through ClawdSecbot. If you exit without restoring their default configuration, those Bots may stop working.\n\nIf you confirm, ClawdSecbot will stop the proxy, protection will be disabled, and it will try to restore the Bot's own unprotected service.",
+  "@exitRestoreMessage": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "exitRestoreConfirm": "Restore and Exit",
+  "exitRestoreInProgress": "Restoring the Bot's default service. Please wait...",
+  "exitRestoreFailedTitle": "Restore Failed, Exit Cancelled",
+  "exitRestoreFailedMessage": "The following assets could not be restored, so the app will stay open to avoid leaving the Bot unusable after exit:\n\n{details}",
+  "@exitRestoreFailedMessage": {
+    "placeholders": {
+      "details": {"type": "String"}
+    }
+  },
   "restoreConfigSuccess": "Configuration restored to initial state",
   "restoreConfigFailed": "Failed to restore configuration: {error}",
   "@restoreConfigFailed": {

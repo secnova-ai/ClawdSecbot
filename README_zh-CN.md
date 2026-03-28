@@ -2,6 +2,10 @@
 
 **[English](README.md)**
 
+迁移文档：
+- [Version Upgrade Migration Guide (EN)](mds/version_upgrade_migration_en.md)
+- [版本升级迁移指南 (ZH-CN)](mds/version_upgrade_migration_zh-CN.md)
+
 面向 Bot 类端侧智能体的桌面安全防护软件。
 
 ClawSecbot 监控并保护运行在本地的 AI Bot 类智能体，如 Openclaw。它作为 AI Agent 与 LLM 服务之间的安全防护层 —— 拦截 API 请求、实时分析风险、执行沙箱策略，并提供完整的审计追踪。

@@ -1705,6 +1705,29 @@ class AppLocalizationsEn extends AppLocalizations {
       'Are you sure you want to restore to initial configuration? This will:\n\n1. Stop current protection\n2. Restore openclaw.json to the state before first protection\n3. Restart openclaw gateway\n\nThis action cannot be undone.';
 
   @override
+  String get exitRestoreTitle => 'Restore Bot Service Before Exit';
+
+  @override
+  String exitRestoreMessage(int count) {
+    return 'There are currently $count Bot asset(s) still routing traffic through ClawdSecbot. If you exit without restoring their default configuration, those Bots may stop working.\n\nIf you confirm, ClawdSecbot will stop the proxy, protection will be disabled, and it will try to restore the Bot\'s own unprotected service.';
+  }
+
+  @override
+  String get exitRestoreConfirm => 'Restore and Exit';
+
+  @override
+  String get exitRestoreInProgress =>
+      'Restoring the Bot\'s default service. Please wait...';
+
+  @override
+  String get exitRestoreFailedTitle => 'Restore Failed, Exit Cancelled';
+
+  @override
+  String exitRestoreFailedMessage(String details) {
+    return 'The following assets could not be restored, so the app will stay open to avoid leaving the Bot unusable after exit:\n\n$details';
+  }
+
+  @override
   String get restoreConfigSuccess => 'Configuration restored to initial state';
 
   @override

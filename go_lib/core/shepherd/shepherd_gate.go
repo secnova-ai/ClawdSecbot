@@ -53,18 +53,13 @@ type ShepherdGate struct {
 	modelConfig *repository.SecurityModelConfig
 	chatModel   model.ChatModel
 	language    string
+	assetName   string
+	assetID     string
 
 	reactAnalyzer *ToolCallReActAnalyzer
 	reactSkillCfg ReActSkillRuntimeConfig
+	userRules     *UserRules
 }
-
-// Global UserRules storage
-var (
-	globalUserRules   = &UserRules{}
-	globalRulesMu     sync.RWMutex
-	globalRulesLoaded bool
-	globalRulesFile   string
-)
 
 // NewShepherdGate creates a new ShepherdGate instance
 func NewShepherdGate(config *repository.SecurityModelConfig) (*ShepherdGate, error) {
@@ -76,9 +71,6 @@ func NewShepherdGateWithRuntime(config *repository.SecurityModelConfig, reactCfg
 	if err := modelfactory.ValidateSecurityModelConfig(config); err != nil {
 		return nil, fmt.Errorf("invalid security model config: %w", err)
 	}
-	if err := ensureGlobalUserRulesLoaded(); err != nil {
-		logging.Warning("[ShepherdGate] Failed to load user rules from JSON, fallback to empty rules: %v", err)
-	}
 
 	ctx := context.Background()
 	chatModel, err := modelfactory.CreateChatModelFromConfig(ctx, config)
@@ -86,11 +78,18 @@ func NewShepherdGateWithRuntime(config *repository.SecurityModelConfig, reactCfg
 		return nil, fmt.Errorf("failed to create chat model: %w", err)
 	}
 
+	defaultRules, err := loadDefaultUserRules()
+	if err != nil {
+		logging.Warning("[ShepherdGate] Failed to load default user rules, fallback to empty rules: %v", err)
+		defaultRules = &UserRules{SensitiveActions: []string{}}
+	}
+
 	sg := &ShepherdGate{
 		modelConfig:   config,
 		chatModel:     chatModel,
 		language:      "en",
 		reactSkillCfg: normalizeReActSkillRuntimeConfig(reactCfg),
+		userRules:     cloneUserRules(defaultRules),
 	}
 
 	lang := skillscan.GetLanguageFromAppSettings()
@@ -114,7 +113,24 @@ func NewShepherdGateForTesting(chatModel model.ChatModel, language string, model
 		chatModel:   chatModel,
 		language:    language,
 		modelConfig: modelConfig,
+		userRules:   &UserRules{SensitiveActions: []string{}},
 	}
+}
+
+// GetUserRules returns a copy of current user rules for this gate instance.
+func (sg *ShepherdGate) GetUserRules() *UserRules {
+	sg.mu.RLock()
+	defer sg.mu.RUnlock()
+	return cloneUserRules(sg.userRules)
+}
+
+// UpdateUserRules updates user rules for this gate instance.
+func (sg *ShepherdGate) UpdateUserRules(sensitiveActions []string) {
+	sg.mu.Lock()
+	sg.userRules = &UserRules{
+		SensitiveActions: normalizeSensitiveActions(sensitiveActions),
+	}
+	sg.mu.Unlock()
 }
 
 // getEffectiveLanguage returns the current effective language.
@@ -152,6 +168,21 @@ func (sg *ShepherdGate) SetLanguage(lang string) {
 	}
 }
 
+// SetAssetContext sets asset identity used for security event attribution.
+func (sg *ShepherdGate) SetAssetContext(assetName, assetID string) {
+	sg.mu.Lock()
+	sg.assetName = strings.TrimSpace(assetName)
+	sg.assetID = strings.TrimSpace(assetID)
+	reactAnalyzer := sg.reactAnalyzer
+	normalizedAssetName := sg.assetName
+	normalizedAssetID := sg.assetID
+	sg.mu.Unlock()
+
+	if reactAnalyzer != nil {
+		reactAnalyzer.SetAssetContext(normalizedAssetName, normalizedAssetID)
+	}
+}
+
 // UpdateModelConfig updates the model configuration and recreates the chat model.
 func (sg *ShepherdGate) UpdateModelConfig(config *repository.SecurityModelConfig) error {
 	ctx := context.Background()
@@ -164,12 +195,15 @@ func (sg *ShepherdGate) UpdateModelConfig(config *repository.SecurityModelConfig
 	lang := sg.language
 	oldAnalyzer := sg.reactAnalyzer
 	reactSkillCfg := sg.reactSkillCfg
+	assetName := sg.assetName
+	assetID := sg.assetID
 	sg.mu.RUnlock()
 
 	newAnalyzer, analyzerErr := NewToolCallReActAnalyzerWithConfig(ctx, chatModel, lang, config, &reactSkillCfg)
 	if analyzerErr != nil {
 		return fmt.Errorf("failed to recreate ReAct analyzer: %w", analyzerErr)
 	}
+	newAnalyzer.SetAssetContext(assetName, assetID)
 
 	sg.mu.Lock()
 	sg.modelConfig = config
@@ -254,7 +288,7 @@ func extractUsage(extra map[string]interface{}, defaultPromptTokens, defaultComp
 
 // CheckToolCall performs the security check
 func (sg *ShepherdGate) CheckToolCall(ctx context.Context, contextMessages []ConversationMessage, toolCalls []ToolCallInfo, toolResults []ToolResultInfo, lastUserMessage string) (*ShepherdDecision, error) {
-	rules := GetGlobalUserRules()
+	rules := sg.GetUserRules()
 
 	sg.mu.RLock()
 	reactAnalyzer := sg.reactAnalyzer
