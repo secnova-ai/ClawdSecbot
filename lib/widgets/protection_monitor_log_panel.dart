@@ -12,6 +12,7 @@ class ProtectionMonitorLogPanel extends StatefulWidget {
   final bool useGroupedView;
   final Map<String, RequestLogGroup> requestGroups;
   final List<String> requestOrder;
+  final String currentBotModelName;
   final ScrollController logScrollController;
   final ScrollController horizontalScrollController;
   final ValueChanged<bool> onViewModeChanged;
@@ -19,18 +20,23 @@ class ProtectionMonitorLogPanel extends StatefulWidget {
   final void Function(String text, AppLocalizations l10n) onCopyText;
   final VoidCallback onScrollToBottom;
 
+  /// bot 资产配置的默认模型名,当日志未携带模型信息时作为兜底显示
+  final String defaultModelName;
+
   const ProtectionMonitorLogPanel({
     super.key,
     required this.logs,
     required this.useGroupedView,
     required this.requestGroups,
     required this.requestOrder,
+    this.currentBotModelName = '',
     required this.logScrollController,
     required this.horizontalScrollController,
     required this.onViewModeChanged,
     required this.onClearLogs,
     required this.onCopyText,
     required this.onScrollToBottom,
+    this.defaultModelName = '',
   });
 
   @override
@@ -474,7 +480,9 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
 
   /// 构建分组请求卡片
   Widget _buildGroupedCard(RequestLogGroup group, AppLocalizations l10n) {
-    final subtitleBase = group.model.isNotEmpty ? group.model : '-';
+    final subtitleBase = widget.currentBotModelName.isNotEmpty
+        ? widget.currentBotModelName
+        : (group.model.isNotEmpty ? group.model : '-');
     final subtitle = subtitleBase;
     final ts = _formatTime(group.startTime);
     final contentText = group.responseContent.isNotEmpty
@@ -490,13 +498,23 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
         ? '${group.promptTokens} / ${group.completionTokens} / ${group.totalTokens}'
         : '';
 
-    var displayMessages = group.messages
+    // 只展示最新一轮交互: 从尾部倒推,跳过 tool 消息找到最近的 assistant/user
+    final nonSystemMessages = group.messages
         .where((m) => m.role != 'system')
         .toList();
-    final lastUserIdx = displayMessages.lastIndexWhere((m) => m.role == 'user');
-    if (lastUserIdx >= 0) {
-      displayMessages = displayMessages.sublist(lastUserIdx);
+    int latestStart = 0;
+    if (nonSystemMessages.length > 1) {
+      int i = nonSystemMessages.length - 1;
+      while (i > 0 && nonSystemMessages[i].role == 'tool') {
+        i--;
+      }
+      latestStart = i;
     }
+    final relevantMessages = nonSystemMessages.sublist(latestStart);
+    final userAndAssistantMessages =
+        relevantMessages.where((m) => m.role != 'tool').toList();
+    final toolMessageCount =
+        relevantMessages.where((m) => m.role == 'tool').length;
     // 风险边框颜色映射
     final Color borderColor;
     if (group.decisionBlocked) {
@@ -575,46 +593,69 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
             ],
           ),
           const SizedBox(height: 8),
-          if (displayMessages.isNotEmpty)
+          if (userAndAssistantMessages.isNotEmpty || toolMessageCount > 0)
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: displayMessages.take(3).map((m) {
-                final roleColor = m.role == 'user'
-                    ? const Color(0xFF22C55E)
-                    : (m.role == 'assistant'
-                          ? const Color(0xFF6366F1)
-                          : Colors.white70);
-                final content = m.content.replaceAll(
-                  RegExp(r'^\[.*?\]\s*'),
-                  '',
-                );
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 56,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          m.role,
-                          style: AppFonts.inter(fontSize: 11, color: roleColor),
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          content,
-                          style: AppFonts.inter(
-                            fontSize: 11,
-                            color: Colors.white,
+              children: [
+                // user / assistant 消息正常展示
+                ...userAndAssistantMessages.take(3).map((m) {
+                  final roleColor = m.role == 'user'
+                      ? const Color(0xFF22C55E)
+                      : (m.role == 'assistant'
+                            ? const Color(0xFF6366F1)
+                            : Colors.white70);
+                  var content = m.content.replaceAll(
+                    RegExp(r'^\[.*?\]\s*'),
+                    '',
+                  );
+                  // assistant 消息内容为空时(仅含 tool_calls),用工具名填充
+                  if (content.trim().isEmpty && m.role == 'assistant') {
+                    if (group.toolNames.isNotEmpty) {
+                      content = '→ ${group.toolNames.join(', ')}';
+                    } else if (group.toolCallCount > 0) {
+                      content = '→ ${group.toolCallCount} tool call(s)';
+                    } else {
+                      content = '...';
+                    }
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 56,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            m.role,
+                            style: AppFonts.inter(
+                              fontSize: 11,
+                              color: roleColor,
+                            ),
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                    ],
+                        Expanded(
+                          child: Text(
+                            content,
+                            style: AppFonts.inter(
+                              fontSize: 11,
+                              color: Colors.white,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+                // tool 消息折叠为汇总行 + 可选的工具结果摘要
+                if (toolMessageCount > 0)
+                  _buildToolResultSummaryRow(
+                    toolMessageCount,
+                    group.toolResultSummaries,
+                    l10n,
                   ),
-                );
-              }).toList(),
+              ],
             ),
           if (hasContent)
             Padding(
@@ -852,6 +893,74 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
                   ),
                 ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建工具结果折叠汇总行
+  Widget _buildToolResultSummaryRow(
+    int toolCount,
+    List<String> summaries,
+    AppLocalizations l10n,
+  ) {
+    final isZh = l10n.localeName.startsWith('zh');
+    final label = isZh ? '$toolCount 条工具结果' : '$toolCount tool result(s)';
+    final previewText = summaries.isNotEmpty
+        ? summaries.first
+        : (isZh ? '(工具输出)' : '(tool output)');
+    final displayPreview = previewText.length > 100
+        ? '${previewText.substring(0, 100)}...'
+        : previewText;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 56,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              children: [
+                const Icon(
+                  LucideIcons.wrench,
+                  size: 12,
+                  color: Color(0xFFEC4899),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'tool',
+                  style: AppFonts.inter(
+                    fontSize: 11,
+                    color: const Color(0xFFEC4899),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEC4899).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              label,
+              style: AppFonts.inter(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: const Color(0xFFEC4899),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              displayPreview,
+              style: AppFonts.inter(fontSize: 11, color: Colors.white54),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),

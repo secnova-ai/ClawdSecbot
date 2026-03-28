@@ -17,6 +17,11 @@ class RequestLogGroup {
   int totalTokens = 0;
   int toolCallCount = 0;
   final List<String> toolNames = [];
+
+  /// 工具执行结果的单行摘要列表,由 proxy_tool_result_content 填充,
+  /// 与 messages 列表解耦,避免原始 JSON 污染卡片展示。
+  final List<String> toolResultSummaries = [];
+
   String decisionStatus = '';
   String decisionReason = '';
   bool decisionBlocked = false;

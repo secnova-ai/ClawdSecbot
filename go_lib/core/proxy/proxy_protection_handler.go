@@ -48,6 +48,7 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			pp.sendLog("proxy_session_quota_exceeded", map[string]interface{}{
 				"current": sessionTotal,
 				"limit":   sessionLimit,
+				"model":   modelName,
 			})
 
 			// Initialize audit log for this blocked request
@@ -93,6 +94,7 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			pp.sendLog("proxy_quota_exceeded", map[string]interface{}{
 				"current": currentTotal,
 				"limit":   dailyLimit,
+				"model":   modelName,
 			})
 
 			// Initialize audit log for this blocked request
@@ -143,7 +145,9 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 	}
 	pp.auditMu.Unlock()
 
-	pp.sendLog("proxy_new_request", nil)
+	pp.sendLog("proxy_new_request", map[string]interface{}{
+		"model": modelName,
+	})
 	// 打印安全模型和Bot模型转发地址信息
 	securityModel := ""
 	if pp.shepherdGate != nil {
@@ -757,6 +761,10 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 			toolCallCount := len(pp.streamBuffer.toolCalls)
 			bufferToolCalls := make([]openai.ChatCompletionMessageToolCall, len(pp.streamBuffer.toolCalls))
 			copy(bufferToolCalls, pp.streamBuffer.toolCalls)
+			var contentWithTools string
+			for _, c := range pp.streamBuffer.contentChunks {
+				contentWithTools += c
+			}
 			pp.streamBuffer.mu.Unlock()
 
 			pp.sendTerminalLog(fmt.Sprintf("onStreamChunk: %d tool calls in stream", toolCallCount))
@@ -766,6 +774,18 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 			pp.totalToolCalls += toolCallCount
 			pp.metricsMu.Unlock()
 			pp.sendMetricsToCallback()
+
+			// Log accumulated text content even when tool_calls are present,
+			// so the grouped card can display the assistant's text response.
+			if len(contentWithTools) > 0 {
+				displayContent := contentWithTools
+				if len(displayContent) > 300 {
+					displayContent = displayContent[:300] + "...(truncated)"
+				}
+				pp.sendLog("proxy_stream_content_with_tools", map[string]interface{}{
+					"content": displayContent,
+				})
+			}
 
 			// Log tool calls for Flutter UI display
 			pp.sendLog("proxy_tool_call_count", map[string]interface{}{

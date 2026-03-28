@@ -102,6 +102,7 @@ mixin ProtectionMonitorTranslationMixin on State<ProtectionMonitorPage> {
         case 'proxy_tool_calls_in_stream':
           return l10n.proxyToolCallsInStream;
         case 'proxy_stream_content_no_tools':
+        case 'proxy_stream_content_with_tools':
           return l10n.proxyStreamContentNoTools(
             params?['content']?.toString() ?? '',
           );

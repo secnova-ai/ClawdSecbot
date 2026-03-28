@@ -294,6 +294,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
   // Proxy info
   int? _proxyPort;
   String? _providerName;
+  String _currentBotModelName = '';
 
   // Statistics
   int _messageCount = 0;
@@ -974,6 +975,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
         widget.assetName,
         widget.assetID,
       );
+      await _loadCurrentBotModelName();
       if (_protectionConfig != null) {
         _auditOnly = _protectionConfig!.auditOnly;
         _protectionService.setAssetName(
@@ -994,6 +996,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
         widget.assetName,
         widget.assetID,
       );
+      await _loadCurrentBotModelName();
       if (newConfig != null) {
         final auditOnlyChanged = newConfig.auditOnly != _auditOnly;
         _protectionConfig = newConfig;
@@ -1010,6 +1013,25 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
           '[Protection Monitor] Failed to reload protection config: $e',
         );
       }
+    }
+  }
+
+  Future<void> _loadCurrentBotModelName() async {
+    try {
+      final assetID = widget.assetID.isNotEmpty
+          ? widget.assetID
+          : (_protectionConfig?.assetID ?? '');
+      final config = await ModelConfigDatabaseService().getBotModelConfig(
+        widget.assetName,
+        assetID,
+      );
+      final modelName = config?.model.trim() ?? '';
+      if (!mounted || modelName == _currentBotModelName) return;
+      setState(() {
+        _currentBotModelName = modelName;
+      });
+    } catch (e) {
+      appLogger.error('[Protection Monitor] Failed to load bot model config', e);
     }
   }
 
@@ -1245,9 +1267,12 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
                                   useGroupedView: _useGroupedView,
                                   requestGroups: _requestGroups,
                                   requestOrder: _requestOrder,
+                                  currentBotModelName: _currentBotModelName,
                                   logScrollController: _logScrollController,
                                   horizontalScrollController:
                                       _horizontalScrollController,
+                                  defaultModelName:
+                                      _protectionConfig?.botModelConfig?.model ?? '',
                                   onViewModeChanged: (grouped) {
                                     setState(() => _useGroupedView = grouped);
                                   },

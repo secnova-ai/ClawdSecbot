@@ -133,6 +133,16 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
     return count.ceil();
   }
 
+  // ============ 工具结果摘要 ============
+
+  /// 将工具结果的原始 JSON 内容展平为单行摘要,去除换行符,
+  /// 截取前 120 字符,避免多行 JSON 在卡片中只显示 `{`。
+  String _flattenToolResultContent(String raw) {
+    final flat = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (flat.length <= 120) return flat;
+    return '${flat.substring(0, 120)}...';
+  }
+
   // ============ 结构化日志处理 ============
 
   /// 解析结构化日志并更新请求分组
@@ -157,11 +167,21 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
         requestOrder.add(reqId);
       }
       switch (key) {
+        case 'proxy_new_request':
+        case 'proxy_session_quota_exceeded':
+        case 'proxy_quota_exceeded':
+          final m = params?['model']?.toString() ?? '';
+          if (m.isNotEmpty) group.model = m;
+          break;
         case 'proxy_request_info':
           group.model = params?['model']?.toString() ?? group.model;
           group.messageCount =
               params?['messageCount'] as int? ?? group.messageCount;
           group.stream = params?['stream']?.toString() ?? group.stream;
+          break;
+        case 'proxy_response_info':
+          final rm = params?['model']?.toString() ?? '';
+          if (rm.isNotEmpty && group.model.isEmpty) group.model = rm;
           break;
         case 'proxy_message_info':
           final idx = params?['index'] as int? ?? 0;
@@ -174,6 +194,7 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
               params?['reason']?.toString() ?? group.finishReason;
           break;
         case 'proxy_stream_content_no_tools':
+        case 'proxy_stream_content_with_tools':
           final c = params?['content']?.toString() ?? '';
           if (c.isNotEmpty) {
             group.streamContent = c;
@@ -187,7 +208,12 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
         case 'proxy_tool_result_content':
           {
             final c3 = params?['content']?.toString() ?? '';
-            if (c3.isNotEmpty) group.responseContent = c3;
+            if (c3.isNotEmpty) {
+              // 工具结果是请求体中的 role=tool 内容,不是模型回复,
+              // 存入 toolResultSummaries 供卡片展示摘要,不污染 responseContent。
+              final summary = _flattenToolResultContent(c3);
+              group.toolResultSummaries.add(summary);
+            }
             break;
           }
         case 'proxy_tool_call_count':
