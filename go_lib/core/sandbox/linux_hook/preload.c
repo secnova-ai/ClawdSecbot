@@ -743,6 +743,27 @@ static int is_local_ip(const char *ip) {
     return 0;
 }
 
+// IP 通配符匹配: '*' 可匹配任意长度字符（用于 10.0.*.* 等模式）
+static int ip_pattern_matches(const char *ip, const char *pattern) {
+    if (!ip || !pattern) return 0;
+
+    while (*pattern) {
+        if (*pattern == '*') {
+            pattern++;
+            if (*pattern == '\0') return 1;
+            while (*ip) {
+                if (ip_pattern_matches(ip, pattern)) return 1;
+                ip++;
+            }
+            return ip_pattern_matches(ip, pattern);
+        }
+        if (*ip == '\0' || *ip != *pattern) return 0;
+        ip++;
+        pattern++;
+    }
+    return *ip == '\0';
+}
+
 // 判断 IP 地址是否被策略拦截 (支持黑名单/白名单模式)
 static int is_ip_blocked(const char *ip) {
     if (!g_policy_loaded || !ip) return 0;
@@ -751,13 +772,13 @@ static int is_ip_blocked(const char *ip) {
         if (g_policy.allowed_ips_count == 0 && g_policy.allowed_domains_count == 0) return 0;
         if (is_local_ip(ip)) return 0;
         for (size_t i = 0; i < g_policy.allowed_ips_count; ++i) {
-            if (strcmp(ip, g_policy.allowed_ips[i]) == 0) return 0;
+            if (ip_pattern_matches(ip, g_policy.allowed_ips[i])) return 0;
         }
         return 1;
     }
 
     for (size_t i = 0; i < g_policy.blocked_ips_count; ++i) {
-        if (strcmp(ip, g_policy.blocked_ips[i]) == 0) return 1;
+        if (ip_pattern_matches(ip, g_policy.blocked_ips[i])) return 1;
     }
     return 0;
 }

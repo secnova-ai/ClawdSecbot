@@ -246,6 +246,27 @@ static int command_matches(const char *cmd, const char *pattern) {
     return 0;
 }
 
+/* IP 通配符匹配：支持 10.0.*.* 这类模式 */
+static int ip_pattern_matches(const char *ip, const char *pattern) {
+    if (!ip || !pattern) return 0;
+
+    while (*pattern) {
+        if (*pattern == '*') {
+            pattern++;
+            if (*pattern == '\0') return 1;
+            while (*ip) {
+                if (ip_pattern_matches(ip, pattern)) return 1;
+                ip++;
+            }
+            return ip_pattern_matches(ip, pattern);
+        }
+        if (*ip == '\0' || *ip != *pattern) return 0;
+        ip++;
+        pattern++;
+    }
+    return *ip == '\0';
+}
+
 PolicyAction policy_check_file(const SandboxPolicy *p, const wchar_t *wpath) {
     if (!wpath) return ACTION_ALLOW;
     char path[MAX_PATH_LEN];
@@ -302,13 +323,13 @@ PolicyAction policy_check_network(const SandboxPolicy *p, const char *ip, int po
     if (p->network_policy == POLICY_WHITELIST) {
         if (is_ip_in_list(ip)) return ACTION_ALLOW;
         for (int i = 0; i < p->allowed_ips_count; i++) {
-            if (strcmp(p->allowed_ips[i], ip) == 0) return ACTION_ALLOW;
+            if (ip_pattern_matches(ip, p->allowed_ips[i])) return ACTION_ALLOW;
         }
         return p->log_only ? ACTION_LOG : ACTION_DENY;
     }
 
     for (int i = 0; i < p->blocked_ips_count; i++) {
-        if (strcmp(p->blocked_ips[i], ip) == 0) {
+        if (ip_pattern_matches(ip, p->blocked_ips[i])) {
             return p->log_only ? ACTION_LOG : ACTION_DENY;
         }
     }
