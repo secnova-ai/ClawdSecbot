@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"go_lib/core/logging"
@@ -280,4 +281,40 @@ func (r *SkillSecurityScanRepository) TrustSkill(skillName string) error {
 	}
 	logging.Info("Skill trusted: name=%s", skillName)
 	return nil
+}
+
+// DeleteSkillScansNotIn removes scan records whose skill_name is not in the provided list.
+// Returns the number of deleted rows. If existingSkillNames is empty, no deletion is performed
+// (safety guard against accidental mass-delete when skill directory is unreadable).
+func (r *SkillSecurityScanRepository) DeleteSkillScansNotIn(existingSkillNames []string) (int64, error) {
+	if r.db == nil {
+		return 0, fmt.Errorf("database not initialized")
+	}
+	if len(existingSkillNames) == 0 {
+		return 0, nil
+	}
+
+	placeholders := strings.Repeat("?,", len(existingSkillNames))
+	placeholders = placeholders[:len(placeholders)-1]
+
+	args := make([]interface{}, len(existingSkillNames))
+	for i, name := range existingSkillNames {
+		args[i] = name
+	}
+
+	query := fmt.Sprintf("DELETE FROM skill_scans WHERE skill_name NOT IN (%s)", placeholders)
+	result, err := r.db.Exec(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete orphaned skill scans: %w", err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if count > 0 {
+		logging.Info("Deleted %d orphaned skill scan records", count)
+	}
+	return count, nil
 }

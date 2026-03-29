@@ -45,7 +45,9 @@ import (
 	"go_lib/chatmodel-routing/adapter"
 	"go_lib/core"
 	"go_lib/core/callback_bridge"
+	"go_lib/core/logging"
 	"go_lib/core/proxy"
+	"go_lib/core/repository"
 	"go_lib/core/sandbox"
 	"go_lib/core/service"
 	"go_lib/core/shepherd"
@@ -239,6 +241,23 @@ func DeleteSkillScanFFI(skillNameC *C.char) *C.char {
 
 //export GetRiskySkills
 func GetRiskySkills() *C.char {
+	// Clean up orphaned skill scan records before returning risky skills.
+	// This ensures deleted skills no longer on disk don't appear in results.
+	pm := core.GetPluginManager()
+	var allSkillNames []string
+	for _, plugin := range pm.GetAllPlugins() {
+		if names, err := plugin.ListSkillNames(); err == nil {
+			allSkillNames = append(allSkillNames, names...)
+		}
+	}
+	if len(allSkillNames) > 0 {
+		scanRepo := repository.NewSkillSecurityScanRepository(nil)
+		if deleted, err := scanRepo.DeleteSkillScansNotIn(allSkillNames); err != nil {
+			logging.Warning("[GetRiskySkills] Failed to clean orphaned scan records: %v", err)
+		} else if deleted > 0 {
+			logging.Info("[GetRiskySkills] Cleaned up %d orphaned scan records", deleted)
+		}
+	}
 	return jsonToCString(service.GetRiskySkills())
 }
 
@@ -249,6 +268,22 @@ func TrustSkillScan(skillNameC *C.char) *C.char {
 
 //export GetAllSkillScansFFI
 func GetAllSkillScansFFI() *C.char {
+	// Clean up orphaned skill scan records before returning all scans.
+	pm := core.GetPluginManager()
+	var allSkillNames []string
+	for _, plugin := range pm.GetAllPlugins() {
+		if names, err := plugin.ListSkillNames(); err == nil {
+			allSkillNames = append(allSkillNames, names...)
+		}
+	}
+	if len(allSkillNames) > 0 {
+		scanRepo := repository.NewSkillSecurityScanRepository(nil)
+		if deleted, err := scanRepo.DeleteSkillScansNotIn(allSkillNames); err != nil {
+			logging.Warning("[GetAllSkillScansFFI] Failed to clean orphaned scan records: %v", err)
+		} else if deleted > 0 {
+			logging.Info("[GetAllSkillScansFFI] Cleaned up %d orphaned scan records", deleted)
+		}
+	}
 	return jsonToCString(service.GetAllSkillScans())
 }
 

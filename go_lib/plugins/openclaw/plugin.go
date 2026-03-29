@@ -150,6 +150,19 @@ func (p *OpenclawPlugin) AssessRisks(scannedHashes map[string]bool) ([]core.Risk
 	return risks, nil
 }
 
+// ListSkillNames returns all skill names currently on disk.
+func (p *OpenclawPlugin) ListSkillNames() ([]string, error) {
+	skills, err := listSkills()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(skills))
+	for i, s := range skills {
+		names[i] = s.Name
+	}
+	return names, nil
+}
+
 // MitigateRisk handles risk mitigation requests for Openclaw-specific risks.
 func (p *OpenclawPlugin) MitigateRisk(riskInfo string) string {
 	return MitigateRiskDispatch(riskInfo)

@@ -570,8 +570,19 @@ func StartBatchSkillScanInternal() string {
 	}
 	logging.Info("[BatchScan] Discovered %d skills total", len(skills))
 
-	// 2. 读取已扫描哈希
+	// 1.5 Clean up orphaned scan records for skills no longer on disk
 	scanRepo := repository.NewSkillSecurityScanRepository(nil)
+	diskSkillNames := make([]string, len(skills))
+	for i, s := range skills {
+		diskSkillNames[i] = s.Name
+	}
+	if deleted, err := scanRepo.DeleteSkillScansNotIn(diskSkillNames); err != nil {
+		logging.Warning("[BatchScan] Failed to clean orphaned scan records: %v", err)
+	} else if deleted > 0 {
+		logging.Info("[BatchScan] Cleaned up %d orphaned scan records", deleted)
+	}
+
+	// 2. 读取已扫描哈希
 	hashes, err := scanRepo.GetScannedSkillHashes()
 	if err != nil {
 		logging.Warning("[BatchScan] Failed to get scanned hashes: %v, treating all as unscanned", err)

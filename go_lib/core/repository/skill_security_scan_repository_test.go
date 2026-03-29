@@ -334,3 +334,141 @@ func TestSkillSecurityScanRepository_GetAllSkillScansEmpty(t *testing.T) {
 		t.Errorf("Expected 0 records for empty DB, got %d", len(records))
 	}
 }
+
+// TestSkillSecurityScanRepository_DeleteSkillScansNotIn_RemovesOrphans verifies orphaned records are deleted
+func TestSkillSecurityScanRepository_DeleteSkillScansNotIn_RemovesOrphans(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	repo := NewSkillSecurityScanRepository(db)
+
+	skills := []SkillScanRecord{
+		{SkillName: "skill-a", SkillHash: "hash-a", Safe: true},
+		{SkillName: "skill-b", SkillHash: "hash-b", Safe: false, Issues: []string{"issue"}},
+		{SkillName: "skill-c", SkillHash: "hash-c", Safe: true},
+	}
+	for _, s := range skills {
+		if err := repo.SaveSkillScanResult(&s); err != nil {
+			t.Fatalf("SaveSkillScanResult failed: %v", err)
+		}
+	}
+
+	// Only skill-a and skill-c exist on disk; skill-b was deleted
+	deleted, err := repo.DeleteSkillScansNotIn([]string{"skill-a", "skill-c"})
+	if err != nil {
+		t.Fatalf("DeleteSkillScansNotIn failed: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("Expected 1 deleted, got %d", deleted)
+	}
+
+	// Verify skill-b is gone
+	record, err := repo.GetSkillScanByHash("hash-b")
+	if err != nil {
+		t.Fatalf("GetSkillScanByHash failed: %v", err)
+	}
+	if record != nil {
+		t.Error("Expected skill-b record to be deleted")
+	}
+
+	// Verify skill-a and skill-c remain
+	remaining, err := repo.GetAllSkillScans()
+	if err != nil {
+		t.Fatalf("GetAllSkillScans failed: %v", err)
+	}
+	if len(remaining) != 2 {
+		t.Errorf("Expected 2 remaining records, got %d", len(remaining))
+	}
+}
+
+// TestSkillSecurityScanRepository_DeleteSkillScansNotIn_EmptySlice verifies no deletion on empty input
+func TestSkillSecurityScanRepository_DeleteSkillScansNotIn_EmptySlice(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	repo := NewSkillSecurityScanRepository(db)
+
+	if err := repo.SaveSkillScanResult(&SkillScanRecord{
+		SkillName: "skill-x", SkillHash: "hash-x", Safe: true,
+	}); err != nil {
+		t.Fatalf("SaveSkillScanResult failed: %v", err)
+	}
+
+	// Empty slice should not delete anything (safety guard)
+	deleted, err := repo.DeleteSkillScansNotIn([]string{})
+	if err != nil {
+		t.Fatalf("DeleteSkillScansNotIn failed: %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("Expected 0 deleted for empty slice, got %d", deleted)
+	}
+
+	records, err := repo.GetAllSkillScans()
+	if err != nil {
+		t.Fatalf("GetAllSkillScans failed: %v", err)
+	}
+	if len(records) != 1 {
+		t.Errorf("Expected 1 record to remain, got %d", len(records))
+	}
+}
+
+// TestSkillSecurityScanRepository_DeleteSkillScansNotIn_AllExist verifies no deletion when all skills exist
+func TestSkillSecurityScanRepository_DeleteSkillScansNotIn_AllExist(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	repo := NewSkillSecurityScanRepository(db)
+
+	skills := []SkillScanRecord{
+		{SkillName: "s1", SkillHash: "h1", Safe: true},
+		{SkillName: "s2", SkillHash: "h2", Safe: true},
+	}
+	for _, s := range skills {
+		if err := repo.SaveSkillScanResult(&s); err != nil {
+			t.Fatalf("SaveSkillScanResult failed: %v", err)
+		}
+	}
+
+	deleted, err := repo.DeleteSkillScansNotIn([]string{"s1", "s2"})
+	if err != nil {
+		t.Fatalf("DeleteSkillScansNotIn failed: %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("Expected 0 deleted when all exist, got %d", deleted)
+	}
+}
+
+// TestSkillSecurityScanRepository_DeleteSkillScansNotIn_NoneExist verifies all orphans are deleted
+func TestSkillSecurityScanRepository_DeleteSkillScansNotIn_NoneExist(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	repo := NewSkillSecurityScanRepository(db)
+
+	skills := []SkillScanRecord{
+		{SkillName: "old-1", SkillHash: "h1", Safe: true},
+		{SkillName: "old-2", SkillHash: "h2", Safe: false, Issues: []string{"issue"}},
+	}
+	for _, s := range skills {
+		if err := repo.SaveSkillScanResult(&s); err != nil {
+			t.Fatalf("SaveSkillScanResult failed: %v", err)
+		}
+	}
+
+	// All disk skills are different from DB records
+	deleted, err := repo.DeleteSkillScansNotIn([]string{"new-1", "new-2"})
+	if err != nil {
+		t.Fatalf("DeleteSkillScansNotIn failed: %v", err)
+	}
+	if deleted != 2 {
+		t.Errorf("Expected 2 deleted, got %d", deleted)
+	}
+
+	records, err := repo.GetAllSkillScans()
+	if err != nil {
+		t.Fatalf("GetAllSkillScans failed: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("Expected 0 records after cleanup, got %d", len(records))
+	}
+}

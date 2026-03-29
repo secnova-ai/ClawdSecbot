@@ -152,6 +152,19 @@ func (p *NullclawPlugin) AssessRisks(scannedHashes map[string]bool) ([]core.Risk
 	return risks, nil
 }
 
+// ListSkillNames returns all skill names currently on disk.
+func (p *NullclawPlugin) ListSkillNames() ([]string, error) {
+	skills, err := listSkills()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(skills))
+	for i, s := range skills {
+		names[i] = s.Name
+	}
+	return names, nil
+}
+
 // MitigateRisk handles risk mitigation requests for Nullclaw-specific risks.
 func (p *NullclawPlugin) MitigateRisk(riskInfo string) string {
 	return MitigateRiskDispatch(riskInfo)

@@ -1,12 +1,14 @@
-# ClawSecbot 全局开发规范（精简版）
+# ClawSecbot 全局开发规范
 
 > 适用范围：本文件仅保留长期稳定、跨模块共享的约束。实现细节请写入各模块文档。
 
 ## 1. 架构底线
 
-- 架构分层：Flutter Desktop（UI/状态）+ Go（业务）+ FFI（通信）。
+- 架构分层：Flutter Desktop（UI/状态）+ Go（业务）+ FFI（通信），禁止在UI层编写复杂业务逻辑，必须下沉到go对应的插件中去
 - Go 以 `c-shared` 构建单一动态库：`botsec.dylib` / `botsec.so` / `botsec.dll`。
 - 支持平台：macOS（arm64/x86_64）、Linux（arm64/x86_64）、Windows（x86_64）。
+- 插件开发规范参考：mds/openclaw_like_bot_plugin_guide.md
+- 版本升级兼容规范参考：mds/version_upgrade_migration_en.md
 
 ## 2. 目录职责
 
@@ -25,6 +27,7 @@
 - Flutter 生产日志统一使用 `appLogger`；Go 使用 `core/logging`。
 - 非明确需求不做隐式向前兼容与数据迁移。
 - 单文件代码不超过1500行
+- 涉及到数据库表结构变更，需要安装版本升级兼容措施进行数据迁移
 
 ## 4. 分层与调用链
 

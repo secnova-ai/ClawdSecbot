@@ -59,6 +59,10 @@ func (p *testPlugin) GetProtectionStatus(assetID string) ProtectionStatus {
 	return ProtectionStatus{}
 }
 
+func (p *testPlugin) ListSkillNames() ([]string, error) {
+	return nil, nil
+}
+
 type mitigationAwarePlugin struct {
 	testPlugin
 	handledRiskID string

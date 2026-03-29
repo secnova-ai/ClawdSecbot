@@ -40,6 +40,10 @@ type BotPlugin interface {
 	// AssessRisks evaluates risks for discovered assets.
 	AssessRisks(scannedHashes map[string]bool) ([]Risk, error)
 
+	// ListSkillNames returns the names of all skills currently on disk for this plugin.
+	// Used by the host to reconcile skill scan records against disk reality.
+	ListSkillNames() ([]string, error)
+
 	// MitigateRisk handles mitigation requests.
 	// riskInfo is a JSON string containing risk ID, args, form_data, etc.
 	// Returns a JSON string with {"success": bool, "message": ..., "error": ...}
