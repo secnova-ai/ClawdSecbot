@@ -61,19 +61,20 @@ func GetAuditLogs(filterJSON string) map[string]interface{} {
 	return successDataResult(logs)
 }
 
-// GetAuditLogCount 获取审计日志数量
+// GetAuditLogCount 获取审计日志数量（可选 search_query，与 GetAuditLogs 全文条件一致）.
 func GetAuditLogCount(jsonStr string) map[string]interface{} {
 	var input struct {
-		RiskOnly  bool   `json:"risk_only"`
-		AssetName string `json:"asset_name,omitempty"`
-		AssetID   string `json:"asset_id,omitempty"`
+		RiskOnly    bool   `json:"risk_only"`
+		AssetName   string `json:"asset_name,omitempty"`
+		AssetID     string `json:"asset_id,omitempty"`
+		SearchQuery string `json:"search_query,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &input); err != nil {
 		return errorMessageResult("invalid JSON: " + err.Error())
 	}
 
 	repo := repository.NewAuditLogRepository(nil)
-	count, err := repo.GetAuditLogCount(input.RiskOnly, input.AssetName, input.AssetID)
+	count, err := repo.GetAuditLogCount(input.RiskOnly, input.AssetName, input.AssetID, input.SearchQuery)
 	if err != nil {
 		logging.Error("Failed to get audit log count: %v", err)
 		return errorResult(err)

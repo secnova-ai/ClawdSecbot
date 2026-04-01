@@ -1264,7 +1264,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get auditLogAllowed => 'Allowed Count';
 
   @override
-  String get auditLogSearchHint => 'Search logs...';
+  String get auditLogSearchHint =>
+      'Search request, reply, risk, messages & tools JSON...';
+
+  @override
+  String get auditLogSearchTooltip =>
+      'Substring match in request body, model output, risk reason, and raw messages / tool_calls JSON (not request ID or other structured fields).';
 
   @override
   String get auditLogRiskOnly => 'Risk Only';
@@ -1352,6 +1357,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String auditLogPageInfo(int current, int total) {
     return 'Page $current of $total';
   }
+
+  @override
+  String auditLogEntryTotal(int count) {
+    return '$count entries';
+  }
+
+  @override
+  String auditLogEntryRange(int start, int end) {
+    return 'Items $start-$end';
+  }
+
+  @override
+  String auditLogItemSerial(int n) {
+    return '#$n';
+  }
+
+  @override
+  String get auditLogSearchSubmitHint => 'Press Enter to search';
 
   @override
   String get auditLogActionAllow => 'Allowed';

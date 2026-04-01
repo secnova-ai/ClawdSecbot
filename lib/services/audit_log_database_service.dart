@@ -183,11 +183,12 @@ class AuditLogDatabaseService {
     }).toList();
   }
 
-  /// Get audit log count with optional filtering
+  /// 获取审计日志条数（可选资产、风险、与列表一致的全文搜索条件）.
   Future<int> getAuditLogCount({
     bool riskOnly = false,
     String? assetName,
     String? assetID,
+    String? searchQuery,
   }) async {
     final result = _callFFI(
       'GetAuditLogCountFFI',
@@ -195,6 +196,8 @@ class AuditLogDatabaseService {
         'risk_only': riskOnly,
         if (assetName != null && assetName.isNotEmpty) 'asset_name': assetName,
         if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
+        if (searchQuery != null && searchQuery.isNotEmpty)
+          'search_query': searchQuery,
       }),
     );
 
