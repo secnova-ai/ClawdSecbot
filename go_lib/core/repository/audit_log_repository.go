@@ -198,12 +198,13 @@ func (r *AuditLogRepository) GetAuditLogs(filter *AuditLogFilter) ([]*AuditLog, 
 
 	params = append(params, filter.Limit, filter.Offset)
 
+	// 时间降序(最新在上), id 作次要键保证同刻多条时顺序稳定.
 	query := fmt.Sprintf(`
 		SELECT id, timestamp, request_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
 			has_risk, risk_level, risk_reason, confidence, action,
 			prompt_tokens, completion_tokens, total_tokens, duration_ms,
 			messages, message_count
-		FROM audit_logs %s ORDER BY timestamp DESC LIMIT ? OFFSET ?
+		FROM audit_logs %s ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?
 	`, whereClause)
 
 	rows, err := r.db.Query(query, params...)

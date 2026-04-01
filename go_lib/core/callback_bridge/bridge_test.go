@@ -198,3 +198,43 @@ func TestSendTruthRecordDelivery(t *testing.T) {
 		t.Fatalf("unexpected request id: %v", received[0].Payload["request_id"])
 	}
 }
+
+// TestTruthRecordCoalescesInFlightUpdates 同一 request_id 在 completed 前多次更新应合并为少量回调.
+func TestTruthRecordCoalescesInFlightUpdates(t *testing.T) {
+	var mu sync.Mutex
+	var truthCount int64
+
+	bridge := newTestBridge(func(msg string) {
+		var m Message
+		if err := json.Unmarshal([]byte(msg), &m); err != nil {
+			return
+		}
+		if m.Type == MessageTypeTruthRecord {
+			mu.Lock()
+			truthCount++
+			mu.Unlock()
+		}
+	})
+	defer bridge.Close()
+
+	const n = 30
+	for i := 0; i < n; i++ {
+		bridge.SendTruthRecord(map[string]interface{}{
+			"request_id": "req_coalesce_1",
+			"phase":      "starting",
+			"seq":        i,
+		})
+	}
+	bridge.SendTruthRecord(map[string]interface{}{
+		"request_id": "req_coalesce_1",
+		"phase":      "completed",
+	})
+
+	time.Sleep(250 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if truthCount >= n {
+		t.Fatalf("expected coalescing to reduce truth_record callbacks below %d, got %d", n, truthCount)
+	}
+}

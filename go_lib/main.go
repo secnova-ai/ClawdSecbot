@@ -765,12 +765,13 @@ func RegisterMessageCallback(callback C.DartCallback) *C.char {
 	C.setDartCallback(callback)
 	callbackActive = true
 
+	// Dart 侧使用 NativeCallable.listener 时, 回调在 isolate 上异步执行; 若在此处 defer C.free,
+	// 会在 Dart 读取指针之前释放内存, Windows 上极易崩溃。内存改由 Dart 复制完 JSON 后调用 FreeString 释放。
 	bridge, err := callback_bridge.NewBridge(func(message string) {
 		if !callbackActive {
 			return
 		}
 		cStr := C.CString(message)
-		defer C.free(unsafe.Pointer(cStr))
 		C.invokeDartCallback(cStr)
 	})
 	if err != nil {

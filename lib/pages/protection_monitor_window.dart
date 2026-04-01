@@ -361,6 +361,10 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
   Timer? _truthRecordCatchUpTimer;
   Timer? _securityEventCatchUpTimer;
 
+  /// 合并同一帧内多条 TruthRecord(同一 request_id 保留最新), 再一次性 setState.
+  final Map<String, TruthRecordModel> _pendingTruthByRequestId = {};
+  bool _truthRecordFrameFlushScheduled = false;
+
   // 防护配置
   ProtectionConfig? _protectionConfig;
   bool _auditOnly = false;
@@ -572,23 +576,39 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
     try {
       final snapshots = _protectionService.fetchAllTruthRecordSnapshots();
       if (snapshots.isEmpty) return;
-      int updated = 0;
+      final toApply = <TruthRecordModel>[];
       for (final record in snapshots) {
         final existing = requestGroups[record.requestId];
         if (existing == null ||
             record.updatedAt.compareTo(existing.updatedAt) > 0) {
-          processProtectionRecord(record);
-          updated++;
+          toApply.add(record);
         }
       }
-      if (updated > 0) {
-        appLogger.info(
-          '[TruthRecord] catch_up fetched=${snapshots.length} updated=$updated',
+      if (toApply.isNotEmpty) {
+        processProtectionRecordBatch(toApply);
+        appLogger.debug(
+          '[TruthRecord] catch_up fetched=${snapshots.length} updated=${toApply.length}',
         );
       }
     } catch (e) {
       appLogger.error('[TruthRecord] catch_up error', e);
     }
+  }
+
+  /// 将流式 TruthRecord 先入队, 在下一帧合并后批量刷新 UI, 避免同步文件日志与连续 setState 卡住主线程.
+  void _enqueueTruthRecordForUi(TruthRecordModel record) {
+    if (!mounted) return;
+    _pendingTruthByRequestId[record.requestId] = record;
+    if (_truthRecordFrameFlushScheduled) return;
+    _truthRecordFrameFlushScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _truthRecordFrameFlushScheduled = false;
+      if (!mounted) return;
+      if (_pendingTruthByRequestId.isEmpty) return;
+      final batch = _pendingTruthByRequestId.values.toList();
+      _pendingTruthByRequestId.clear();
+      processProtectionRecordBatch(batch);
+    });
   }
 
   /// 启动安全事件 catch-up 定时器，每 5 秒从数据库增量拉取新事件。
@@ -889,7 +909,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
             record,
           ) {
             if (!mounted) return;
-            processProtectionRecord(record);
+            _enqueueTruthRecordForUi(record);
           });
         }
 
@@ -961,7 +981,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
           record,
         ) {
           if (!mounted) return;
-          processProtectionRecord(record);
+          _enqueueTruthRecordForUi(record);
         });
         _startTruthRecordCatchUp();
       }
@@ -1231,6 +1251,8 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
     _truthRecordSubscription?.cancel();
     _truthRecordCatchUpTimer?.cancel();
     _securityEventCatchUpTimer?.cancel();
+    _pendingTruthByRequestId.clear();
+    _truthRecordFrameFlushScheduled = false;
     logUpdateTimer?.cancel();
     resultUpdateTimer?.cancel();
     _logScrollController.dispose();

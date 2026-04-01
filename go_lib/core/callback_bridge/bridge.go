@@ -69,23 +69,39 @@ func NewBridge(callback CallbackFunc) (*Bridge, error) {
 	return bridge, nil
 }
 
+// publishFlushTickerInterval 周期刷新 log/metrics 尾部积压与 TruthRecord 合并快照(Dart FFI).
+const publishFlushTickerInterval = 200 * time.Millisecond
+
 func (b *Bridge) publishWorker() {
 	defer b.wg.Done()
 
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(publishFlushTickerInterval)
 	defer ticker.Stop()
 
 	var logBatch []string
 	var metricsBatch []map[string]interface{}
+	// 同一周期内同一 request_id 只保留最新快照, 避免流式更新对 Dart 连发数十次 FFI(Windows UI 易未响应).
+	truthPending := make(map[string]map[string]interface{})
 
 	for {
 		select {
 		case <-b.ctx.Done():
-			b.flushLogs(logBatch)
-			b.flushMetrics(metricsBatch)
-			b.drainSecurityEvents()
-			b.drainTruthRecords()
-			return
+			for {
+				select {
+				case record := <-b.truthRecordChan:
+					if rid := truthRecordRequestID(record); rid != "" {
+						truthPending[rid] = record
+					} else {
+						b.flushTruthRecords([]map[string]interface{}{record})
+					}
+				default:
+					b.flushLogs(logBatch)
+					b.flushMetrics(metricsBatch)
+					b.drainSecurityEvents()
+					b.flushTruthRecordsCoalesced(truthPending)
+					return
+				}
+			}
 
 		case log := <-b.logChan:
 			logBatch = append(logBatch, log)
@@ -105,7 +121,17 @@ func (b *Bridge) publishWorker() {
 			b.flushSecurityEvents([]map[string]interface{}{event})
 
 		case record := <-b.truthRecordChan:
-			b.flushTruthRecords([]map[string]interface{}{record})
+			rid := truthRecordRequestID(record)
+			if rid != "" {
+				truthPending[rid] = record
+				// 终态立即推送, 避免再等 ticker; 并从 pending 移除以免重复发送.
+				if ph, _ := record["phase"].(string); ph == "completed" || ph == "stopped" {
+					b.flushTruthRecords([]map[string]interface{}{record})
+					delete(truthPending, rid)
+				}
+			} else {
+				b.flushTruthRecords([]map[string]interface{}{record})
+			}
 
 		case <-ticker.C:
 			if len(logBatch) > 0 {
@@ -115,6 +141,10 @@ func (b *Bridge) publishWorker() {
 			if len(metricsBatch) > 0 {
 				b.flushMetrics(metricsBatch)
 				metricsBatch = metricsBatch[:0]
+			}
+			if len(truthPending) > 0 {
+				b.flushTruthRecordsCoalesced(truthPending)
+				truthPending = make(map[string]map[string]interface{})
 			}
 		}
 	}
@@ -190,22 +220,29 @@ func (b *Bridge) flushTruthRecords(records []map[string]interface{}) {
 	}
 }
 
+// truthRecordRequestID 从快照 map 中取 request_id, 用于合并同一请求的突发更新.
+func truthRecordRequestID(record map[string]interface{}) string {
+	if v, ok := record["request_id"].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// flushTruthRecordsCoalesced 将 pending 中每个 request_id 的最新一条推入 Dart(通常每 ticker 周期一次).
+func (b *Bridge) flushTruthRecordsCoalesced(pending map[string]map[string]interface{}) {
+	if len(pending) == 0 {
+		return
+	}
+	for _, record := range pending {
+		b.flushTruthRecords([]map[string]interface{}{record})
+	}
+}
+
 func (b *Bridge) drainSecurityEvents() {
 	for {
 		select {
 		case event := <-b.securityEventChan:
 			b.flushSecurityEvents([]map[string]interface{}{event})
-		default:
-			return
-		}
-	}
-}
-
-func (b *Bridge) drainTruthRecords() {
-	for {
-		select {
-		case record := <-b.truthRecordChan:
-			b.flushTruthRecords([]map[string]interface{}{record})
 		default:
 			return
 		}

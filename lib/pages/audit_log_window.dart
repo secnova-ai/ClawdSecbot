@@ -273,6 +273,17 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
     } catch (_) {}
   }
 
+  /// 左侧日志列表按时间降序排列, 最近的在最上方(与分页 offset 语义一致).
+  void _sortAuditLogsNewestFirst(List<AuditLog> logs) {
+    logs.sort((a, b) {
+      final byTime = b.timestamp.compareTo(a.timestamp);
+      if (byTime != 0) {
+        return byTime;
+      }
+      return b.requestId.compareTo(a.requestId);
+    });
+  }
+
   Future<void> _loadLogs() async {
     setState(() => _isLoading = true);
 
@@ -286,6 +297,8 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
           ? _searchController.text
           : null,
     );
+
+    _sortAuditLogsNewestFirst(logs);
 
     final count = await _agentService.getAuditLogCount(
       riskOnly: _riskOnly,

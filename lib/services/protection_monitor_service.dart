@@ -281,26 +281,7 @@ class ProtectionMonitorService {
             .truthRecordStream
             .handleError(_handleBridgeError)
             .listen((payload) {
-              scheduleMicrotask(() {
-                try {
-                  final record = TruthRecordModel.fromJson(payload);
-                  appLogger.info(
-                    '[TruthRecord] bridge_received request_id=${record.requestId} asset_id=${record.assetID} expected_asset_id=$_assetID phase=${record.phase} type=${record.primaryContentType} complete=${record.isComplete}',
-                  );
-                  if (record.assetID == _assetID &&
-                      !_truthRecordController.isClosed) {
-                    _truthRecordController.add(record);
-                    if (record.isComplete) {
-                      _persistCompletedRecord(record);
-                    }
-                  }
-                } catch (e) {
-                  appLogger.error(
-                    '[ProtectionMonitor] Parse truth record error',
-                    e,
-                  );
-                }
-              });
+              unawaited(_processTruthRecordFromBridge(payload));
             });
         _proxyLogPollTimer?.cancel();
         _proxyLogPollTimer = null;
@@ -318,6 +299,27 @@ class ProtectionMonitorService {
       _messageBridgeService?.dispose();
       _messageBridgeService = null;
       return false;
+    }
+  }
+
+  /// TruthRecord payload 较大时 fromJson 耗 CPU; 先让出 UI 事件循环再解析, 减轻 Windows 未响应.
+  Future<void> _processTruthRecordFromBridge(
+    Map<String, dynamic> payload,
+  ) async {
+    await Future<void>.delayed(Duration.zero);
+    try {
+      final record = TruthRecordModel.fromJson(payload);
+      appLogger.debug(
+        '[TruthRecord] bridge_received request_id=${record.requestId} asset_id=${record.assetID} expected_asset_id=$_assetID phase=${record.phase} type=${record.primaryContentType} complete=${record.isComplete}',
+      );
+      if (record.assetID == _assetID && !_truthRecordController.isClosed) {
+        _truthRecordController.add(record);
+        if (record.isComplete) {
+          _persistCompletedRecord(record);
+        }
+      }
+    } catch (e) {
+      appLogger.error('[ProtectionMonitor] Parse truth record error', e);
     }
   }
 
@@ -764,20 +766,29 @@ class ProtectionMonitorService {
       }
       final requestViews = result['request_views'] as List?;
       if (requestViews != null) {
+        // 同一轮询内同一 request_id 只保留最后一条快照, 避免向 UI 连发数十次 add + 同步写日志.
+        final latestByRequestId = <String, TruthRecordModel>{};
         for (final item in requestViews) {
-          if (item is Map) {
-            final record = TruthRecordModel.fromJson(
-              Map<String, dynamic>.from(item),
-            );
-            appLogger.info(
-              '[TruthRecord] polling_received request_id=${record.requestId} asset_id=${record.assetID} expected_asset_id=$_assetID phase=${record.phase} type=${record.primaryContentType} complete=${record.isComplete}',
-            );
-            if (record.assetID == _assetID &&
-                !_truthRecordController.isClosed) {
+          if (item is! Map) {
+            continue;
+          }
+          final record = TruthRecordModel.fromJson(
+            Map<String, dynamic>.from(item),
+          );
+          if (record.assetID == _assetID) {
+            latestByRequestId[record.requestId] = record;
+          }
+        }
+        if (latestByRequestId.isNotEmpty) {
+          appLogger.debug(
+            '[TruthRecord] polling batch count=${latestByRequestId.length} asset=$_assetID',
+          );
+          for (final record in latestByRequestId.values) {
+            if (!_truthRecordController.isClosed) {
               _truthRecordController.add(record);
-              if (record.isComplete) {
-                _persistCompletedRecord(record);
-              }
+            }
+            if (record.isComplete) {
+              _persistCompletedRecord(record);
             }
           }
         }
