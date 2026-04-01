@@ -273,7 +273,7 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 		// 审计用完整内容，单条上限 256KB
 		recordContent := truncateToBytes(content, maxRecordMessageBytes)
 		if len(recordContent) < len(content) {
-			logging.Info("[TruthRecord] message content truncated to %d bytes (original %d) at index %d role=%s", len(recordContent), len(content), i, role)
+			logging.Debug("[TruthRecord] message content truncated to %d bytes (original %d) at index %d role=%s", len(recordContent), len(content), i, role)
 		}
 		pp.sendLog("proxy_message_info", map[string]interface{}{
 			"index":   i,

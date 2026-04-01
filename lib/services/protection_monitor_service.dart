@@ -1063,10 +1063,12 @@ class ProtectionMonitorService {
     );
   }
 
+  /// 获取审计日志条数（searchQuery 与 [getAuditLogs] 全文条件一致）.
   Future<int> getAuditLogCount({
     bool riskOnly = false,
     String? assetName,
     String? assetID,
+    String? searchQuery,
   }) async {
     final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
         ? assetID.trim()
@@ -1079,6 +1081,7 @@ class ProtectionMonitorService {
       riskOnly: riskOnly,
       assetName: effectiveAssetName,
       assetID: effectiveAssetID,
+      searchQuery: searchQuery,
     );
   }
 

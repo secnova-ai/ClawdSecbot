@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
@@ -128,14 +129,21 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
+  /// 已生效的全文搜索关键词(仅回车后更新, 与输入框内容可暂时不一致).
+  String _appliedSearchQuery = '';
+
+  /// 用户按回车提交搜索后, 列表查询进行中的标记(用于搜索框旁旋转指示).
+  bool _searchSubmitLoading = false;
+
   List<AuditLog> _logs = [];
   int _totalCount = 0;
   bool _isLoading = false;
   bool _riskOnly = false;
   int _currentPage = 0;
-  final int _pageSize = 50;
+  final int _pageSize = 10;
   Timer? _refreshTimer;
   AuditLog? _selectedLog;
+  final Map<String, AuditLog> _selectedLogsForExport = <String, AuditLog>{};
   List<SecurityEvent> _relatedEvents = [];
   Map<String, dynamic> _statistics = {};
   bool _isMaximized = false;
@@ -216,6 +224,30 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
     await _loadStatistics();
   }
 
+  Future<void> _refreshFromToolbar() async {
+    _selectLog(null);
+    _clearSelectedLogs();
+    await _syncAndRefresh();
+  }
+
+  bool _isLogChecked(AuditLog log) =>
+      _selectedLogsForExport.containsKey(log.id);
+
+  void _toggleLogSelection(AuditLog log) {
+    setState(() {
+      if (_selectedLogsForExport.containsKey(log.id)) {
+        _selectedLogsForExport.remove(log.id);
+      } else {
+        _selectedLogsForExport[log.id] = log;
+      }
+    });
+  }
+
+  void _clearSelectedLogs() {
+    if (_selectedLogsForExport.isEmpty) return;
+    setState(() => _selectedLogsForExport.clear());
+  }
+
   Future<void> _loadAssetTabs() async {
     final tabs = <_AuditAssetFilterTab>[
       const _AuditAssetFilterTab(label: 'All Bots', assetName: '', assetID: ''),
@@ -284,33 +316,60 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
     });
   }
 
-  Future<void> _loadLogs() async {
-    setState(() => _isLoading = true);
-
-    final logs = await _agentService.getAuditLogs(
-      limit: _pageSize,
-      offset: _currentPage * _pageSize,
-      riskOnly: _riskOnly,
-      assetName: _selectedAssetName,
-      assetID: _selectedAssetID,
-      searchQuery: _searchController.text.isNotEmpty
-          ? _searchController.text
-          : null,
-    );
-
-    _sortAuditLogsNewestFirst(logs);
-
-    final count = await _agentService.getAuditLogCount(
-      riskOnly: _riskOnly,
-      assetName: _selectedAssetName,
-      assetID: _selectedAssetID,
-    );
-
+  /// 加载当前页的审计日志列表; [triggeredBySearch] 为 true 时在搜索框侧显示查询动画.
+  Future<void> _loadLogs({bool triggeredBySearch = false}) async {
+    if (!mounted) return;
     setState(() {
-      _logs = logs;
-      _totalCount = count;
-      _isLoading = false;
+      _isLoading = true;
+      if (triggeredBySearch) {
+        _searchSubmitLoading = true;
+      } else {
+        _searchSubmitLoading = false;
+      }
     });
+
+    try {
+      final logs = await _agentService.getAuditLogs(
+        limit: _pageSize,
+        offset: _currentPage * _pageSize,
+        riskOnly: _riskOnly,
+        assetName: _selectedAssetName,
+        assetID: _selectedAssetID,
+        searchQuery: _appliedSearchQuery.isNotEmpty
+            ? _appliedSearchQuery
+            : null,
+      );
+
+      _sortAuditLogsNewestFirst(logs);
+
+      final count = await _agentService.getAuditLogCount(
+        riskOnly: _riskOnly,
+        assetName: _selectedAssetName,
+        assetID: _selectedAssetID,
+        searchQuery: _appliedSearchQuery.isNotEmpty
+            ? _appliedSearchQuery
+            : null,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _logs = logs;
+        for (final log in logs) {
+          if (_selectedLogsForExport.containsKey(log.id)) {
+            _selectedLogsForExport[log.id] = log;
+          }
+        }
+        _totalCount = count;
+        _isLoading = false;
+        _searchSubmitLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _searchSubmitLoading = false;
+      });
+    }
   }
 
   Future<void> _loadStatistics() async {
@@ -321,15 +380,22 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
     setState(() => _statistics = stats);
   }
 
-  void _onSearchChanged(String value) {
-    _currentPage = 0;
-    _loadLogs();
+  /// 将搜索框当前内容提交为查询条件并回到第一页重新加载列表(仅回车触发).
+  void _submitSearch() {
+    final trimmed = _searchController.text.trim();
+    setState(() {
+      _appliedSearchQuery = trimmed;
+      _currentPage = 0;
+      _selectedLogsForExport.clear();
+    });
+    _loadLogs(triggeredBySearch: true);
   }
 
   void _onRiskFilterChanged(bool value) {
     setState(() {
       _riskOnly = value;
       _currentPage = 0;
+      _selectedLogsForExport.clear();
     });
     _loadLogs();
     _loadStatistics();
@@ -340,6 +406,7 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
       _selectedAssetName = tab.assetName;
       _selectedAssetID = tab.assetID;
       _currentPage = 0;
+      _selectedLogsForExport.clear();
     });
     _loadLogs();
     _loadStatistics();
@@ -362,9 +429,12 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
         )
         .map((tab) => tab.label)
         .cast<String?>()
-        .firstWhere((label) => label != null && label.isNotEmpty, orElse: () {
-          return _selectedAssetName.isNotEmpty ? _selectedAssetName : null;
-        });
+        .firstWhere(
+          (label) => label != null && label.isNotEmpty,
+          orElse: () {
+            return _selectedAssetName.isNotEmpty ? _selectedAssetName : null;
+          },
+        );
     final confirmTitle = hasAssetFilter
         ? '${l10n?.auditLogClear ?? 'Clear'} ${currentTabLabel ?? ''}'.trim()
         : (l10n?.auditLogClearConfirmTitle ?? 'Clear All Logs');
@@ -376,10 +446,7 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
-        title: Text(
-          confirmTitle,
-          style: const TextStyle(color: Colors.white),
-        ),
+        title: Text(confirmTitle, style: const TextStyle(color: Colors.white)),
         content: Text(
           confirmMessage,
           style: const TextStyle(color: Colors.white70),
@@ -402,6 +469,8 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
               );
               navigator.pop();
               if (!mounted) return;
+              _selectLog(null);
+              _clearSelectedLogs();
               await _loadAssetTabs();
               await _loadLogs();
               await _loadStatistics();
@@ -426,10 +495,10 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
       _securityEventDatabaseService
           .getSecurityEventsByRequestID(log.requestId)
           .then((events) {
-        if (mounted && _selectedLog?.requestId == log.requestId) {
-          setState(() => _relatedEvents = events);
-        }
-      });
+            if (mounted && _selectedLog?.requestId == log.requestId) {
+              setState(() => _relatedEvents = events);
+            }
+          });
     }
   }
 
@@ -442,6 +511,88 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
         duration: const Duration(seconds: 2),
       ),
     );
+  }
+
+  Future<void> _exportSelectedLogs() async {
+    if (_selectedLogsForExport.isEmpty) return;
+    final l10n = AppLocalizations.of(context);
+    try {
+      final selectedLogs = _selectedLogsForExport.values.toList()
+        ..sort((a, b) {
+          final byTime = b.timestamp.compareTo(a.timestamp);
+          if (byTime != 0) return byTime;
+          return b.requestId.compareTo(a.requestId);
+        });
+
+      final savePath = await FilePicker.platform.saveFile(
+        dialogTitle: _isZh ? '选择导出位置' : 'Choose export location',
+        fileName:
+            'audit_logs_batch_${DateTime.now().millisecondsSinceEpoch}.md',
+        type: FileType.custom,
+        allowedExtensions: const ['md'],
+      );
+      if (savePath == null || savePath.trim().isEmpty) return;
+
+      final contents = await Future.wait(
+        selectedLogs.map((log) async {
+          final relatedEvents = log.requestId.isEmpty
+              ? <SecurityEvent>[]
+              : await _securityEventDatabaseService
+                    .getSecurityEventsByRequestID(log.requestId);
+          return buildAuditLogMarkdownContent(
+            isZh: _isZh,
+            log: log,
+            relatedEvents: relatedEvents,
+            rawText: _buildRawSectionText(log),
+            actionText: _buildActionSectionText(log),
+            eventText: _buildEventSectionText(relatedEvents),
+          );
+        }),
+      );
+
+      final exportTime = DateTime.now().toIso8601String();
+      final buffer = StringBuffer()
+        ..writeln(_isZh ? '# 审计日志批量导出' : '# Audit Log Batch Export')
+        ..writeln()
+        ..writeln(
+          _isZh
+              ? '- 导出条数: ${selectedLogs.length}'
+              : '- Exported logs: ${selectedLogs.length}',
+        )
+        ..writeln(_isZh ? '- 导出时间: $exportTime' : '- Exported at: $exportTime');
+
+      for (final content in contents) {
+        buffer
+          ..writeln()
+          ..writeln('---')
+          ..writeln()
+          ..write(content);
+      }
+
+      final file = File(savePath);
+      await file.writeAsString(buffer.toString(), encoding: utf8);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isZh
+                ? '已批量导出 ${selectedLogs.length} 条日志到 ${file.path}'
+                : 'Exported ${selectedLogs.length} logs to ${file.path}',
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            l10n?.auditLogExportFailed ?? 'Batch export failed: $e',
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   @override
@@ -551,16 +702,29 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
             ),
           ),
           IconButton(
+            icon: const Icon(LucideIcons.download, size: 16),
+            color: _selectedLogsForExport.isEmpty
+                ? Colors.white30
+                : Colors.white70,
+            onPressed: _selectedLogsForExport.isEmpty
+                ? null
+                : _exportSelectedLogs,
+            tooltip: _isZh
+                ? '批量导出已选日志（${_selectedLogsForExport.length}）'
+                : 'Export selected logs (${_selectedLogsForExport.length})',
+          ),
+          IconButton(
             icon: const Icon(LucideIcons.refreshCw, size: 16),
             color: Colors.white70,
-            onPressed: _syncAndRefresh,
+            onPressed: _refreshFromToolbar,
             tooltip: l10n?.auditLogRefresh ?? 'Refresh',
           ),
           IconButton(
             icon: const Icon(LucideIcons.trash2, size: 16),
             color: Colors.white70,
             onPressed: _clearAllLogs,
-            tooltip: (_selectedAssetName.isNotEmpty || _selectedAssetID.isNotEmpty)
+            tooltip:
+                (_selectedAssetName.isNotEmpty || _selectedAssetID.isNotEmpty)
                 ? (l10n?.auditLogClear ?? 'Clear')
                 : (l10n?.auditLogClearAll ?? 'Clear All'),
           ),
@@ -727,23 +891,48 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
           ),
           const SizedBox(height: 10),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
                 child: TextField(
                   controller: _searchController,
-                  onChanged: _onSearchChanged,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) => _submitSearch(),
                   style: AppFonts.inter(fontSize: 13, color: Colors.white),
+                  minLines: 1,
+                  maxLines: 1,
                   decoration: InputDecoration(
-                    hintText: l10n?.auditLogSearchHint ?? 'Search logs...',
+                    hintText:
+                        '${l10n?.auditLogSearchHint ?? 'Search request, reply, risk, messages & tools...'} '
+                        '${l10n?.auditLogSearchSubmitHint ?? 'Press Enter to search'}',
                     hintStyle: AppFonts.inter(
-                      fontSize: 13,
+                      fontSize: 12,
                       color: Colors.white38,
+                      height: 1.25,
                     ),
-                    prefixIcon: const Icon(
-                      LucideIcons.search,
-                      size: 16,
-                      color: Colors.white38,
+                    prefixIcon: Tooltip(
+                      message:
+                          l10n?.auditLogSearchTooltip ??
+                          'Matches substrings in request body, output, risk reason, and raw messages/tool_calls JSON.',
+                      child: const Icon(
+                        LucideIcons.search,
+                        size: 16,
+                        color: Colors.white38,
+                      ),
                     ),
+                    suffixIcon: _searchSubmitLoading
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFF6366F1),
+                              ),
+                            ),
+                          )
+                        : null,
                     filled: true,
                     fillColor: Colors.black.withValues(alpha: 0.3),
                     border: OutlineInputBorder(
@@ -752,7 +941,7 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
                     ),
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12,
-                      vertical: 10,
+                      vertical: 12,
                     ),
                   ),
                 ),
@@ -768,6 +957,54 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
                 selectedColor: const Color(0xFF6366F1).withValues(alpha: 0.3),
                 checkmarkColor: const Color(0xFF6366F1),
               ),
+              if (_selectedLogsForExport.isNotEmpty) ...[
+                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: const Color(0xFF6366F1).withValues(alpha: 0.35),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        LucideIcons.checkSquare,
+                        size: 14,
+                        color: const Color(0xFF818CF8),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _isZh
+                            ? '已选 ${_selectedLogsForExport.length} 条'
+                            : '${_selectedLogsForExport.length} selected',
+                        style: AppFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: _clearSelectedLogs,
+                        child: Text(
+                          _isZh ? '清空' : 'Clear',
+                          style: AppFonts.inter(
+                            fontSize: 12,
+                            color: const Color(0xFF93C5FD),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ],
@@ -810,77 +1047,143 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
       itemBuilder: (context, index) {
         final log = _logs[index];
         final isSelected = _selectedLog?.id == log.id;
+        final isChecked = _isLogChecked(log);
+        final offset = _currentPage * _pageSize + index;
+        final serialNumber = math.max(1, _totalCount - offset);
 
-        return GestureDetector(
-          onTap: () => _selectLog(log),
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: isSelected
-                  ? const Color(0xFF6366F1).withValues(alpha: 0.2)
-                  : Colors.black.withValues(alpha: 0.3),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: isSelected
-                    ? const Color(0xFF6366F1).withValues(alpha: 0.5)
-                    : Colors.white.withValues(alpha: 0.1),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    _buildActionBadge(log.action),
-                    const SizedBox(width: 8),
-                    if (log.hasRisk) _buildRiskBadge(log.riskLevel),
-                    const Spacer(),
-                    Text(
-                      _formatTimestamp(log.timestamp),
-                      style: AppFonts.firaCode(
-                        fontSize: 10,
-                        color: Colors.white38,
-                      ),
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              GestureDetector(
+                onTap: () => _toggleLogSelection(log),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isChecked
+                        ? const Color(0xFF6366F1).withValues(alpha: 0.24)
+                        : Colors.white.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isChecked
+                          ? const Color(0xFF6366F1).withValues(alpha: 0.7)
+                          : Colors.white.withValues(alpha: 0.12),
                     ),
-                    const SizedBox(width: 4),
-                    IconButton(
-                      icon: const Icon(LucideIcons.copy, size: 14),
-                      color: Colors.white54,
-                      tooltip:
-                          AppLocalizations.of(context)?.appStoreGuideCopy ??
-                          '复制',
-                      onPressed: () => _copyText(log.requestContent),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  log.requestContent.length > 100
-                      ? '${log.requestContent.substring(0, 100)}...'
-                      : log.requestContent,
-                  style: AppFonts.inter(fontSize: 12, color: Colors.white70),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (log.toolCalls.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Icon(LucideIcons.wrench, size: 12, color: Colors.white38),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${log.toolCalls.length} tool calls',
-                        style: AppFonts.inter(
-                          fontSize: 11,
-                          color: Colors.white38,
-                        ),
-                      ),
-                    ],
                   ),
-                ],
-              ],
-            ),
+                  child: Text(
+                    '$serialNumber',
+                    textAlign: TextAlign.center,
+                    style: AppFonts.firaCode(
+                      fontSize: 10,
+                      fontWeight: isChecked ? FontWeight.w700 : FontWeight.w500,
+                      color: isChecked
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.55),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => _selectLog(log),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? const Color(0xFF6366F1).withValues(alpha: 0.2)
+                          : Colors.black.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isSelected
+                            ? const Color(0xFF6366F1).withValues(alpha: 0.5)
+                            : isChecked
+                            ? const Color(0xFF6366F1).withValues(alpha: 0.25)
+                            : Colors.white.withValues(alpha: 0.1),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            _buildActionBadge(log.action),
+                            const SizedBox(width: 8),
+                            if (log.hasRisk) _buildRiskBadge(log.riskLevel),
+                            if (isChecked) ...[
+                              const SizedBox(width: 8),
+                              Icon(
+                                LucideIcons.checkSquare,
+                                size: 12,
+                                color: const Color(0xFF818CF8),
+                              ),
+                            ],
+                            const Spacer(),
+                            Text(
+                              _formatTimestamp(log.timestamp),
+                              style: AppFonts.firaCode(
+                                fontSize: 10,
+                                color: Colors.white38,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            IconButton(
+                              icon: const Icon(LucideIcons.copy, size: 14),
+                              color: Colors.white54,
+                              tooltip:
+                                  AppLocalizations.of(
+                                    context,
+                                  )?.appStoreGuideCopy ??
+                                  '复制',
+                              onPressed: () => _copyText(log.requestContent),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          log.requestContent.length > 100
+                              ? '${log.requestContent.substring(0, 100)}...'
+                              : log.requestContent,
+                          style: AppFonts.inter(
+                            fontSize: 12,
+                            color: Colors.white70,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (log.toolCalls.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Icon(
+                                LucideIcons.wrench,
+                                size: 12,
+                                color: Colors.white38,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${log.toolCalls.length} tool calls',
+                                style: AppFonts.inter(
+                                  fontSize: 11,
+                                  color: Colors.white38,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         );
       },
@@ -954,22 +1257,31 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
 
   String _buildRawSectionText(AuditLog log) {
     if (log.messages.isEmpty) return log.requestContent;
-    return _buildRawMessagesWithToolFallback(log).map((item) {
-      return '[${item.roleLabel}]\n${item.content}';
-    }).join('\n\n');
+    return _buildRawMessagesWithToolFallback(log)
+        .map((item) {
+          return '[${item.roleLabel}]\n${item.content}';
+        })
+        .join('\n\n');
   }
 
-  String _buildActionSectionText(AuditLog log) => log.toolCalls.map((tc) =>
-      'Tool: ${tc.name}${tc.isSensitive ? " [SENSITIVE]" : ""}${tc.arguments.isNotEmpty ? "\nArguments: ${tc.arguments}" : ""}',
-  ).join('\n\n');
+  String _buildActionSectionText(AuditLog log) => log.toolCalls
+      .map(
+        (tc) =>
+            'Tool: ${tc.name}${tc.isSensitive ? " [SENSITIVE]" : ""}${tc.arguments.isNotEmpty ? "\nArguments: ${tc.arguments}" : ""}',
+      )
+      .join('\n\n');
 
-  String _buildEventSectionText(List<SecurityEvent> events) => events.map((e) {
-    final parts = ['[${e.eventType}] ${e.actionDesc}'];
-    if (e.riskType.isNotEmpty) parts.add('Risk: ${e.riskType}');
-    if (e.detail.isNotEmpty) parts.add('Detail: ${e.detail}');
-    parts.add('Source: ${e.source}  Time: ${e.timestamp.toIso8601String()}');
-    return parts.join('\n');
-  }).join('\n\n');
+  String _buildEventSectionText(List<SecurityEvent> events) => events
+      .map((e) {
+        final parts = ['[${e.eventType}] ${e.actionDesc}'];
+        if (e.riskType.isNotEmpty) parts.add('Risk: ${e.riskType}');
+        if (e.detail.isNotEmpty) parts.add('Detail: ${e.detail}');
+        parts.add(
+          'Source: ${e.source}  Time: ${e.timestamp.toIso8601String()}',
+        );
+        return parts.join('\n');
+      })
+      .join('\n\n');
 
   Future<void> _exportLogDetail() async {
     final log = _selectedLog;
@@ -996,16 +1308,22 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
       final file = File(savePath);
       await file.writeAsString(markdownContent, encoding: utf8);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(_isZh ? '已导出到 ${file.path}' : 'Exported to ${file.path}'),
-        duration: const Duration(seconds: 4),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isZh ? '已导出到 ${file.path}' : 'Exported to ${file.path}',
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(l10n?.auditLogExportFailed ?? 'Export failed: $e'),
-        duration: const Duration(seconds: 3),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n?.auditLogExportFailed ?? 'Export failed: $e'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
     }
   }
 
@@ -1167,7 +1485,10 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(
                         _isZh ? '暂无关联安全事件' : 'No related security events',
-                        style: AppFonts.inter(fontSize: 12, color: Colors.white38),
+                        style: AppFonts.inter(
+                          fontSize: 12,
+                          color: Colors.white38,
+                        ),
                       ),
                     ),
                 ],
@@ -1183,7 +1504,11 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
   Widget _buildSecurityEventCard(SecurityEvent evt) {
     final blocked = evt.isBlocked;
     final accent = blocked ? Colors.red : Colors.amber;
-    final typeLabel = switch (evt.eventType) { 'blocked' => 'BLOCKED', 'tool_execution' => 'TOOL', _ => evt.eventType.toUpperCase() };
+    final typeLabel = switch (evt.eventType) {
+      'blocked' => 'BLOCKED',
+      'tool_execution' => 'TOOL',
+      _ => evt.eventType.toUpperCase(),
+    };
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(10),
@@ -1192,29 +1517,66 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: accent.withValues(alpha: 0.3)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Icon(blocked ? LucideIcons.shieldAlert : LucideIcons.alertTriangle, size: 14, color: accent),
-          const SizedBox(width: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-            decoration: BoxDecoration(color: accent.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(4)),
-            child: Text(typeLabel, style: AppFonts.firaCode(fontSize: 9, fontWeight: FontWeight.w600, color: accent)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                blocked ? LucideIcons.shieldAlert : LucideIcons.alertTriangle,
+                size: 14,
+                color: accent,
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  typeLabel,
+                  style: AppFonts.firaCode(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: accent,
+                  ),
+                ),
+              ),
+              if (evt.riskType.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    evt.riskType,
+                    style: AppFonts.firaCode(
+                      fontSize: 10,
+                      color: Colors.white54,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+              const Spacer(),
+              Text(
+                evt.source,
+                style: AppFonts.firaCode(fontSize: 9, color: Colors.white38),
+              ),
+            ],
           ),
-          if (evt.riskType.isNotEmpty) ...[
-            const SizedBox(width: 6),
-            Flexible(child: Text(evt.riskType, style: AppFonts.firaCode(fontSize: 10, color: Colors.white54), overflow: TextOverflow.ellipsis)),
+          const SizedBox(height: 6),
+          SelectableText(
+            evt.actionDesc,
+            style: AppFonts.inter(fontSize: 11, color: Colors.white70),
+          ),
+          if (evt.detail.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            SelectableText(
+              evt.detail,
+              style: AppFonts.firaCode(fontSize: 10, color: Colors.white38),
+            ),
           ],
-          const Spacer(),
-          Text(evt.source, style: AppFonts.firaCode(fontSize: 9, color: Colors.white38)),
-        ]),
-        const SizedBox(height: 6),
-        SelectableText(evt.actionDesc, style: AppFonts.inter(fontSize: 11, color: Colors.white70)),
-        if (evt.detail.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          SelectableText(evt.detail, style: AppFonts.firaCode(fontSize: 10, color: Colors.white38)),
         ],
-      ]),
+      ),
     );
   }
 
@@ -1444,25 +1806,43 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
     );
   }
 
+  /// 底栏: 总条数、当前页条目区间与翻页控制(单页时按钮禁用但仍展示数量).
   Widget _buildPagination() {
     final l10n = AppLocalizations.of(context);
-    final totalPages = (_totalCount / _pageSize).ceil();
-    if (totalPages <= 1) return const SizedBox.shrink();
+    final totalPages = _totalCount == 0
+        ? 1
+        : ((_totalCount + _pageSize - 1) ~/ _pageSize);
+    final latestCount = _totalCount == 0
+        ? 0
+        : math.min((_currentPage + 1) * _pageSize, _totalCount);
+
+    final countLine = _isZh
+        ? '共$_totalCount条，最新$latestCount条'
+        : '$_totalCount total, latest $latestCount';
 
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         border: Border(
           top: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
         ),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          Expanded(
+            child: Text(
+              countLine,
+              style: AppFonts.inter(fontSize: 12, color: Colors.white54),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
           IconButton(
             icon: const Icon(LucideIcons.chevronLeft, size: 16),
-            color: _currentPage > 0 ? Colors.white : Colors.white38,
-            onPressed: _currentPage > 0
+            color: _currentPage > 0 && _totalCount > 0
+                ? Colors.white
+                : Colors.white38,
+            onPressed: _currentPage > 0 && _totalCount > 0
                 ? () => _onPageChanged(_currentPage - 1)
                 : null,
           ),
@@ -1473,10 +1853,10 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
           ),
           IconButton(
             icon: const Icon(LucideIcons.chevronRight, size: 16),
-            color: _currentPage < totalPages - 1
+            color: _currentPage < totalPages - 1 && _totalCount > 0
                 ? Colors.white
                 : Colors.white38,
-            onPressed: _currentPage < totalPages - 1
+            onPressed: _currentPage < totalPages - 1 && _totalCount > 0
                 ? () => _onPageChanged(_currentPage + 1)
                 : null,
           ),

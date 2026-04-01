@@ -981,14 +981,17 @@ class ProtectionService {
     searchQuery: searchQuery,
   );
 
+  /// 审计日志条数（[searchQuery] 与 [getAuditLogs] 全文条件一致）.
   Future<int> getAuditLogCount({
     bool riskOnly = false,
     String? assetName,
     String? assetID,
+    String? searchQuery,
   }) async => _monitor.getAuditLogCount(
     riskOnly: riskOnly,
     assetName: assetName,
     assetID: assetID,
+    searchQuery: searchQuery,
   );
 
   Future<Map<String, dynamic>> getAuditLogStatistics({

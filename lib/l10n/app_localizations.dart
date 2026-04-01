@@ -2184,11 +2184,17 @@ abstract class AppLocalizations {
   /// **'允许次数'**
   String get auditLogAllowed;
 
-  /// No description provided for @auditLogSearchHint.
+  /// 审计日志搜索框占位说明
   ///
   /// In zh, this message translates to:
-  /// **'搜索日志...'**
+  /// **'搜索请求、回复、风险说明与消息/工具 JSON...'**
   String get auditLogSearchHint;
+
+  /// 审计日志搜索框图标悬停帮助
+  ///
+  /// In zh, this message translates to:
+  /// **'在请求正文、模型输出、风险说明以及 messages、tool_calls 的 JSON 原文中做子串匹配（不搜请求 ID 等结构化字段）。'**
+  String get auditLogSearchTooltip;
 
   /// No description provided for @auditLogRiskOnly.
   ///
@@ -2357,6 +2363,30 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'第 {current} 页，共 {total} 页'**
   String auditLogPageInfo(int current, int total);
+
+  /// No description provided for @auditLogEntryTotal.
+  ///
+  /// In zh, this message translates to:
+  /// **'共 {count} 条'**
+  String auditLogEntryTotal(int count);
+
+  /// No description provided for @auditLogEntryRange.
+  ///
+  /// In zh, this message translates to:
+  /// **'第 {start}-{end} 条'**
+  String auditLogEntryRange(int start, int end);
+
+  /// No description provided for @auditLogItemSerial.
+  ///
+  /// In zh, this message translates to:
+  /// **'第 {n} 条'**
+  String auditLogItemSerial(int n);
+
+  /// No description provided for @auditLogSearchSubmitHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'按回车搜索'**
+  String get auditLogSearchSubmitHint;
 
   /// No description provided for @auditLogActionAllow.
   ///

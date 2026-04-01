@@ -58,6 +58,17 @@ type AuditLogAsset struct {
 	AssetID   string `json:"asset_id"`
 }
 
+// appendAuditLogSearchConditions 追加全文子串匹配条件（与列表查询语义一致，含 messages/tool_calls JSON）.
+func appendAuditLogSearchConditions(conditions *[]string, params *[]interface{}, searchQuery string) {
+	q := strings.TrimSpace(searchQuery)
+	if q == "" {
+		return
+	}
+	pattern := "%" + q + "%"
+	*conditions = append(*conditions, "(request_content LIKE ? OR output_content LIKE ? OR risk_reason LIKE ? OR tool_calls LIKE ? OR messages LIKE ?)")
+	*params = append(*params, pattern, pattern, pattern, pattern, pattern)
+}
+
 // AuditLogRepository 审计日志仓库
 type AuditLogRepository struct {
 	db *sql.DB
@@ -185,11 +196,7 @@ func (r *AuditLogRepository) GetAuditLogs(filter *AuditLogFilter) ([]*AuditLog, 
 		conditions = append(conditions, "timestamp <= ?")
 		params = append(params, filter.EndTime)
 	}
-	if filter.SearchQuery != "" {
-		conditions = append(conditions, "(request_content LIKE ? OR output_content LIKE ? OR risk_reason LIKE ?)")
-		pattern := "%" + filter.SearchQuery + "%"
-		params = append(params, pattern, pattern, pattern)
-	}
+	appendAuditLogSearchConditions(&conditions, &params, filter.SearchQuery)
 
 	whereClause := ""
 	if len(conditions) > 0 {
@@ -229,16 +236,16 @@ func (r *AuditLogRepository) GetAuditLogs(filter *AuditLogFilter) ([]*AuditLog, 
 	return logs, nil
 }
 
-// GetAuditLogCount 获取审计日志数量
-func (r *AuditLogRepository) GetAuditLogCount(riskOnly bool, assetName, assetID string) (int, error) {
+// GetAuditLogCount 获取审计日志数量（searchQuery 与 GetAuditLogs 全文条件一致）.
+func (r *AuditLogRepository) GetAuditLogCount(riskOnly bool, assetName, assetID, searchQuery string) (int, error) {
 	if r.db == nil {
 		return 0, fmt.Errorf("database not initialized")
 	}
 
 	assetName = strings.TrimSpace(assetName)
 	assetID = strings.TrimSpace(assetID)
-	conditions := make([]string, 0, 3)
-	params := make([]interface{}, 0, 3)
+	conditions := make([]string, 0, 4)
+	params := make([]interface{}, 0, 8)
 	if riskOnly {
 		conditions = append(conditions, "has_risk = 1")
 	}
@@ -250,6 +257,7 @@ func (r *AuditLogRepository) GetAuditLogCount(riskOnly bool, assetName, assetID 
 		conditions = append(conditions, "asset_name = ?")
 		params = append(params, assetName)
 	}
+	appendAuditLogSearchConditions(&conditions, &params, searchQuery)
 
 	whereClause := ""
 	if len(conditions) > 0 {

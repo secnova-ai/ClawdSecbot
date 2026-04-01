@@ -64,7 +64,7 @@ func TestAuditLog_BatchSave(t *testing.T) {
 		t.Fatalf("SaveAuditLogsBatch failed: %v", err)
 	}
 
-	count, err := repo.GetAuditLogCount(false, "", "")
+	count, err := repo.GetAuditLogCount(false, "", "", "")
 	if err != nil {
 		t.Fatalf("GetAuditLogCount failed: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestAuditLog_BatchSave(t *testing.T) {
 		t.Errorf("Expected 3 logs, got %d", count)
 	}
 
-	riskCount, err := repo.GetAuditLogCount(true, "", "")
+	riskCount, err := repo.GetAuditLogCount(true, "", "", "")
 	if err != nil {
 		t.Fatalf("GetAuditLogCount(riskOnly) failed: %v", err)
 	}
@@ -202,6 +202,37 @@ func TestAuditLog_Filter(t *testing.T) {
 	if len(result) != 1 {
 		t.Errorf("Expected 1 search result, got %d", len(result))
 	}
+
+	// tool_calls JSON 子串
+	_ = repo.SaveAuditLog(&AuditLog{
+		ID: "tc1", Timestamp: now, RequestID: "r-tc", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "ALLOW",
+		ToolCalls: `[{"name":"grep_files"}]`,
+	})
+	result, err = repo.GetAuditLogs(&AuditLogFilter{Limit: 10, SearchQuery: "grep_files"})
+	if err != nil {
+		t.Fatalf("GetAuditLogs search tool_calls failed: %v", err)
+	}
+	if len(result) != 1 {
+		t.Errorf("Expected 1 tool_calls search result, got %d", len(result))
+	}
+
+	// messages JSON 子串
+	_ = repo.SaveAuditLog(&AuditLog{
+		ID: "msg1", Timestamp: now, RequestID: "r-msg", AssetName: "openclaw", AssetID: "openclaw:a1", Action: "ALLOW",
+		Messages: `[{"index":0,"role":"user","content":"unique_blob_xyz"}]`,
+	})
+	result, err = repo.GetAuditLogs(&AuditLogFilter{Limit: 10, SearchQuery: "unique_blob_xyz"})
+	if err != nil {
+		t.Fatalf("GetAuditLogs search messages failed: %v", err)
+	}
+	if len(result) != 1 {
+		t.Errorf("Expected 1 messages search result, got %d", len(result))
+	}
+
+	n, err := repo.GetAuditLogCount(false, "", "", "grep_files")
+	if err != nil || n != 1 {
+		t.Errorf("GetAuditLogCount with search_query expected 1, got %d err=%v", n, err)
+	}
 }
 
 func TestAuditLog_ClearAll(t *testing.T) {
@@ -218,7 +249,7 @@ func TestAuditLog_ClearAll(t *testing.T) {
 		t.Fatalf("ClearAllAuditLogs failed: %v", err)
 	}
 
-	count, _ := repo.GetAuditLogCount(false, "", "")
+	count, _ := repo.GetAuditLogCount(false, "", "", "")
 	if count != 0 {
 		t.Errorf("Expected 0 logs after clear, got %d", count)
 	}
@@ -250,7 +281,7 @@ func TestAuditLog_FilterByAssetID(t *testing.T) {
 		t.Fatalf("Expected asset_id nullclaw:b1, got %s", logs[0].AssetID)
 	}
 
-	count, err := repo.GetAuditLogCount(false, "wrong_name_should_be_ignored", "nullclaw:b1")
+	count, err := repo.GetAuditLogCount(false, "wrong_name_should_be_ignored", "nullclaw:b1", "")
 	if err != nil {
 		t.Fatalf("GetAuditLogCount by asset failed: %v", err)
 	}
