@@ -17,6 +17,8 @@ type PreloadConfig struct {
 	AllowedIPs        []string `json:"allowed_ips"`
 	BlockedDomains    []string `json:"blocked_domains"`
 	AllowedDomains    []string `json:"allowed_domains"`
+	GatewayBinaryPath string   `json:"gateway_binary_path,omitempty"`
+	GatewayConfigPath string   `json:"gateway_config_path,omitempty"`
 	StrictMode        bool     `json:"strict_mode"`
 	LogOnly           bool     `json:"log_only"`
 }
@@ -28,6 +30,8 @@ func (c *PreloadConfig) ToPolicyJSON() ([]byte, error) {
 
 // buildPreloadConfig 将 SandboxConfig 转换为 PreloadConfig (域名自动解析为 IP 提供双重拦截)
 func buildPreloadConfig(config SandboxConfig) *PreloadConfig {
+	config = normalizeSandboxConfig(config)
+
 	pc := &PreloadConfig{
 		FilePolicyType:    "blacklist",
 		BlockedPaths:      []string{},
@@ -63,6 +67,9 @@ func buildPreloadConfig(config SandboxConfig) *PreloadConfig {
 		pc.BlockedIPs = ips
 		pc.BlockedDomains = domains
 	}
+
+	pc.GatewayBinaryPath = config.GatewayBinaryPath
+	pc.GatewayConfigPath = config.GatewayConfigPath
 
 	// Shell 权限
 	if config.ShellPermission.Mode == ModeWhitelist {

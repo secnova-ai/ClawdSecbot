@@ -10,7 +10,6 @@ import (
 	"go_lib/core/logging"
 )
 
-// MessageType 消息类型
 type MessageType string
 
 const (
@@ -19,57 +18,50 @@ const (
 	MessageTypeStatus        MessageType = "status"
 	MessageTypeVersionUpdate MessageType = "version_update"
 	MessageTypeSecurityEvent MessageType = "security_event"
+	MessageTypeTruthRecord   MessageType = "truth_record"
 )
 
-// Message 统一消息结构
 type Message struct {
 	Type      MessageType            `json:"type"`
 	Timestamp int64                  `json:"timestamp"`
 	Payload   map[string]interface{} `json:"payload"`
 }
 
-// CallbackFunc Go 回调函数类型
 type CallbackFunc func(message string)
 
-// Bridge 回调桥接器,用于 Go 和 Dart 之间的通信
 type Bridge struct {
-	// Go 回调函数（由外部设置）
 	callback CallbackFunc
 
-	// 输入通道
 	logChan           chan string
 	metricsChan       chan map[string]interface{}
 	securityEventChan chan map[string]interface{}
+	truthRecordChan   chan map[string]interface{}
 
-	// 生命周期管理
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	// 状态
 	running bool
 	mu      sync.Mutex
 }
 
-// NewBridge 创建回调桥接器
 func NewBridge(callback CallbackFunc) (*Bridge, error) {
 	if callback == nil {
 		return nil, fmt.Errorf("callback function is required")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-
 	bridge := &Bridge{
 		callback:          callback,
 		logChan:           make(chan string, 1000),
 		metricsChan:       make(chan map[string]interface{}, 100),
 		securityEventChan: make(chan map[string]interface{}, 100),
+		truthRecordChan:   make(chan map[string]interface{}, 200),
 		ctx:               ctx,
 		cancel:            cancel,
 		running:           true,
 	}
 
-	// 启动发布工作协程
 	bridge.wg.Add(1)
 	go bridge.publishWorker()
 
@@ -77,25 +69,39 @@ func NewBridge(callback CallbackFunc) (*Bridge, error) {
 	return bridge, nil
 }
 
-// publishWorker 发布日志、指标和安全事件的工作协程
+// publishFlushTickerInterval 周期刷新 log/metrics 尾部积压与 TruthRecord 合并快照(Dart FFI).
+const publishFlushTickerInterval = 200 * time.Millisecond
+
 func (b *Bridge) publishWorker() {
 	defer b.wg.Done()
 
-	// 批量发送定时器
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(publishFlushTickerInterval)
 	defer ticker.Stop()
 
 	var logBatch []string
 	var metricsBatch []map[string]interface{}
+	// 同一周期内同一 request_id 只保留最新快照, 避免流式更新对 Dart 连发数十次 FFI(Windows UI 易未响应).
+	truthPending := make(map[string]map[string]interface{})
 
 	for {
 		select {
 		case <-b.ctx.Done():
-			// 发送剩余消息
-			b.flushLogs(logBatch)
-			b.flushMetrics(metricsBatch)
-			b.drainSecurityEvents()
-			return
+			for {
+				select {
+				case record := <-b.truthRecordChan:
+					if rid := truthRecordRequestID(record); rid != "" {
+						truthPending[rid] = record
+					} else {
+						b.flushTruthRecords([]map[string]interface{}{record})
+					}
+				default:
+					b.flushLogs(logBatch)
+					b.flushMetrics(metricsBatch)
+					b.drainSecurityEvents()
+					b.flushTruthRecordsCoalesced(truthPending)
+					return
+				}
+			}
 
 		case log := <-b.logChan:
 			logBatch = append(logBatch, log)
@@ -112,11 +118,22 @@ func (b *Bridge) publishWorker() {
 			}
 
 		case event := <-b.securityEventChan:
-			// 安全事件频率低、实时性要求高，收到即 flush，不做批量合并
 			b.flushSecurityEvents([]map[string]interface{}{event})
 
+		case record := <-b.truthRecordChan:
+			rid := truthRecordRequestID(record)
+			if rid != "" {
+				truthPending[rid] = record
+				// 终态立即推送, 避免再等 ticker; 并从 pending 移除以免重复发送.
+				if ph, _ := record["phase"].(string); ph == "completed" || ph == "stopped" {
+					b.flushTruthRecords([]map[string]interface{}{record})
+					delete(truthPending, rid)
+				}
+			} else {
+				b.flushTruthRecords([]map[string]interface{}{record})
+			}
+
 		case <-ticker.C:
-			// 定时刷新
 			if len(logBatch) > 0 {
 				b.flushLogs(logBatch)
 				logBatch = logBatch[:0]
@@ -125,11 +142,14 @@ func (b *Bridge) publishWorker() {
 				b.flushMetrics(metricsBatch)
 				metricsBatch = metricsBatch[:0]
 			}
+			if len(truthPending) > 0 {
+				b.flushTruthRecordsCoalesced(truthPending)
+				truthPending = make(map[string]map[string]interface{})
+			}
 		}
 	}
 }
 
-// invokeCallback 调用回调发送消息
 func (b *Bridge) invokeCallback(data []byte) error {
 	b.mu.Lock()
 	callback := b.callback
@@ -139,11 +159,9 @@ func (b *Bridge) invokeCallback(data []byte) error {
 	if !running || callback == nil {
 		return fmt.Errorf("bridge not running")
 	}
-
 	if len(data) == 0 {
 		return fmt.Errorf("empty data")
 	}
-
 	if data[0] != '{' || data[len(data)-1] != '}' {
 		return fmt.Errorf("invalid JSON format")
 	}
@@ -155,11 +173,9 @@ func (b *Bridge) invokeCallback(data []byte) error {
 	}()
 
 	callback(string(data))
-
 	return nil
 }
 
-// flushLogs 发送日志批次
 func (b *Bridge) flushLogs(logs []string) {
 	for _, log := range logs {
 		msg := b.newLogMessage(log)
@@ -169,7 +185,6 @@ func (b *Bridge) flushLogs(logs []string) {
 	}
 }
 
-// flushMetrics 发送指标批次
 func (b *Bridge) flushMetrics(metricsList []map[string]interface{}) {
 	for _, metrics := range metricsList {
 		msg := b.newMetricsMessage(metrics)
@@ -179,7 +194,6 @@ func (b *Bridge) flushMetrics(metricsList []map[string]interface{}) {
 	}
 }
 
-// flushSecurityEvents 发送安全事件批次
 func (b *Bridge) flushSecurityEvents(events []map[string]interface{}) {
 	for _, event := range events {
 		msg := &Message{
@@ -193,7 +207,37 @@ func (b *Bridge) flushSecurityEvents(events []map[string]interface{}) {
 	}
 }
 
-// drainSecurityEvents 关闭时清空残留安全事件
+func (b *Bridge) flushTruthRecords(records []map[string]interface{}) {
+	for _, record := range records {
+		msg := &Message{
+			Type:      MessageTypeTruthRecord,
+			Timestamp: time.Now().UnixMilli(),
+			Payload:   record,
+		}
+		if data, err := json.Marshal(msg); err == nil {
+			_ = b.invokeCallback(data)
+		}
+	}
+}
+
+// truthRecordRequestID 从快照 map 中取 request_id, 用于合并同一请求的突发更新.
+func truthRecordRequestID(record map[string]interface{}) string {
+	if v, ok := record["request_id"].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// flushTruthRecordsCoalesced 将 pending 中每个 request_id 的最新一条推入 Dart(通常每 ticker 周期一次).
+func (b *Bridge) flushTruthRecordsCoalesced(pending map[string]map[string]interface{}) {
+	if len(pending) == 0 {
+		return
+	}
+	for _, record := range pending {
+		b.flushTruthRecords([]map[string]interface{}{record})
+	}
+}
+
 func (b *Bridge) drainSecurityEvents() {
 	for {
 		select {
@@ -205,7 +249,6 @@ func (b *Bridge) drainSecurityEvents() {
 	}
 }
 
-// newLogMessage 从已有的 JSON 字符串创建日志消息
 func (b *Bridge) newLogMessage(jsonStr string) *Message {
 	var payload map[string]interface{}
 	if err := json.Unmarshal([]byte(jsonStr), &payload); err != nil {
@@ -218,7 +261,6 @@ func (b *Bridge) newLogMessage(jsonStr string) *Message {
 	}
 }
 
-// newMetricsMessage 创建性能指标消息
 func (b *Bridge) newMetricsMessage(metrics map[string]interface{}) *Message {
 	return &Message{
 		Type:      MessageTypeMetrics,
@@ -227,7 +269,6 @@ func (b *Bridge) newMetricsMessage(metrics map[string]interface{}) *Message {
 	}
 }
 
-// newStatusMessage 创建状态消息
 func (b *Bridge) newStatusMessage(status map[string]interface{}) *Message {
 	return &Message{
 		Type:      MessageTypeStatus,
@@ -236,12 +277,10 @@ func (b *Bridge) newStatusMessage(status map[string]interface{}) *Message {
 	}
 }
 
-// SendLog 发送日志 (非阻塞)
 func (b *Bridge) SendLog(log string) {
 	select {
 	case b.logChan <- log:
 	default:
-		// 通道满,丢弃最旧的消息
 		select {
 		case <-b.logChan:
 		default:
@@ -253,12 +292,10 @@ func (b *Bridge) SendLog(log string) {
 	}
 }
 
-// SendMetrics 发送指标 (非阻塞)
 func (b *Bridge) SendMetrics(metrics map[string]interface{}) {
 	select {
 	case b.metricsChan <- metrics:
 	default:
-		// 通道满时丢弃最旧项，尽量保留最新快照，减少统计落后/漏同步窗口。
 		select {
 		case <-b.metricsChan:
 		default:
@@ -270,7 +307,6 @@ func (b *Bridge) SendMetrics(metrics map[string]interface{}) {
 	}
 }
 
-// SendStatus 发送状态消息 (直接发送,不走批量)
 func (b *Bridge) SendStatus(status map[string]interface{}) {
 	msg := b.newStatusMessage(status)
 	if data, err := json.Marshal(msg); err == nil {
@@ -278,7 +314,6 @@ func (b *Bridge) SendStatus(status map[string]interface{}) {
 	}
 }
 
-// SendVersionUpdate 发送版本更新消息 (直接发送,不走批量)
 func (b *Bridge) SendVersionUpdate(versionInfo map[string]interface{}) {
 	msg := &Message{
 		Type:      MessageTypeVersionUpdate,
@@ -290,23 +325,34 @@ func (b *Bridge) SendVersionUpdate(versionInfo map[string]interface{}) {
 	}
 }
 
-// SendSecurityEvent 发送安全事件消息 (通过 channel 走 publishWorker 序列化路径)
 func (b *Bridge) SendSecurityEvent(event map[string]interface{}) {
 	select {
 	case b.securityEventChan <- event:
 	default:
-		// 通道满,跳过
 	}
 }
 
-// IsRunning 返回是否正在运行
+func (b *Bridge) SendTruthRecord(record map[string]interface{}) {
+	select {
+	case b.truthRecordChan <- record:
+	default:
+		select {
+		case <-b.truthRecordChan:
+		default:
+		}
+		select {
+		case b.truthRecordChan <- record:
+		default:
+		}
+	}
+}
+
 func (b *Bridge) IsRunning() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.running
 }
 
-// Close 关闭桥接器
 func (b *Bridge) Close() error {
 	b.mu.Lock()
 	if !b.running {

@@ -6,6 +6,7 @@ import 'package:ffi/ffi.dart';
 
 import '../models/audit_log_model.dart';
 import '../models/protection_analysis_model.dart';
+import '../models/truth_record_model.dart';
 import '../models/security_event_model.dart';
 import 'audit_log_database_service.dart';
 import 'message_bridge_service.dart' hide FreeStringC, FreeStringDart;
@@ -48,6 +49,8 @@ class ProtectionMonitorService {
       StreamController<ApiMetrics>.broadcast();
   final StreamController<List<SecurityEvent>> _securityEventController =
       StreamController<List<SecurityEvent>>.broadcast();
+  final StreamController<TruthRecordModel> _truthRecordController =
+      StreamController<TruthRecordModel>.broadcast();
 
   Timer? _proxyLogPollTimer;
   Timer? _dbSyncTimer; // 独立定时器：回调模式下仍周期同步审计日志
@@ -61,6 +64,8 @@ class ProtectionMonitorService {
   StreamSubscription<String>? _logSubscription;
   StreamSubscription<Map<String, dynamic>>? _metricsSubscription;
   StreamSubscription<Map<String, dynamic>>? _securityEventBridgeSubscription;
+  final Set<String> _seenSecurityEventIds = <String>{};
+  StreamSubscription<Map<String, dynamic>>? _truthRecordBridgeSubscription;
 
   final bool _isAnalyzing = false;
   int _analysisCount = 0;
@@ -92,6 +97,8 @@ class ProtectionMonitorService {
   Stream<ApiMetrics> get metricsStream => _metricsController.stream;
   Stream<List<SecurityEvent>> get securityEventStream =>
       _securityEventController.stream;
+  Stream<TruthRecordModel> get truthRecordStream =>
+      _truthRecordController.stream;
 
   bool get isAnalyzing => _isAnalyzing;
   int get analysisCount => _analysisCount;
@@ -129,6 +136,7 @@ class ProtectionMonitorService {
     _assetID = normalizedAssetID;
     if (changed) {
       resetMemoryState();
+      _seenSecurityEventIds.clear();
     }
   }
 
@@ -202,6 +210,7 @@ class ProtectionMonitorService {
     _dbSyncTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (_proxySessionID != null && _isProxyRunning) {
         syncPendingAuditLogs();
+        syncPendingSecurityEvents();
       }
     });
   }
@@ -259,10 +268,7 @@ class ProtectionMonitorService {
               scheduleMicrotask(() {
                 try {
                   final event = SecurityEvent.fromJson(payload);
-                  if (_matchesCurrentAsset(event) &&
-                      !_securityEventController.isClosed) {
-                    _securityEventController.add([event]);
-                  }
+                  _publishSecurityEvents([event]);
                 } catch (e) {
                   appLogger.error(
                     '[ProtectionMonitor] Parse security event error',
@@ -270,6 +276,12 @@ class ProtectionMonitorService {
                   );
                 }
               });
+            });
+        _truthRecordBridgeSubscription = _messageBridgeService!
+            .truthRecordStream
+            .handleError(_handleBridgeError)
+            .listen((payload) {
+              unawaited(_processTruthRecordFromBridge(payload));
             });
         _proxyLogPollTimer?.cancel();
         _proxyLogPollTimer = null;
@@ -290,10 +302,32 @@ class ProtectionMonitorService {
     }
   }
 
+  /// TruthRecord payload 较大时 fromJson 耗 CPU; 先让出 UI 事件循环再解析, 减轻 Windows 未响应.
+  Future<void> _processTruthRecordFromBridge(
+    Map<String, dynamic> payload,
+  ) async {
+    await Future<void>.delayed(Duration.zero);
+    try {
+      final record = TruthRecordModel.fromJson(payload);
+      appLogger.debug(
+        '[TruthRecord] bridge_received request_id=${record.requestId} asset_id=${record.assetID} expected_asset_id=$_assetID phase=${record.phase} type=${record.primaryContentType} complete=${record.isComplete}',
+      );
+      if (record.assetID == _assetID && !_truthRecordController.isClosed) {
+        _truthRecordController.add(record);
+        if (record.isComplete) {
+          _persistCompletedRecord(record);
+        }
+      }
+    } catch (e) {
+      appLogger.error('[ProtectionMonitor] Parse truth record error', e);
+    }
+  }
+
   void disableCallbackBridge() {
     _logSubscription?.cancel();
     _metricsSubscription?.cancel();
     _securityEventBridgeSubscription?.cancel();
+    _truthRecordBridgeSubscription?.cancel();
     _messageBridgeService?.dispose();
     _messageBridgeService = null;
     _useCallback = false;
@@ -506,6 +540,91 @@ class ProtectionMonitorService {
     _totalToolCalls = _requestCount = 0;
     _auditTokens = _auditPromptTokens = _auditCompletionTokens = 0;
     _proxySessionID = null;
+    _seenSecurityEventIds.clear();
+  }
+
+  /// 将已完成的 TruthRecord 转换为 AuditLog 并持久化到 SQLite（事件驱动，替代轮询）。
+  void _persistCompletedRecord(TruthRecordModel record) {
+    try {
+      final log = AuditLog(
+        id: record.requestId,
+        timestamp: record.startedAt,
+        requestId: record.requestId,
+        assetName: record.assetName,
+        assetID: record.assetID,
+        model: record.model,
+        requestContent: record.messages
+            .where((m) => m.role.toLowerCase() == 'user')
+            .map((m) => m.content)
+            .join('\n'),
+        toolCalls: record.toolCalls
+            .map(
+              (tc) => AuditToolCall(
+                name: tc.name,
+                arguments: tc.arguments,
+                result: tc.result,
+                isSensitive: tc.isSensitive,
+              ),
+            )
+            .toList(),
+        outputContent: record.outputContent,
+        hasRisk: record.hasRisk,
+        riskLevel: record.decision?.riskLevel ?? '',
+        riskReason: record.decision?.reason ?? '',
+        confidence: record.decision?.confidence ?? 0,
+        action: record.decision?.action ?? 'ALLOW',
+        promptTokens: record.promptTokens,
+        completionTokens: record.completionTokens,
+        totalTokens: record.totalTokens,
+        durationMs: record.durationMs,
+        messages: record.messages
+            .map(
+              (m) => AuditMessage(
+                index: m.index,
+                role: m.role,
+                content: m.content,
+              ),
+            )
+            .toList(),
+        messageCount: record.messageCount,
+      );
+      unawaited(
+        AuditLogDatabaseService()
+            .saveAuditLogsBatch([log])
+            .catchError((Object e) {
+              appLogger.error(
+                '[ProtectionMonitor] Failed to persist completed record',
+                e,
+              );
+            }),
+      );
+    } catch (e) {
+      appLogger.error(
+        '[ProtectionMonitor] Failed to convert TruthRecord to AuditLog',
+        e,
+      );
+    }
+  }
+
+  void _publishSecurityEvents(List<SecurityEvent> events) {
+    if (_securityEventController.isClosed || events.isEmpty) {
+      return;
+    }
+
+    final matched = <SecurityEvent>[];
+    for (final event in events) {
+      if (!_matchesCurrentAsset(event)) {
+        continue;
+      }
+      if (event.id.isNotEmpty && !_seenSecurityEventIds.add(event.id)) {
+        continue;
+      }
+      matched.add(event);
+    }
+
+    if (matched.isNotEmpty) {
+      _securityEventController.add(matched);
+    }
   }
 
   Future<void> resetProxyStatistics() async {
@@ -645,6 +764,35 @@ class ProtectionMonitorService {
           if (!_logController.isClosed) _logController.add(log.toString());
         }
       }
+      final requestViews = result['request_views'] as List?;
+      if (requestViews != null) {
+        // 同一轮询内同一 request_id 只保留最后一条快照, 避免向 UI 连发数十次 add + 同步写日志.
+        final latestByRequestId = <String, TruthRecordModel>{};
+        for (final item in requestViews) {
+          if (item is! Map) {
+            continue;
+          }
+          final record = TruthRecordModel.fromJson(
+            Map<String, dynamic>.from(item),
+          );
+          if (record.assetID == _assetID) {
+            latestByRequestId[record.requestId] = record;
+          }
+        }
+        if (latestByRequestId.isNotEmpty) {
+          appLogger.debug(
+            '[TruthRecord] polling batch count=${latestByRequestId.length} asset=$_assetID',
+          );
+          for (final record in latestByRequestId.values) {
+            if (!_truthRecordController.isClosed) {
+              _truthRecordController.add(record);
+            }
+            if (record.isComplete) {
+              _persistCompletedRecord(record);
+            }
+          }
+        }
+      }
 
       final prevPromptTokens = _totalPromptTokens;
       final prevCompletionTokens = _totalCompletionTokens;
@@ -752,6 +900,35 @@ class ProtectionMonitorService {
       }
     } catch (e) {
       appLogger.error('[ProtectionMonitor] Poll proxy logs error', e);
+    }
+  }
+
+  /// 非破坏性地从 Go RecordStore 获取所有 TruthRecord 最新快照。
+  /// 用于 catch-up 补漏：当回调桥偶发丢失快照时同步最新状态。
+  List<TruthRecordModel> fetchAllTruthRecordSnapshots() {
+    try {
+      final dylib = _getDylib();
+      final getSnapshots = dylib.lookupFunction<
+        GetAllTruthRecordSnapshotsC,
+        GetAllTruthRecordSnapshotsDart
+      >('GetAllTruthRecordSnapshots');
+      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+        'FreeString',
+      );
+      final resultPtr = getSnapshots();
+      final resultJson = resultPtr.toDartString();
+      freeString(resultPtr);
+
+      final decoded = jsonDecode(resultJson);
+      if (decoded is! List) return [];
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map((e) => TruthRecordModel.fromJson(e))
+          .where((r) => r.assetID == _assetID)
+          .toList();
+    } catch (e) {
+      appLogger.error('[ProtectionMonitor] Fetch truth record snapshots failed', e);
+      return [];
     }
   }
 
@@ -886,10 +1063,12 @@ class ProtectionMonitorService {
     );
   }
 
+  /// 获取审计日志条数（searchQuery 与 [getAuditLogs] 全文条件一致）.
   Future<int> getAuditLogCount({
     bool riskOnly = false,
     String? assetName,
     String? assetID,
+    String? searchQuery,
   }) async {
     final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
         ? assetID.trim()
@@ -902,6 +1081,7 @@ class ProtectionMonitorService {
       riskOnly: riskOnly,
       assetName: effectiveAssetName,
       assetID: effectiveAssetID,
+      searchQuery: searchQuery,
     );
   }
 
@@ -962,10 +1142,7 @@ class ProtectionMonitorService {
           .map((e) => SecurityEvent.fromJson(e as Map<String, dynamic>))
           .toList();
       await SecurityEventDatabaseService().saveSecurityEventsBatch(events);
-      final matchedEvents = events.where(_matchesCurrentAsset).toList();
-      if (matchedEvents.isNotEmpty && !_securityEventController.isClosed) {
-        _securityEventController.add(matchedEvents);
-      }
+      _publishSecurityEvents(events);
       return events.length;
     } catch (e) {
       appLogger.error('[ProtectionMonitor] Sync security events failed', e);
@@ -1009,12 +1186,14 @@ class ProtectionMonitorService {
     _logSubscription?.cancel();
     _metricsSubscription?.cancel();
     _securityEventBridgeSubscription?.cancel();
+    _truthRecordBridgeSubscription?.cancel();
     _messageBridgeService?.dispose();
     _saveStatisticsToDatabase();
     _logController.close();
     _resultController.close();
     _metricsController.close();
     _securityEventController.close();
+    _truthRecordController.close();
     if (removeInstance) {
       _instances.remove(_instanceKey);
     }

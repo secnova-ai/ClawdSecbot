@@ -7,7 +7,6 @@ on:
       - 'go_lib/**'
       - 'lib/**'
       - 'linux/**'
-      - 'sandbox/**'
       - 'images/**'
       - 'pubspec.yaml'
   pull_request:
@@ -16,7 +15,6 @@ on:
       - 'go_lib/**'
       - 'lib/**'
       - 'linux/**'
-      - 'sandbox/**'
       - 'images/**'
       - 'pubspec.yaml'
 
@@ -59,14 +57,14 @@ jobs:
 
       - name: Build libsandbox_preload.so with CMake
         run: |
-          cmake -S sandbox -B sandbox/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build sandbox/build
+          cmake -S go_lib/core/sandbox/linux_hook -B go_lib/core/sandbox/linux_hook/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build go_lib/core/sandbox/linux_hook/build
 
       - name: Upload preload library artifact
         uses: actions/upload-artifact@v4
         with:
           name: sandbox-preload-so
-          path: sandbox/build/libsandbox_preload.so
+          path: go_lib/core/sandbox/linux_hook/build/libsandbox_preload.so
           retention-days: 7
 
   build-flutter:

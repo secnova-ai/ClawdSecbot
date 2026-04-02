@@ -745,7 +745,14 @@
   "auditLogBlocked": "Blocked",
   "auditLogWarned": "Warned",
   "auditLogAllowed": "Allowed",
-  "auditLogSearchHint": "Search logs...",
+  "auditLogSearchHint": "Search request, reply, risk, messages & tools JSON...",
+  "@auditLogSearchHint": {
+    "description": "Audit log search field placeholder"
+  },
+  "auditLogSearchTooltip": "Substring match in request body, model output, risk reason, and raw messages / tool_calls JSON (not request ID or other structured fields).",
+  "@auditLogSearchTooltip": {
+    "description": "Audit log search icon tooltip"
+  },
   "auditLogRiskOnly": "Risk Only",
   "auditLogNoLogs": "No audit logs",
   "auditLogRefresh": "Refresh",
@@ -771,6 +778,8 @@
   "auditLogToolArguments": "Arguments",
   "auditLogToolResult": "Result",
   "auditLogSensitive": "SENSITIVE",
+  "auditLogExport": "Export",
+  "auditLogExportFailed": "Export failed",
   "auditLogPageInfo": "Page {current} of {total}",
   "@auditLogPageInfo": {
     "placeholders": {
@@ -778,6 +787,26 @@
       "total": {"type": "int"}
     }
   },
+  "auditLogEntryTotal": "{count} entries",
+  "@auditLogEntryTotal": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "auditLogEntryRange": "Items {start}-{end}",
+  "@auditLogEntryRange": {
+    "placeholders": {
+      "start": {"type": "int"},
+      "end": {"type": "int"}
+    }
+  },
+  "auditLogItemSerial": "#{n}",
+  "@auditLogItemSerial": {
+    "placeholders": {
+      "n": {"type": "int"}
+    }
+  },
+  "auditLogSearchSubmitHint": "Press Enter to search",
   "auditLogActionAllow": "Allowed",
   "auditLogActionWarn": "Risk",
   "auditLogActionBlock": "Blocked",

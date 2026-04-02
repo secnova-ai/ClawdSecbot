@@ -433,6 +433,11 @@ func ClearSecurityEventsBuffer() *C.char {
 	return C.CString(shepherd.ClearSecurityEventsBufferInternal())
 }
 
+//export GetSecurityEventsByRequestIDFFI
+func GetSecurityEventsByRequestIDFFI(requestIDC *C.char) *C.char {
+	return jsonToCString(service.GetSecurityEventsByRequestID(C.GoString(requestIDC)))
+}
+
 // ==================== API 指标 FFI ====================
 
 //export SaveApiMetricsFFI
@@ -760,12 +765,13 @@ func RegisterMessageCallback(callback C.DartCallback) *C.char {
 	C.setDartCallback(callback)
 	callbackActive = true
 
+	// Dart 侧使用 NativeCallable.listener 时, 回调在 isolate 上异步执行; 若在此处 defer C.free,
+	// 会在 Dart 读取指针之前释放内存, Windows 上极易崩溃。内存改由 Dart 复制完 JSON 后调用 FreeString 释放。
 	bridge, err := callback_bridge.NewBridge(func(message string) {
 		if !callbackActive {
 			return
 		}
 		cStr := C.CString(message)
-		defer C.free(unsafe.Pointer(cStr))
 		C.invokeDartCallback(cStr)
 	})
 	if err != nil {
@@ -788,6 +794,7 @@ func RegisterMessageCallback(callback C.DartCallback) *C.char {
 			"source":      event.Source,
 			"asset_name":  event.AssetName,
 			"asset_id":    event.AssetID,
+			"request_id":  event.RequestID,
 		})
 	})
 	return jsonToCString(map[string]interface{}{"success": true, "mode": "callback"})
@@ -1062,26 +1069,33 @@ func DeleteSkill(skillPath *C.char) *C.char {
 	return C.CString(core.DeleteSkillByPlugin("", C.GoString(skillPath)))
 }
 
-// ==================== Audit Log FFI (core/proxy) ====================
+// ==================== TruthRecord Snapshot FFI ====================
+
+//export GetAllTruthRecordSnapshots
+func GetAllTruthRecordSnapshots() *C.char {
+	return C.CString(proxy.GetAllTruthRecordSnapshotsInternal())
+}
+
+// ==================== Audit Log FFI (core/proxy — backed by TruthRecord) ====================
 
 //export GetAuditLogs
 func GetAuditLogs(limit, offset C.int, riskOnly C.int) *C.char {
-	return C.CString(proxy.GetAuditLogsInternal(int(limit), int(offset), riskOnly != 0))
+	return C.CString(proxy.GetTruthRecordsInternal(int(limit), int(offset), riskOnly != 0))
 }
 
 //export GetPendingAuditLogs
 func GetPendingAuditLogs() *C.char {
-	return C.CString(proxy.GetPendingAuditLogsInternal())
+	return C.CString(proxy.GetPendingTruthRecordsInternal())
 }
 
 //export ClearAuditLogs
 func ClearAuditLogs() *C.char {
-	return C.CString(proxy.ClearAuditLogsInternal())
+	return C.CString(proxy.ClearTruthRecordsInternal())
 }
 
 //export ClearAuditLogsWithFilter
 func ClearAuditLogsWithFilter(jsonC *C.char) *C.char {
-	return C.CString(proxy.ClearAuditLogsWithFilterInternal(C.GoString(jsonC)))
+	return C.CString(proxy.ClearTruthRecordsWithFilterInternal(C.GoString(jsonC)))
 }
 
 // ==================== Gateway Sandbox FFI (plugin capability dispatch) ====================

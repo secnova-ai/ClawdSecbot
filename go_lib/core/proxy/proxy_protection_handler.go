@@ -1,7 +1,7 @@
 package proxy
 
 // proxy_protection_handler.go 包含 ProxyProtection 的请求/响应处理方法。
-// 从 proxy_protection.go 中拆分，保持单文件不超过 1500 行。
+// 所有请求生命周期信息统一通过 updateTruthRecord() 写入单一 TruthRecord（SSOT）。
 
 import (
 	"context"
@@ -20,18 +20,22 @@ import (
 
 // onRequest handles incoming requests
 func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatCompletionNewParams, rawBody []byte) (*chatmodelrouting.FilterRequestResult, bool) {
-	// Extract model name from request
 	modelName := string(req.Model)
+	stream := false
+	var requestProbe struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(rawBody, &requestProbe); err == nil {
+		stream = requestProbe.Stream
+	}
 
-	// Get config values with lock
 	pp.configMu.RLock()
 	sessionLimit := pp.singleSessionTokenLimit
 	dailyLimit := pp.dailyTokenLimit
 	initialUsage := pp.initialDailyUsage
 	pp.configMu.RUnlock()
 
-	// Check single-session token limit (total tokens since proxy start)
-	// 配额是硬性预算限制，与审计模式无关，只要配置了限额且超额就必须阻断
+	// ==================== 单会话 Token 配额检查 ====================
 	if sessionLimit > 0 {
 		pp.metricsMu.Lock()
 		sessionTotal := pp.totalTokens - pp.baselineTotalTokens
@@ -45,37 +49,42 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 		if sessionTotal >= sessionLimit {
 			reason := fmt.Sprintf("单会话 Token 配额已用尽 (%d/%d)", sessionTotal, sessionLimit)
 			pp.sendTerminalLog(fmt.Sprintf(">>> %s,已拦截请求 <<<", reason))
-			pp.sendLog("proxy_session_quota_exceeded", map[string]interface{}{
-				"current": sessionTotal,
-				"limit":   sessionLimit,
-			})
 
-			// Initialize audit log for this blocked request
 			pp.auditMu.Lock()
 			pp.requestStartTime = time.Now()
 			pp.currentRequestID = fmt.Sprintf("req_%d_%d", time.Now().UnixNano(), pp.requestCount+1)
-			pp.currentAuditLog = &AuditLog{
-				ID:         generateAuditLogID(),
-				Timestamp:  pp.requestStartTime.Format(time.RFC3339),
-				RequestID:  pp.currentRequestID,
-				AssetName:  pp.assetName,
-				AssetID:    pp.assetID,
-				Model:      modelName,
-				HasRisk:    true,
-				RiskLevel:  "QUOTA",
-				RiskReason: reason,
-				Action:     "BLOCK",
-			}
+			requestID := pp.currentRequestID
 			pp.auditMu.Unlock()
 
-			pp.saveAuditLog(true, "QUOTA", reason, 100, "BLOCK")
+			pp.sendLog("proxy_session_quota_exceeded", map[string]interface{}{
+				"current": sessionTotal,
+				"limit":   sessionLimit,
+				"model":   modelName,
+			})
+
 			mockMsg := formatQuotaExceededMessage("session", sessionTotal, sessionLimit)
+			pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+				r.Model = modelName
+				r.MessageCount = len(req.Messages)
+				r.Phase = RecordPhaseStopped
+				r.CompletedAt = time.Now().Format(time.RFC3339Nano)
+				r.Decision = &SecurityDecision{
+					Action:     "BLOCK",
+					RiskLevel:  "QUOTA",
+					Reason:     reason,
+					Confidence: 100,
+				}
+				applyRecordPrimaryContent(r, RecordContentSecurity, mockMsg, true)
+			})
+
+			pp.emitMonitorRequestCreated(req, rawBody, stream)
+			pp.emitMonitorSecurityDecision("QUOTA_EXCEEDED", reason, true, mockMsg)
+			pp.emitMonitorResponseReturned("QUOTA_EXCEEDED", mockMsg, mockMsg)
 			return &chatmodelrouting.FilterRequestResult{MockContent: mockMsg}, false
 		}
 	}
 
-	// Check daily token limit
-	// 配额是硬性预算限制，与审计模式无关，只要配置了限额且超额就必须阻断
+	// ==================== 每日 Token 配额检查 ====================
 	if dailyLimit > 0 {
 		pp.metricsMu.Lock()
 		runtimeUsage := pp.totalTokens - pp.baselineTotalTokens
@@ -90,79 +99,86 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 		if currentTotal >= dailyLimit {
 			reason := fmt.Sprintf("每日 Token 配额已用尽 (%d/%d)", currentTotal, dailyLimit)
 			pp.sendTerminalLog(fmt.Sprintf(">>> %s,已拦截请求 <<<", reason))
-			pp.sendLog("proxy_quota_exceeded", map[string]interface{}{
-				"current": currentTotal,
-				"limit":   dailyLimit,
-			})
 
-			// Initialize audit log for this blocked request
 			pp.auditMu.Lock()
 			pp.requestStartTime = time.Now()
 			pp.currentRequestID = fmt.Sprintf("req_%d_%d", time.Now().UnixNano(), pp.requestCount+1)
-			pp.currentAuditLog = &AuditLog{
-				ID:         generateAuditLogID(),
-				Timestamp:  pp.requestStartTime.Format(time.RFC3339),
-				RequestID:  pp.currentRequestID,
-				AssetName:  pp.assetName,
-				AssetID:    pp.assetID,
-				Model:      modelName,
-				HasRisk:    true,
-				RiskLevel:  "QUOTA",
-				RiskReason: reason,
-				Action:     "BLOCK",
-			}
+			requestID := pp.currentRequestID
 			pp.auditMu.Unlock()
 
-			pp.saveAuditLog(true, "QUOTA", reason, 100, "BLOCK")
+			pp.sendLog("proxy_quota_exceeded", map[string]interface{}{
+				"current": currentTotal,
+				"limit":   dailyLimit,
+				"model":   modelName,
+			})
+
 			mockMsg := formatQuotaExceededMessage("daily", currentTotal, dailyLimit)
+			pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+				r.Model = modelName
+				r.MessageCount = len(req.Messages)
+				r.Phase = RecordPhaseStopped
+				r.CompletedAt = time.Now().Format(time.RFC3339Nano)
+				r.Decision = &SecurityDecision{
+					Action:     "BLOCK",
+					RiskLevel:  "QUOTA",
+					Reason:     reason,
+					Confidence: 100,
+				}
+				applyRecordPrimaryContent(r, RecordContentSecurity, mockMsg, true)
+			})
+
+			pp.emitMonitorRequestCreated(req, rawBody, stream)
+			pp.emitMonitorSecurityDecision("QUOTA_EXCEEDED", reason, true, mockMsg)
+			pp.emitMonitorResponseReturned("QUOTA_EXCEEDED", mockMsg, mockMsg)
 			return &chatmodelrouting.FilterRequestResult{MockContent: mockMsg}, false
 		}
 	}
 
-	// Increment request count
+	// ==================== 正常请求处理 ====================
 	pp.metricsMu.Lock()
 	pp.requestCount++
 	currentRequestNum := pp.requestCount
 	pp.metricsMu.Unlock()
-	// 请求进入即同步一次指标，确保顶部消息计数及时更新
 	pp.sendMetricsToCallback()
 
-	// Initialize audit log for this request
 	pp.auditMu.Lock()
 	pp.requestStartTime = time.Now()
 	pp.currentRequestID = fmt.Sprintf("req_%d_%d", time.Now().UnixNano(), currentRequestNum)
-	pp.currentAuditLog = &AuditLog{
-		ID:        generateAuditLogID(),
-		Timestamp: pp.requestStartTime.Format(time.RFC3339),
-		RequestID: pp.currentRequestID,
-		AssetName: pp.assetName,
-		AssetID:   pp.assetID,
-		Model:     modelName,
-		HasRisk:   false,
-		Action:    "ALLOW",
-	}
+	requestID := pp.currentRequestID
 	pp.auditMu.Unlock()
 
-	pp.sendLog("proxy_new_request", nil)
-	// 打印安全模型和Bot模型转发地址信息
+	pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+		r.Model = modelName
+		r.MessageCount = len(req.Messages)
+		r.Phase = RecordPhaseStarting
+		r.Decision = &SecurityDecision{Action: "ALLOW"}
+	})
+
+	pp.sendLog("proxy_new_request", map[string]interface{}{
+		"model": modelName,
+	})
+	pp.emitMonitorRequestCreated(req, rawBody, stream)
+
 	securityModel := ""
 	if pp.shepherdGate != nil {
 		securityModel = pp.shepherdGate.GetModelName()
 	}
-	logging.Info("[ProxyProtection] onRequest: model=%s, messageCount=%d, requestID=%s, securityModel=%s, botTargetURL=%s", modelName, len(req.Messages), pp.currentRequestID, securityModel, pp.targetURL)
+	logging.Info("[ProxyProtection] onRequest: model=%s, messageCount=%d, requestID=%s, securityModel=%s, botTargetURL=%s", modelName, len(req.Messages), requestID, securityModel, pp.targetURL)
 	pp.sendLog("proxy_request_info", map[string]interface{}{
 		"model":        modelName,
 		"messageCount": len(req.Messages),
-		"stream":       "unknown",
+		"stream":       fmt.Sprintf("%v", stream),
 	})
-	// Debug: Print all message roles for troubleshooting
+	pp.emitMonitorUpstreamRequestBuilt(req, rawBody)
+	pp.emitMonitorUpstreamRequestSent()
+
 	var roles []string
 	for _, msg := range req.Messages {
 		roles = append(roles, getMessageRole(msg))
 	}
 	pp.sendTerminalLog(fmt.Sprintf("请求消息角色: %v", roles))
 
-	// Check for tool result messages (role=tool) - only these trigger detection
+	// ==================== 工具结果检测逻辑 ====================
 	type toolCallRef struct {
 		ID       string
 		FuncName string
@@ -173,14 +189,8 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 	var latestAssistantIndex int = -1
 	hasToolResultMessages := false
 
-	// Build request content summary for audit log
-	var requestContentParts []string
-
-	// Collect tool result message indices for detection
 	var toolResultIndices []int
 
-	// First pass: find the latest assistant message with tool_calls
-	// AND check if tool messages immediately follow it (before any user message)
 	for i := len(req.Messages) - 1; i >= 0; i-- {
 		msg := req.Messages[i]
 		if msg.OfAssistant != nil && len(msg.OfAssistant.ToolCalls) > 0 {
@@ -197,21 +207,17 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 				pp.sendTerminalLog(fmt.Sprintf("  [%d] ID=%s", idx, tc.ID))
 			}
 
-			// Check if tool messages immediately follow this assistant
-			// and no user message has been sent after the tool messages
 			hasToolsFollowing := false
 			for j := i + 1; j < len(req.Messages); j++ {
 				if req.Messages[j].OfTool != nil {
 					hasToolsFollowing = true
 				} else if req.Messages[j].OfUser != nil {
-					// Found a user message after tools, these tools are already processed
 					pp.sendTerminalLog(fmt.Sprintf("在索引 %d 发现用户消息,说明工具结果已被处理,不触发检测", j))
 					latestAssistantToolCalls = nil
 					latestAssistantIndex = -1
 					break
 				}
 			}
-
 			if hasToolsFollowing && latestAssistantIndex >= 0 {
 				pp.sendTerminalLog("工具调用后紧接着是工具结果,且之后没有用户消息,将触发检测")
 			}
@@ -222,75 +228,109 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 		pp.sendTerminalLog("未找到需要检测的 assistant tool_calls")
 	}
 
-	// Initialize context messages for ShepherdGate
+	// 独立于 ShepherdGate 清除逻辑，收集最新一轮 assistant 工具调用 ID，用于 TruthRecord 标记。
+	// 仅当工具结果尚未被后续 assistant 回复消费时才标记 — 即 tool 消息后面不能紧跟非 tool 消息。
+	latestRoundTCIDs := make(map[string]bool)
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		msg := req.Messages[i]
+		if msg.OfAssistant != nil && len(msg.OfAssistant.ToolCalls) > 0 {
+			hasToolFollowing := false
+			consumed := false
+			for j := i + 1; j < len(req.Messages); j++ {
+				if req.Messages[j].OfTool != nil {
+					hasToolFollowing = true
+				} else if hasToolFollowing {
+					consumed = true
+					break
+				}
+			}
+			if hasToolFollowing && !consumed {
+				for _, tc := range msg.OfAssistant.ToolCalls {
+					latestRoundTCIDs[tc.ID] = true
+				}
+			}
+			break
+		}
+	}
+
 	pp.mu.Lock()
 	pp.lastContextMessages = make([]ConversationMessage, 0, len(req.Messages))
 	pp.mu.Unlock()
 
-	// Log each message in the request
 	for i, msg := range req.Messages {
 		cm := extractConversationMessage(msg)
 		role := cm.Role
 		content := cm.Content
 
-		// Store in context for ShepherdGate
 		pp.mu.Lock()
 		pp.lastContextMessages = append(pp.lastContextMessages, cm)
 		pp.mu.Unlock()
 
-		// Truncate long content for display
 		displayContent := content
 		if len(displayContent) > 200 {
-			displayContent = displayContent[:200] + "...(truncated)"
+			displayContent = truncateString(displayContent, 200)
+		}
+		// 审计用完整内容，单条上限 256KB
+		recordContent := truncateToBytes(content, maxRecordMessageBytes)
+		if len(recordContent) < len(content) {
+			logging.Debug("[TruthRecord] message content truncated to %d bytes (original %d) at index %d role=%s", len(recordContent), len(content), i, role)
 		}
 		pp.sendLog("proxy_message_info", map[string]interface{}{
 			"index":   i,
 			"role":    role,
 			"content": displayContent,
 		})
+		pp.emitMonitorClientMessage(i, role, content)
+		pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+			r.Messages = append(r.Messages, RecordMessage{
+				Index:   i,
+				Role:    role,
+				Content: recordContent,
+			})
+		})
 
-		// Track the last user message for audit (will be used after loop)
-		// 更新成员变量而非局部变量，跨请求持久化防止上下文压缩丢失
 		if role == "user" {
 			pp.mu.Lock()
 			pp.lastUserMessageContent = content
 			pp.mu.Unlock()
 		}
 
-		// Collect tool calls from assistant messages (for context, not for triggering detection)
 		if msg.OfAssistant != nil && len(msg.OfAssistant.ToolCalls) > 0 {
 			for _, tc := range msg.OfAssistant.ToolCalls {
 				toolCallsInHistory = append(toolCallsInHistory, toolCallRef{
 					ID:       tc.ID,
 					FuncName: tc.Function.Name,
+					RawArgs:  tc.Function.Arguments,
 				})
 			}
 		}
 
-		// Collect tool result messages (role=tool means a tool was executed and returned)
-		// ONLY trigger detection if:
-		// 1. This tool result corresponds to the latest assistant tool_calls
-		// 2. This tool message appears AFTER the latest assistant message (not historical)
 		if msg.OfTool != nil {
 			toolCallID := msg.OfTool.ToolCallID
 			toolContent := content
 			if len(toolContent) > 300 {
-				toolContent = toolContent[:300] + "...(truncated)"
+				toolContent = truncateString(toolContent, 300)
 			}
-			pp.sendLog("proxy_tool_result_content", map[string]interface{}{
-				"index":   i,
-				"tool_id": toolCallID,
-				"content": toolContent,
+			pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+				applyRecordPrimaryContent(r, RecordContentToolResult, toolContent, false)
 			})
 			pp.sendTerminalLog(fmt.Sprintf("发现 tool 消息在索引 %d，tool_call_id=%s", i, toolCallID))
-			// Check if this tool result is AFTER the latest assistant message
+
 			if latestAssistantIndex >= 0 && i > latestAssistantIndex {
-				// Check if this tool result matches any tool call ID from the latest assistant message
 				if len(latestAssistantToolCalls) > 0 {
 					matched := false
 					for _, tc := range latestAssistantToolCalls {
 						if tc.ID == toolCallID {
 							pp.sendTerminalLog(fmt.Sprintf("✓ tool_call_id 匹配成功且在最新 assistant 之后: %s", toolCallID))
+							pp.sendLog("proxy_tool_result_content", map[string]interface{}{
+								"index":   i,
+								"tool_id": toolCallID,
+								"content": toolContent,
+							})
+							pp.sendLog("monitor_upstream_tool_result", map[string]interface{}{
+								"tool_id": toolCallID,
+								"summary": pp.previewToolResult(toolContent),
+							})
 							hasToolResultMessages = true
 							toolResultIndices = append(toolResultIndices, i)
 							matched = true
@@ -309,7 +349,6 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 		}
 	}
 
-	// Map tool_call_id to result content for accurate matching
 	toolResultsMap := make(map[string]string)
 	for _, msg := range req.Messages {
 		if msg.OfTool != nil {
@@ -321,53 +360,40 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 		}
 	}
 
-	// Add last user message to request content for audit log
-	pp.mu.Lock()
-	cachedUserMsg := pp.lastUserMessageContent
-	pp.mu.Unlock()
-	if cachedUserMsg != "" {
-		requestContentParts = append(requestContentParts, truncateString(cachedUserMsg, 500))
-	}
-
-	// Update audit log with request content
-	pp.auditMu.Lock()
-	if pp.currentAuditLog != nil {
-		pp.currentAuditLog.RequestContent = strings.Join(requestContentParts, "\n")
-		// Add tool calls to audit log
-		for _, tc := range toolCallsInHistory {
-			isSensitive := false
-			if pp.toolValidator != nil {
-				isSensitive = pp.toolValidator.IsSensitive(tc.FuncName)
-			}
-
-			// Lookup result using ID
-			tcID := strings.TrimSpace(tc.ID)
-			result := ""
-			if val, ok := toolResultsMap[tcID]; ok {
-				result = truncateString(val, 2000)
-			}
-
-			pp.currentAuditLog.ToolCalls = append(pp.currentAuditLog.ToolCalls, AuditToolCall{
-				Name:        tc.FuncName,
-				Arguments:   "", // Arguments not available from toolCallRef
-				IsSensitive: isSensitive,
-				Result:      result,
-			})
+	// 将历史工具调用记录写入 TruthRecord，标记最新一轮
+	for _, tc := range toolCallsInHistory {
+		isSensitive := false
+		if pp.toolValidator != nil {
+			isSensitive = pp.toolValidator.IsSensitive(tc.FuncName)
 		}
+		tcID := strings.TrimSpace(tc.ID)
+		result := ""
+		if val, ok := toolResultsMap[tcID]; ok {
+			result = truncateToBytes(val, maxRecordMessageBytes)
+		}
+		args := truncateToBytes(tc.RawArgs, maxRecordToolArgsBytes)
+		isLatest := latestRoundTCIDs[tcID]
+		pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+			r.ToolCalls = append(r.ToolCalls, RecordToolCall{
+				ID:          tc.ID,
+				Name:        tc.FuncName,
+				Arguments:   args,
+				Result:      result,
+				IsSensitive: isSensitive,
+				Source:      "history",
+				LatestRound: isLatest,
+			})
+		})
 	}
-	pp.auditMu.Unlock()
 
-	// Debug: Log detection trigger decision
 	_ = toolResultIndices
 	pp.sendTerminalLog(fmt.Sprintf("检测触发判断: hasToolResultMessages=%v, 工具结果数量=%d", hasToolResultMessages, len(toolResultIndices)))
 
-	// Store request in stream buffer
 	pp.streamBuffer.ClearAll()
-	pp.streamBuffer.SetRequest(req, rawBody)
+	pp.streamBuffer.SetRequest(requestID, req, rawBody)
 
-	// ShepherdGate 检测：当工具执行结果返回 LLM 前进行安全分析
+	// ==================== ShepherdGate 安全检测 ====================
 	if hasToolResultMessages && pp.shepherdGate != nil {
-		// 检查恢复状态：用户已确认则跳过检测直接放行
 		pp.ensureRecoveryMutex()
 		pp.recoveryMu.Lock()
 		armed := pp.pendingRecoveryArmed
@@ -379,17 +405,16 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			pp.sendLog("proxy_tool_result_recovery_allowed", map[string]interface{}{
 				"armed": true,
 			})
+			pp.emitMonitorSecurityDecision("RECOVERY_ALLOWED", "user confirmed recovery", false, "")
 		} else {
 			pp.configMu.RLock()
 			auditOnlyForShepherd := pp.auditOnly
 			pp.configMu.RUnlock()
 
-			// 仅审计模式：跳过 ShepherdGate 风险研判，直接放行
 			if auditOnlyForShepherd {
 				logging.Info("[ProxyProtection] Audit-only mode, skipping ShepherdGate analysis")
 				pp.sendTerminalLog("📋 仅审计模式，跳过 ShepherdGate 检测，直接放行")
 			} else {
-				// 构建 ToolCallInfo 和 ToolResultInfo
 				var toolCallInfos []ToolCallInfo
 				for _, tcRef := range latestAssistantToolCalls {
 					info := ToolCallInfo{
@@ -418,10 +443,46 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 					}
 				}
 
+				skipShepherdForSandboxBlock := false
+				for _, tr := range toolResultInfos {
+					if !isClawdSecbotSandboxBlockedToolResult(tr.Content) {
+						continue
+					}
+					if !pp.markSandboxBlockedToolResultIfFirst(tr.ToolCallID) {
+						continue
+					}
+
+					skipShepherdForSandboxBlock = true
+					pp.sendTerminalLog(fmt.Sprintf(
+						"检测到 ClawdSecbot 沙箱已阻止工具结果，跳过 ShepherdGate 二次确认: tool=%s, tool_call_id=%s",
+						tr.FuncName,
+						tr.ToolCallID,
+					))
+					pp.sendLog("proxy_tool_result_sandbox_blocked", map[string]interface{}{
+						"tool_id":  tr.ToolCallID,
+						"tool":     tr.FuncName,
+						"detected": true,
+					})
+					break
+				}
+
+				if skipShepherdForSandboxBlock {
+					pp.emitMonitorSecurityDecision(
+						"SANDBOX_BLOCKED",
+						"tool result already blocked by ClawdSecbot sandbox",
+						false,
+						"",
+					)
+					return nil, true
+				}
+
 				var toolNames []string
 				for _, tc := range toolCallInfos {
 					toolNames = append(toolNames, tc.Name)
 				}
+				pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+					// Tool names/count will be computed from ToolCalls by frontend getters
+				})
 				pp.sendTerminalLog(fmt.Sprintf("🔍 ShepherdGate 正在检查 %d 个工具结果: %s", len(toolResultInfos), strings.Join(toolNames, ", ")))
 
 				pp.mu.Lock()
@@ -432,11 +493,8 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 				securityModel := pp.shepherdGate.GetModelName()
 				logging.Info("[ProxyProtection] ShepherdGate tool result detection triggered: toolCalls=%d, toolResults=%d, securityModel=%s", len(toolCallInfos), len(toolResultInfos), securityModel)
 
-				// 使用代理服务的生命周期 context（pp.ctx）而非请求 context，
-				// 防止客户端断连或请求超时导致 ShepherdGate 分析中途取消，影响代理正常转发。
-				decision, err := pp.shepherdGate.CheckToolCall(pp.ctx, contextMessages, toolCallInfos, toolResultInfos, cachedLastUserMsg)
+				decision, err := pp.shepherdGate.CheckToolCall(pp.ctx, contextMessages, toolCallInfos, toolResultInfos, cachedLastUserMsg, requestID)
 
-				// 更新分析计数
 				pp.statsMu.Lock()
 				pp.analysisCount++
 				pp.statsMu.Unlock()
@@ -454,12 +512,9 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 				}
 
 				if err != nil {
-					// fail-open: 分析失败时放行
 					logging.Error("[ProxyProtection] ShepherdGate tool result check failed: %v, fail-open", err)
 				} else if decision.Status != "ALLOWED" {
 					logging.Info("[ProxyProtection] ShepherdGate tool result decision: status=%s, reason=%s", decision.Status, decision.Reason)
-
-					// 拦截：存储 pending recovery，返回 mock 安全警告
 					pp.sendTerminalLog(fmt.Sprintf("🛡️ ShepherdGate 拦截工具结果: %s - %s", decision.Status, decision.Reason))
 					pp.sendLog("proxy_tool_result_decision", map[string]interface{}{
 						"status":      decision.Status,
@@ -470,17 +525,28 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 						"risk_type":   decision.RiskType,
 					})
 
-					// 存储恢复信息，下次用户确认后放行
 					pp.storePendingToolCallRecovery(nil, "", decision.Reason, "tool_result")
 
 					securityMsg := pp.shepherdGate.FormatSecurityMessage(decision)
 					securityMsg = pp.shepherdGate.TranslateForUser(pp.ctx, securityMsg, cachedLastUserMsg)
-					pp.saveAuditLog(true, "BLOCKED", decision.Reason, 100, "BLOCK")
+					pp.emitMonitorSecurityDecision(decision.Status, decision.Reason, true, securityMsg)
+					pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+						r.Phase = RecordPhaseStopped
+						r.CompletedAt = time.Now().Format(time.RFC3339Nano)
+						r.Decision = &SecurityDecision{
+							Action:     "BLOCK",
+							RiskLevel:  "BLOCKED",
+							Reason:     decision.Reason,
+							Confidence: 100,
+						}
+						applyRecordPrimaryContent(r, RecordContentSecurity, securityMsg, true)
+					})
 					pp.statsMu.Lock()
 					pp.blockedCount++
 					pp.warningCount++
 					pp.statsMu.Unlock()
 					pp.sendMetricsToCallback()
+					pp.emitMonitorResponseReturned(decision.Status, securityMsg, securityMsg)
 
 					return &chatmodelrouting.FilterRequestResult{MockContent: securityMsg}, false
 				} else {
@@ -494,13 +560,18 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 						"action_desc": decision.ActionDesc,
 						"risk_type":   decision.RiskType,
 					})
+					pp.emitMonitorSecurityDecision(decision.Status, decision.Reason, false, "")
+					pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+						r.Decision = &SecurityDecision{
+							Action: "ALLOW",
+							Reason: decision.Reason,
+						}
+					})
 				}
 			}
 		}
 	}
 
-	// 用户确认后，自动准备恢复上一轮被拦截的工具结果
-	// 用代理生命周期 context 避免请求 context 取消导致意图识别失败
 	if pp.armPendingRecoveryFromRequest(pp.ctx, req.Messages) {
 		pp.sendTerminalLog("🔄 已识别用户确认，下一次请求将自动放行被拦截的工具结果")
 		pp.sendLog("proxy_pending_tool_recovery_armed", map[string]interface{}{
@@ -508,17 +579,22 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 		})
 	}
 
-	return nil, true // Allow request to pass through
+	return nil, true
 }
 
 // onResponse handles non-streaming responses
-// Note: Detection is NOT triggered here when tool_calls are present.
-// Detection only happens in onRequest when tool results (role=tool) are received.
 func (pp *ProxyProtection) onResponse(ctx context.Context, resp *openai.ChatCompletion) bool {
-	pp.sendLog("proxy_response_non_stream", nil)
-	pp.sendLog("proxy_response_info", map[string]interface{}{
+	requestID := pp.activeRequestID()
+	pp.sendLogForRequest(requestID, "proxy_response_non_stream", nil)
+	pp.sendLogForRequest(requestID, "proxy_response_info", map[string]interface{}{
 		"model":       resp.Model,
 		"choiceCount": len(resp.Choices),
+	})
+	pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+		r.Phase = RecordPhaseCompleted
+		if r.Model == "" {
+			r.Model = resp.Model
+		}
 	})
 	var outputContent string
 	var generatedToolCalls []openai.ChatCompletionMessageToolCall
@@ -533,48 +609,66 @@ func (pp *ProxyProtection) onResponse(ctx context.Context, resp *openai.ChatComp
 			pp.sendTerminalLog(fmt.Sprintf("onResponse tool_call: %s", tc.Function.Name))
 		}
 
-		// Log response content
 		if msg.Content != "" {
-			displayContent := msg.Content
-			if len(displayContent) > 2000 {
-				displayContent = displayContent[:2000] + "...(truncated)"
+			logContent := msg.Content
+			if len(logContent) > 2000 {
+				logContent = truncateString(logContent, 2000)
 			}
-			pp.sendLog("proxy_response_content", map[string]interface{}{
-				"content": displayContent,
+			recordContent := truncateToBytes(msg.Content, maxRecordMessageBytes)
+			pp.sendLogForRequest(requestID, "proxy_response_content", map[string]interface{}{
+				"content": logContent,
+			})
+			pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+				assistantIndex := len(r.Messages)
+				if assistantIndex < r.MessageCount {
+					assistantIndex = r.MessageCount
+				}
+				if len(r.Messages) == 0 ||
+					r.Messages[len(r.Messages)-1].Role != "assistant" ||
+					r.Messages[len(r.Messages)-1].Content != recordContent {
+					r.Messages = append(r.Messages, RecordMessage{
+						Index:   assistantIndex,
+						Role:    "assistant",
+						Content: recordContent,
+					})
+				}
+				applyRecordPrimaryContent(r, RecordContentAssistant, previewRecordContent(msg.Content, 300).Content, true)
 			})
 		}
 
-		// Log tool calls (for visibility only, detection happens in onRequest when tool results arrive)
 		if len(msg.ToolCalls) > 0 {
 			pp.metricsMu.Lock()
 			pp.totalToolCalls += len(msg.ToolCalls)
 			pp.metricsMu.Unlock()
 			pp.sendMetricsToCallback()
 
-			pp.sendLog("proxy_tool_calls_detected", nil)
-			pp.sendLog("proxy_tool_call_count", map[string]interface{}{
+			pp.sendLogForRequest(requestID, "proxy_tool_calls_detected", nil)
+			pp.sendLogForRequest(requestID, "proxy_tool_call_count", map[string]interface{}{
 				"count": len(msg.ToolCalls),
 			})
 			for i, tc := range msg.ToolCalls {
 				args := tc.Function.Arguments
 				if len(args) > 200 {
-					args = args[:200] + "..."
+					args = truncateString(args, 200)
 				}
-				pp.sendLog("proxy_tool_call_name", map[string]interface{}{
+				pp.sendLogForRequest(requestID, "proxy_tool_call_name", map[string]interface{}{
 					"index": i,
 					"name":  tc.Function.Name,
 				})
-				pp.sendLog("proxy_tool_call_args", map[string]interface{}{
+				pp.sendLogForRequest(requestID, "proxy_tool_call_args", map[string]interface{}{
 					"index": i,
 					"args":  args,
 				})
+				pp.sendLog("monitor_upstream_tool_call", map[string]interface{}{
+					"index": i,
+					"name":  tc.Function.Name,
+				})
 			}
-			pp.sendLog("proxy_tool_calls_pending", nil)
+			pp.sendLogForRequest(requestID, "proxy_tool_calls_pending", nil)
 		}
 	}
 
-	// Collect token usage statistics.
-	// For providers that omit usage in non-streaming mode, estimate to avoid undercounting.
+	// Token usage
 	promptTokens := int(resp.Usage.PromptTokens)
 	completionTokens := int(resp.Usage.CompletionTokens)
 	totalTokens := int(resp.Usage.TotalTokens)
@@ -610,39 +704,44 @@ func (pp *ProxyProtection) onResponse(ctx context.Context, resp *openai.ChatComp
 		pp.metricsMu.Unlock()
 
 		if hasUsageFromUpstream {
-			pp.sendLog("proxy_token_usage", map[string]interface{}{
+			pp.sendLogForRequest(requestID, "proxy_token_usage", map[string]interface{}{
 				"promptTokens":     promptTokens,
 				"completionTokens": completionTokens,
 				"totalTokens":      totalTokens,
 			})
 		} else {
-			pp.sendLog("proxy_token_usage_estimated", map[string]interface{}{
+			pp.sendLogForRequest(requestID, "proxy_token_usage_estimated", map[string]interface{}{
 				"promptTokens":     promptTokens,
 				"completionTokens": completionTokens,
 				"totalTokens":      totalTokens,
 			})
 		}
-
-		// 发送指标到 Callback Bridge
 		pp.sendMetricsToCallback()
 	}
 
-	// Finalize audit log for non-streaming response
-	pp.finalizeAuditLog(outputContent, generatedToolCalls, promptTokens, completionTokens, totalTokens)
-
+	// Finalize via TruthRecord
+	pp.finalizeTruthRecord(requestID, outputContent, generatedToolCalls, promptTokens, completionTokens)
+	pp.sendLog("monitor_upstream_completed", map[string]interface{}{
+		"response_mode":        "non_stream",
+		"final_text":           truncateString(outputContent, 2000),
+		"finish_reason":        "stop",
+		"raw_response_preview": truncateString(resp.RawJSON(), 2000),
+	})
+	pp.emitMonitorResponseReturned("COMPLETED", outputContent, resp.RawJSON())
+	pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+		if len(resp.Choices) > 0 {
+			r.FinishReason = string(resp.Choices[0].FinishReason)
+		}
+	})
 	return true
 }
 
 // onStreamChunk handles streaming responses
-// Note: Tool calls are accumulated for audit purposes but NOT stripped from chunks.
-// Detection happens in onRequest when tool results (role=tool) are received.
 func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.ChatCompletionChunk) bool {
-	// Track current request's token usage (for audit log)
-	// Note: In streaming, usage is typically only sent in the final chunk with finish_reason
+	requestID := pp.activeRequestID()
 	var currentRequestPromptTokens, currentRequestCompletionTokens, currentRequestTotalTokens int
-	// Only process usage when it contains meaningful data (at least one non-zero token count).
+
 	if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 || chunk.Usage.TotalTokens > 0 {
-		// Store current request's token for audit log
 		currentRequestPromptTokens = int(chunk.Usage.PromptTokens)
 		currentRequestCompletionTokens = int(chunk.Usage.CompletionTokens)
 		currentRequestTotalTokens = int(chunk.Usage.TotalTokens)
@@ -650,8 +749,6 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 			currentRequestTotalTokens = currentRequestPromptTokens + currentRequestCompletionTokens
 		}
 
-		// Usage may be emitted as cumulative values across multiple chunks.
-		// Convert to deltas before accumulating global counters.
 		pp.streamBuffer.mu.Lock()
 		prevPromptTokens := pp.streamBuffer.promptTokens
 		prevCompletionTokens := pp.streamBuffer.completionTokens
@@ -668,41 +765,27 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 		if deltaTotalTokens < 0 {
 			deltaTotalTokens = currentRequestTotalTokens
 		}
-
-		// Store latest usage snapshot for this request.
 		pp.streamBuffer.promptTokens = currentRequestPromptTokens
 		pp.streamBuffer.completionTokens = currentRequestCompletionTokens
 		pp.streamBuffer.totalTokens = currentRequestTotalTokens
 		pp.streamBuffer.mu.Unlock()
 
-		// Also update global cumulative metrics
 		pp.metricsMu.Lock()
 		pp.totalPromptTokens += deltaPromptTokens
 		pp.totalCompletionTokens += deltaCompletionTokens
 		pp.totalTokens += deltaTotalTokens
 		pp.metricsMu.Unlock()
 
-		// Update audit log (whether pending or finalized)
-		pp.auditMu.Lock()
-		if pp.currentAuditLog != nil {
-			pp.currentAuditLog.PromptTokens = currentRequestPromptTokens
-			pp.currentAuditLog.CompletionTokens = currentRequestCompletionTokens
-			pp.currentAuditLog.TotalTokens = currentRequestTotalTokens
-			pp.auditMu.Unlock()
-		} else {
-			reqID := pp.currentRequestID
-			pp.auditMu.Unlock()
-			auditLogBuffer.UpdateAuditLogTokens(reqID, currentRequestPromptTokens, currentRequestCompletionTokens, currentRequestTotalTokens)
-		}
-
-		pp.sendLog("proxy_token_usage", map[string]interface{}{
+		pp.sendLogForRequest(requestID, "proxy_token_usage", map[string]interface{}{
 			"promptTokens":     currentRequestPromptTokens,
 			"completionTokens": currentRequestCompletionTokens,
 			"totalTokens":      currentRequestTotalTokens,
 		})
-
-		// 发送指标到 Callback Bridge
 		pp.sendMetricsToCallback()
+		pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+			r.PromptTokens = currentRequestPromptTokens
+			r.CompletionTokens = currentRequestCompletionTokens
+		})
 	}
 
 	if len(chunk.Choices) == 0 {
@@ -711,14 +794,18 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 
 	choice := &chunk.Choices[0]
 
-	// Check if there's meaningful delta content or finish reason
 	if choice.Delta.Content == "" && choice.Delta.Role == "" && len(choice.Delta.ToolCalls) == 0 && choice.FinishReason == "" {
 		return true
 	}
 
-	// Accumulate content (for logging purposes)
 	if choice.Delta.Content != "" {
-		// 获取追加前的长度
+		if !pp.streamBuffer.started {
+			pp.streamBuffer.started = true
+			pp.sendLog("monitor_upstream_stream_started", map[string]interface{}{
+				"response_mode": "stream",
+			})
+		}
+
 		pp.streamBuffer.mu.Lock()
 		prevLen := 0
 		for _, c := range pp.streamBuffer.contentChunks {
@@ -727,60 +814,109 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 		pp.streamBuffer.mu.Unlock()
 
 		pp.streamBuffer.AppendContent(choice.Delta.Content)
-
-		// 计算追加后的长度
 		newLen := prevLen + len(choice.Delta.Content)
 
-		// 节流：首次收到内容或每 200 字符发送一次进度日志
 		if prevLen == 0 || (prevLen/200 != newLen/200) {
-			pp.sendLog("proxy_stream_content", map[string]interface{}{
+			pp.sendLogForRequest(requestID, "proxy_stream_content", map[string]interface{}{
 				"chars": newLen,
 			})
 		}
+		pp.sendLog("proxy_stream_delta", map[string]interface{}{
+			"content": choice.Delta.Content,
+		})
+		pp.sendLog("monitor_upstream_stream_delta", map[string]interface{}{
+			"content": choice.Delta.Content,
+		})
 	}
 
-	// Accumulate tool calls for audit logging (detection happens in onRequest, not here)
 	if len(choice.Delta.ToolCalls) > 0 {
 		for _, stc := range choice.Delta.ToolCalls {
 			pp.streamBuffer.MergeStreamToolCall(stc)
 		}
+		for _, update := range pp.streamBuffer.ConsumeNewlyReadyToolCalls() {
+			tc := update.ToolCall
+			pp.sendLog("proxy_tool_call_name", map[string]interface{}{
+				"index": update.Index,
+				"name":  tc.Function.Name,
+			})
+			pp.sendLog("monitor_upstream_tool_call", map[string]interface{}{
+				"index": update.Index,
+				"name":  tc.Function.Name,
+			})
+			if tc.Function.Arguments != "" {
+				args := tc.Function.Arguments
+				if len(args) > 200 {
+					args = truncateString(args, 200)
+				}
+				pp.sendLog("proxy_tool_call_args", map[string]interface{}{
+					"index": update.Index,
+					"args":  args,
+				})
+			}
+		}
 	}
 
-	// Check finish reason - process tool calls ONLY when the stream (or tool call) finishes
 	if choice.FinishReason != "" {
-		pp.sendLog("proxy_stream_finished", map[string]interface{}{
+		pp.sendLogForRequest(requestID, "proxy_stream_finished", map[string]interface{}{
 			"reason": choice.FinishReason,
 		})
-		// Check if we have buffered tool calls - log for visibility (detection happens in onRequest)
+		pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+			r.FinishReason = string(choice.FinishReason)
+		})
+
 		if pp.streamBuffer.HasToolCalls() {
 			pp.streamBuffer.mu.Lock()
 			toolCallCount := len(pp.streamBuffer.toolCalls)
 			bufferToolCalls := make([]openai.ChatCompletionMessageToolCall, len(pp.streamBuffer.toolCalls))
 			copy(bufferToolCalls, pp.streamBuffer.toolCalls)
+			var contentWithTools string
+			for _, c := range pp.streamBuffer.contentChunks {
+				contentWithTools += c
+			}
 			pp.streamBuffer.mu.Unlock()
 
 			pp.sendTerminalLog(fmt.Sprintf("onStreamChunk: %d tool calls in stream", toolCallCount))
 
-			// Collect tool call statistics
 			pp.metricsMu.Lock()
 			pp.totalToolCalls += toolCallCount
 			pp.metricsMu.Unlock()
 			pp.sendMetricsToCallback()
 
-			// Log tool calls for Flutter UI display
-			pp.sendLog("proxy_tool_call_count", map[string]interface{}{
+			if len(contentWithTools) > 0 {
+				displayContent := contentWithTools
+				if len(displayContent) > 300 {
+					displayContent = truncateString(displayContent, 300)
+				}
+				pp.sendLog("proxy_stream_content_with_tools", map[string]interface{}{
+					"content": displayContent,
+				})
+			}
+
+			pp.sendLogForRequest(requestID, "proxy_tool_call_count", map[string]interface{}{
 				"count": toolCallCount,
 			})
 			for i, tc := range bufferToolCalls {
-				pp.sendLog("proxy_tool_call_name", map[string]interface{}{
+				pp.sendLogForRequest(requestID, "proxy_tool_call_name", map[string]interface{}{
 					"index": i,
 					"name":  tc.Function.Name,
 				})
 			}
-			// Detection will be triggered in the next request when tool results arrive
-			pp.sendLog("proxy_tool_calls_pending", nil)
+			pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+				for _, tc := range bufferToolCalls {
+					args := truncateToBytes(tc.Function.Arguments, maxRecordToolArgsBytes)
+					r.ToolCalls = append(r.ToolCalls, RecordToolCall{
+						ID:        tc.ID,
+						Name:      tc.Function.Name,
+						Arguments: args,
+						Source:    "response",
+					})
+				}
+				if contentWithTools == "" {
+					applyRecordPrimaryContent(r, RecordContentNoText, "Assistant generated tool calls only.", false)
+				}
+			})
+			pp.sendLogForRequest(requestID, "proxy_tool_calls_pending", nil)
 		} else {
-			// No tool calls - log accumulated content
 			pp.streamBuffer.mu.Lock()
 			var accumulatedContent string
 			for _, c := range pp.streamBuffer.contentChunks {
@@ -789,57 +925,66 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 			pp.streamBuffer.mu.Unlock()
 
 			if len(accumulatedContent) > 0 {
-				displayContent := accumulatedContent
-				if len(displayContent) > 300 {
-					displayContent = displayContent[:300] + "...(truncated)"
+				logContent := accumulatedContent
+				if len(logContent) > 300 {
+					logContent = truncateString(logContent, 300)
 				}
-				pp.sendLog("proxy_stream_content_no_tools", map[string]interface{}{
-					"content": displayContent,
+				recordContent := truncateToBytes(accumulatedContent, maxRecordMessageBytes)
+				pp.sendLogForRequest(requestID, "proxy_stream_content_no_tools", map[string]interface{}{
+					"content": logContent,
+				})
+				pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+					assistantIndex := len(r.Messages)
+					if assistantIndex < r.MessageCount {
+						assistantIndex = r.MessageCount
+					}
+					if len(r.Messages) == 0 ||
+						r.Messages[len(r.Messages)-1].Role != "assistant" ||
+						r.Messages[len(r.Messages)-1].Content != recordContent {
+						r.Messages = append(r.Messages, RecordMessage{
+							Index:   assistantIndex,
+							Role:    "assistant",
+							Content: recordContent,
+						})
+					}
+					applyRecordPrimaryContent(r, RecordContentAssistant, previewRecordContent(accumulatedContent, 300).Content, true)
 				})
 			}
 		}
 
-		// Finalize audit log for streaming response
+		// Finalize
 		pp.streamBuffer.mu.Lock()
 		var outputContent string
 		for _, c := range pp.streamBuffer.contentChunks {
 			outputContent += c
 		}
-		// Get token usage for current request (stored when usage was received in stream)
 		promptTokens := pp.streamBuffer.promptTokens
 		completionTokens := pp.streamBuffer.completionTokens
 		totalTokens := pp.streamBuffer.totalTokens
 		generatedToolCalls := pp.streamBuffer.toolCalls
 
-		// If no usage was returned in stream (common in some providers), estimate it
 		if totalTokens == 0 {
 			promptTokens = calculateRequestTokensFromRaw(pp.streamBuffer.requestMessages, pp.streamBuffer.toolsRaw)
 			completionTokens = estimateTokenCount(outputContent)
-
-			// Add tokens for tool calls if present
 			if len(pp.streamBuffer.toolCalls) > 0 {
 				if toolCallsBytes, err := json.Marshal(pp.streamBuffer.toolCalls); err == nil {
 					completionTokens += estimateTokenCount(string(toolCallsBytes))
 				}
 			}
-
 			totalTokens = promptTokens + completionTokens
 
-			// Update global metrics since they weren't updated during stream
 			pp.metricsMu.Lock()
 			pp.totalPromptTokens += promptTokens
 			pp.totalCompletionTokens += completionTokens
 			pp.totalTokens += totalTokens
 			pp.metricsMu.Unlock()
-			// 流式估算 token 也要同步指标，保证统计与日志结束时一致
 			pp.sendMetricsToCallback()
 
-			// Update streamBuffer for consistency
 			pp.streamBuffer.promptTokens = promptTokens
 			pp.streamBuffer.completionTokens = completionTokens
 			pp.streamBuffer.totalTokens = totalTokens
 
-			pp.sendLog("proxy_token_usage_estimated", map[string]interface{}{
+			pp.sendLogForRequest(requestID, "proxy_token_usage_estimated", map[string]interface{}{
 				"promptTokens":     promptTokens,
 				"completionTokens": completionTokens,
 				"totalTokens":      totalTokens,
@@ -847,7 +992,14 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 		}
 		pp.streamBuffer.mu.Unlock()
 
-		pp.finalizeAuditLog(outputContent, generatedToolCalls, promptTokens, completionTokens, totalTokens)
+		pp.finalizeTruthRecord(requestID, outputContent, generatedToolCalls, promptTokens, completionTokens)
+		pp.sendLog("monitor_upstream_completed", map[string]interface{}{
+			"response_mode":        "stream",
+			"final_text":           truncateString(outputContent, 2000),
+			"finish_reason":        choice.FinishReason,
+			"raw_response_preview": truncateString(outputContent, 2000),
+		})
+		pp.emitMonitorResponseReturned("COMPLETED", outputContent, outputContent)
 
 		pp.streamBuffer.Clear()
 	}
@@ -856,7 +1008,6 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 }
 
 // formatQuotaExceededMessage 根据语言生成配额超限的模拟返回消息
-// quotaType: "session" 或 "daily"
 func formatQuotaExceededMessage(quotaType string, current, limit int) string {
 	lang := shepherd.NormalizeShepherdLanguage(skillscan.GetLanguageFromAppSettings())
 
@@ -871,7 +1022,6 @@ func formatQuotaExceededMessage(quotaType string, current, limit int) string {
 			quotaName, current, limit)
 	}
 
-	// English (default)
 	var quotaName string
 	if quotaType == "session" {
 		quotaName = "Session token quota exceeded"

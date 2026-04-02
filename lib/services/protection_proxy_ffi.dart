@@ -85,6 +85,10 @@ typedef GetProtectionProxyLogsDart =
 typedef ResetProtectionStatisticsC = ffi.Pointer<Utf8> Function();
 typedef ResetProtectionStatisticsDart = ffi.Pointer<Utf8> Function();
 
+// --- TruthRecord 快照（非破坏性全量读取） ---
+typedef GetAllTruthRecordSnapshotsC = ffi.Pointer<Utf8> Function();
+typedef GetAllTruthRecordSnapshotsDart = ffi.Pointer<Utf8> Function();
+
 // --- 审计日志缓冲 ---
 typedef GetAuditLogsC =
     ffi.Pointer<Utf8> Function(ffi.Int32, ffi.Int32, ffi.Int32);

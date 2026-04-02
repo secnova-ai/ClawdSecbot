@@ -1,4 +1,4 @@
-//go:build windows
+//go:build linux
 
 package sandbox
 
@@ -12,19 +12,16 @@ import (
 	"go_lib/core/logging"
 )
 
-// HookLogEvent represents a parsed event from the hook DLL log file
 type HookLogEvent struct {
 	Timestamp string
-	Action    string // BLOCK/LOG_ONLY or legacy BLOCK_FILE/BLOCK_CMD/BLOCK_NET/...
-	Type      string // PATH-READ/CMD/NET/DNS... (new format), optional for legacy lines
-	Target    string // target path/domain/ip (new format), optional for legacy lines
-	Detail    string // legacy detail or fallback detail
+	Action    string
+	Type      string
+	Target    string
+	Detail    string
 }
 
-// HookLogCallback is called when new hook log events are detected
 type HookLogCallback func(event HookLogEvent)
 
-// HookLogWatcher monitors the hook DLL's audit log file and emits events
 type HookLogWatcher struct {
 	mu       sync.Mutex
 	logPath  string
@@ -34,7 +31,6 @@ type HookLogWatcher struct {
 	offset   int64
 }
 
-// NewHookLogWatcher creates a watcher for the specified log file
 func NewHookLogWatcher(logPath string, cb HookLogCallback) *HookLogWatcher {
 	return &HookLogWatcher{
 		logPath:  logPath,
@@ -43,7 +39,6 @@ func NewHookLogWatcher(logPath string, cb HookLogCallback) *HookLogWatcher {
 	}
 }
 
-// Start begins watching the log file
 func (w *HookLogWatcher) Start() {
 	w.mu.Lock()
 	if w.running {
@@ -57,7 +52,6 @@ func (w *HookLogWatcher) Start() {
 	go w.watchLoop()
 }
 
-// Stop stops the watcher
 func (w *HookLogWatcher) Stop() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -110,16 +104,10 @@ func (w *HookLogWatcher) readNewLines() {
 	w.offset = newOffset
 }
 
-// shouldEmitHookSecurityEvent decides whether a hook log event should be promoted
-// into the unified security event pipeline.
-// We keep sandbox lifecycle noise in hook log files, but not in UI/database events.
 func shouldEmitHookSecurityEvent(event HookLogEvent) bool {
 	return event.Action == "BLOCK"
 }
 
-// parseHookLogLine parses two formats:
-// 1) New: [2026-03-18 12:00:00] ACTION=BLOCK TYPE=PATH-READ TARGET=C:\Users\a.txt
-// 2) Legacy: [2026-03-18 12:00:00] BLOCK_FILE: C:\Users\secret\data.txt
 func parseHookLogLine(line string) (HookLogEvent, bool) {
 	line = strings.TrimSpace(line)
 	if len(line) < 22 || line[0] != '[' {
@@ -190,7 +178,6 @@ func extractKV(s, key string) string {
 	return strings.TrimSpace(rest[:end])
 }
 
-// MapHookEventToSecurityEvent maps a hook log event to the standard event type/risk classification
 func MapHookEventToSecurityEvent(event HookLogEvent) (eventType, actionDesc, riskType, source string) {
 	source = "sandbox_hook"
 
@@ -263,18 +250,15 @@ func hookActionToRiskType(action string) string {
 	}
 }
 
-// Global watcher registry
 var (
 	hookWatchers   = make(map[string]*HookLogWatcher)
 	hookWatchersMu sync.Mutex
 )
 
-// StartHookLogWatcher starts a log watcher for an asset's hook log
 func StartHookLogWatcher(assetName, logPath string, cb HookLogCallback) {
 	StartHookLogWatcherByKey(assetName, logPath, cb)
 }
 
-// StartHookLogWatcherByKey starts a log watcher with an explicit instance key.
 func StartHookLogWatcherByKey(assetKey, logPath string, cb HookLogCallback) {
 	hookWatchersMu.Lock()
 	defer hookWatchersMu.Unlock()
@@ -289,12 +273,10 @@ func StartHookLogWatcherByKey(assetKey, logPath string, cb HookLogCallback) {
 	logging.Info("[Sandbox] Started hook log watcher for %s: %s", assetKey, logPath)
 }
 
-// StopHookLogWatcher stops the log watcher for an asset
 func StopHookLogWatcher(assetName string) {
 	StopHookLogWatcherByKey(assetName)
 }
 
-// StopHookLogWatcherByKey stops the log watcher for an explicit instance key.
 func StopHookLogWatcherByKey(assetKey string) {
 	hookWatchersMu.Lock()
 	defer hookWatchersMu.Unlock()
@@ -305,7 +287,6 @@ func StopHookLogWatcherByKey(assetKey string) {
 	}
 }
 
-// StopAllHookLogWatchers stops all active watchers
 func StopAllHookLogWatchers() {
 	hookWatchersMu.Lock()
 	defer hookWatchersMu.Unlock()

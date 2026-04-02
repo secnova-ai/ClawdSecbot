@@ -792,7 +792,14 @@
   "auditLogBlocked": "拦截次数",
   "auditLogWarned": "警告",
   "auditLogAllowed": "已允许",
-  "auditLogSearchHint": "搜索日志...",
+  "auditLogSearchHint": "搜索请求、回复、风险说明与消息/工具 JSON...",
+  "@auditLogSearchHint": {
+    "description": "审计日志搜索框占位说明"
+  },
+  "auditLogSearchTooltip": "在请求正文、模型输出、风险说明以及 messages、tool_calls 的 JSON 原文中做子串匹配（不搜请求 ID 等结构化字段）。",
+  "@auditLogSearchTooltip": {
+    "description": "审计日志搜索框图标悬停帮助"
+  },
   "auditLogRiskOnly": "仅显示风险",
   "auditLogNoLogs": "暂无审计日志",
   "auditLogRefresh": "刷新",
@@ -818,6 +825,8 @@
   "auditLogToolArguments": "参数",
   "auditLogToolResult": "结果",
   "auditLogSensitive": "敏感",
+  "auditLogExport": "导出",
+  "auditLogExportFailed": "导出失败",
   "auditLogPageInfo": "第 {current} 页，共 {total} 页",
   "@auditLogPageInfo": {
     "placeholders": {
@@ -825,6 +834,26 @@
       "total": {"type": "int"}
     }
   },
+  "auditLogEntryTotal": "共 {count} 条",
+  "@auditLogEntryTotal": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "auditLogEntryRange": "第 {start}-{end} 条",
+  "@auditLogEntryRange": {
+    "placeholders": {
+      "start": {"type": "int"},
+      "end": {"type": "int"}
+    }
+  },
+  "auditLogItemSerial": "第 {n} 条",
+  "@auditLogItemSerial": {
+    "placeholders": {
+      "n": {"type": "int"}
+    }
+  },
+  "auditLogSearchSubmitHint": "按回车搜索",
   "auditLogActionAllow": "已允许",
   "auditLogActionWarn": "有风险",
   "auditLogActionBlock": "已拦截",

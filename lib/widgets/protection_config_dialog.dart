@@ -396,8 +396,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                     );
                     if (success) {
                       try {
-                        final protectionService = ProtectionService();
-                        protectionService.setAssetName(
+                        final protectionService = ProtectionService.forAsset(
                           widget.assetName,
                           _config.assetID,
                         );
@@ -470,17 +469,25 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           }
           return;
         }
-        final botSaved = await botFormState.saveConfig(deferProxyRestart: true);
-        if (!botSaved && mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text(l10n.modelConfigSaveFailed)));
-          if (botTabIndex != null) {
-            _tabController.animateTo(botTabIndex);
+        if (!botFormState.hasConfigChanged) {
+          appLogger.info(
+            '[ProtectionConfig] Bot model unchanged, skip bot model save.',
+          );
+        } else {
+          final botSaved = await botFormState.saveConfig(
+            deferProxyRestart: true,
+          );
+          if (!botSaved && mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(l10n.modelConfigSaveFailed)));
+            if (botTabIndex != null) {
+              _tabController.animateTo(botTabIndex);
+            }
+            return;
           }
-          return;
+          botModelSaved = true;
         }
-        botModelSaved = true;
       }
 
       // When opening protection (not edit mode), set enabled=true
@@ -588,8 +595,10 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
 
         // 3. 如果防护从禁用变为启用，启动代理
         if (!wasEnabled && shouldEnable) {
-          final protectionService = ProtectionService();
-          protectionService.setAssetName(widget.assetName, newConfig.assetID);
+          final protectionService = ProtectionService.forAsset(
+            widget.assetName,
+            newConfig.assetID,
+          );
           try {
             final result = await protectionService.startProtectionProxy(
               securityModelConfig,
@@ -611,8 +620,10 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           }
         } else {
           // 4. 推送审计模式和 Token 限额到运行中的代理
-          final protectionService = ProtectionService();
-          protectionService.setAssetName(widget.assetName, newConfig.assetID);
+          final protectionService = ProtectionService.forAsset(
+            widget.assetName,
+            newConfig.assetID,
+          );
           await protectionService.setAuditOnly(_auditOnly);
           await protectionService.pushTokenLimitsToProxy(
             assetName: widget.assetName,
@@ -635,7 +646,10 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
 
         // 5. Bot 模型变更后，触发完整重启（此时防护配置已保存到 DB，gateway 重启可读到最新配置）
         if (botModelSaved) {
-          final protectionService = ProtectionService();
+          final protectionService = ProtectionService.forAsset(
+            widget.assetName,
+            newConfig.assetID,
+          );
           if (protectionService.isProxyRunning) {
             try {
               final result = await protectionService
@@ -1386,14 +1400,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                     },
                     onRemove: (index) =>
                         setState(() => _pathList.removeAt(index)),
-                    onBrowse: () async {
-                      final result = await FilePicker.platform.getDirectoryPath(
-                        dialogTitle: l10n.pathPermissionTitle,
-                      );
-                      if (result != null && !_pathList.contains(result)) {
-                        setState(() => _pathList.add(result));
-                      }
-                    },
+                    onBrowse: () => _handlePathBrowse(l10n),
                   ),
                   const SizedBox(height: 20),
 
@@ -2012,165 +2019,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     );
   }
 
-  Widget _buildListEditSection({
-    required String title,
-    required String desc,
-    required IconData icon,
-    required List<String> items,
-    required TextEditingController inputController,
-    required String inputHint,
-    required VoidCallback onAdd,
-    required Function(int) onRemove,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: const Color(0xFF6366F1), size: 16),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: AppFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                    Text(
-                      desc,
-                      style: AppFonts.inter(
-                        fontSize: 11,
-                        color: Colors.white54,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // Input
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.1),
-                    ),
-                  ),
-                  child: TextField(
-                    controller: inputController,
-                    style: AppFonts.firaCode(fontSize: 12, color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: inputHint,
-                      hintStyle: AppFonts.inter(
-                        fontSize: 11,
-                        color: Colors.white38,
-                      ),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 10,
-                      ),
-                    ),
-                    onSubmitted: (_) => onAdd(),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: onAdd,
-                  child: Container(
-                    height: 36,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF6366F1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Icon(
-                      LucideIcons.plus,
-                      size: 16,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          // Items
-          if (items.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: items.asMap().entries.map((entry) {
-                return Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEF4444).withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(
-                      color: const Color(0xFFEF4444).withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          entry.value,
-                          style: AppFonts.firaCode(
-                            fontSize: 11,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: GestureDetector(
-                          onTap: () => onRemove(entry.key),
-                          child: const Icon(
-                            LucideIcons.x,
-                            size: 12,
-                            color: Colors.white54,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   /// 构建网络权限设置区块（出栈 + 入栈）
   Widget _buildNetworkPermissionSection(AppLocalizations l10n) {
     final isMacSandbox = Platform.isMacOS && _sandboxEnabled;
@@ -2289,6 +2137,108 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     }
     setState(() => list.add(addr));
     controller.clear();
+  }
+
+  Future<void> _handlePathBrowse(AppLocalizations l10n) async {
+    try {
+      final result = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: l10n.pathPermissionTitle,
+      );
+      if (!mounted || result == null || _pathList.contains(result)) {
+        return;
+      }
+      setState(() => _pathList.add(result));
+    } on Exception catch (e) {
+      appLogger.warning('[ProtectionConfig] Path picker unavailable: $e');
+      if (!mounted) return;
+      await _showPathPickerFallback(l10n, e.toString());
+    }
+  }
+
+  Future<void> _showPathPickerFallback(
+    AppLocalizations l10n,
+    String errorMessage,
+  ) async {
+    final controller = TextEditingController(text: _pathInputController.text);
+    final fallbackMessage = Platform.isLinux
+        ? 'Linux 缺少可用的目录选择器，请手动输入路径，或安装 zenity、qarma、kdialog 后重试。\n$errorMessage'
+        : '无法打开目录选择器，请手动输入路径后重试。\n$errorMessage';
+
+    try {
+      final selectedPath = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: const Color(0xFF1F2937),
+          title: Text(
+            l10n.pathPermissionTitle,
+            style: AppFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                fallbackMessage,
+                style: AppFonts.inter(fontSize: 12, color: Colors.white70),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                style: AppFonts.firaCode(fontSize: 12, color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: l10n.pathPermissionDesc,
+                  hintStyle: AppFonts.inter(
+                    fontSize: 11,
+                    color: Colors.white38,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: Colors.white.withValues(alpha: 0.15),
+                    ),
+                  ),
+                  focusedBorder: const OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(8)),
+                    borderSide: BorderSide(color: Color(0xFF6366F1)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text('取消', style: AppFonts.inter(color: Colors.white70)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                Navigator.of(dialogContext).pop(value.isEmpty ? null : value);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6366F1),
+              ),
+              child: Text('添加', style: AppFonts.inter(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted ||
+          selectedPath == null ||
+          _pathList.contains(selectedPath)) {
+        return;
+      }
+      setState(() => _pathList.add(selectedPath));
+      _pathInputController.clear();
+    } finally {
+      controller.dispose();
+    }
   }
 
   /// 构建单方向的网络配置子区块

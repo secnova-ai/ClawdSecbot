@@ -1,3 +1,28 @@
+import 'dart:convert';
+
+/// 审计日志中的消息条目
+class AuditMessage {
+  final int index;
+  final String role;
+  final String content;
+
+  AuditMessage({required this.index, required this.role, required this.content});
+
+  factory AuditMessage.fromJson(Map<String, dynamic> json) {
+    return AuditMessage(
+      index: json['index'] as int? ?? 0,
+      role: json['role'] as String? ?? '',
+      content: json['content'] as String? ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'index': index,
+    'role': role,
+    'content': content,
+  };
+}
+
 /// Audit log model for protection proxy
 class AuditLog {
   final String id;
@@ -19,6 +44,10 @@ class AuditLog {
   final int? totalTokens;
   final int durationMs;
 
+  /// 完整对话消息列表（JSON array of {index, role, content}）
+  final List<AuditMessage> messages;
+  final int messageCount;
+
   AuditLog({
     required this.id,
     required this.timestamp,
@@ -38,6 +67,8 @@ class AuditLog {
     this.completionTokens,
     this.totalTokens,
     required this.durationMs,
+    this.messages = const [],
+    this.messageCount = 0,
   });
 
   factory AuditLog.fromJson(Map<String, dynamic> json) {
@@ -64,7 +95,31 @@ class AuditLog {
       completionTokens: json['completion_tokens'] as int?,
       totalTokens: json['total_tokens'] as int?,
       durationMs: json['duration_ms'] as int? ?? 0,
+      messages: _parseMessages(json['messages']),
+      messageCount: json['message_count'] as int? ?? 0,
     );
+  }
+
+  static List<AuditMessage> _parseMessages(dynamic raw) {
+    if (raw == null) return [];
+    if (raw is List) {
+      return raw
+          .whereType<Map>()
+          .map((e) => AuditMessage.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    if (raw is String && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw) as List<dynamic>;
+        return decoded
+            .whereType<Map>()
+            .map((e) => AuditMessage.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+      } catch (_) {
+        return [];
+      }
+    }
+    return [];
   }
 
   Map<String, dynamic> toJson() {
@@ -87,6 +142,8 @@ class AuditLog {
       'completion_tokens': completionTokens,
       'total_tokens': totalTokens,
       'duration_ms': durationMs,
+      'messages': jsonEncode(messages.map((m) => m.toJson()).toList()),
+      'message_count': messageCount,
     };
   }
 

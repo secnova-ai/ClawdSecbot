@@ -1220,7 +1220,11 @@ class AppLocalizationsZh extends AppLocalizations {
   String get auditLogAllowed => '允许次数';
 
   @override
-  String get auditLogSearchHint => '搜索日志...';
+  String get auditLogSearchHint => '搜索请求、回复、风险说明与消息/工具 JSON...';
+
+  @override
+  String get auditLogSearchTooltip =>
+      '在请求正文、模型输出、风险说明以及 messages、tool_calls 的 JSON 原文中做子串匹配（不搜请求 ID 等结构化字段）。';
 
   @override
   String get auditLogRiskOnly => '仅显示风险';
@@ -1298,9 +1302,33 @@ class AppLocalizationsZh extends AppLocalizations {
   String get auditLogSensitive => '敏感';
 
   @override
+  String get auditLogExport => '导出';
+
+  @override
+  String get auditLogExportFailed => '导出失败';
+
+  @override
   String auditLogPageInfo(int current, int total) {
     return '第 $current 页，共 $total 页';
   }
+
+  @override
+  String auditLogEntryTotal(int count) {
+    return '共 $count 条';
+  }
+
+  @override
+  String auditLogEntryRange(int start, int end) {
+    return '第 $start-$end 条';
+  }
+
+  @override
+  String auditLogItemSerial(int n) {
+    return '第 $n 条';
+  }
+
+  @override
+  String get auditLogSearchSubmitHint => '按回车搜索';
 
   @override
   String get auditLogActionAllow => '已允许';

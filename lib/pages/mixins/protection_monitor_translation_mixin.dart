@@ -6,6 +6,35 @@ import '../protection_monitor_window.dart';
 /// 日志翻译 Mixin
 /// 将 Go 层结构化日志 JSON 翻译为本地化字符串
 mixin ProtectionMonitorTranslationMixin on State<ProtectionMonitorPage> {
+  String normalizeVisibleMessageContent(String content) {
+    final raw = content.trim();
+    if (!raw.startsWith('Sender (untrusted metadata):')) {
+      return content;
+    }
+
+    final fencedJson = RegExp(
+      r'^Sender \(untrusted metadata\):\s*```json[\s\S]*?```\s*([\s\S]*)$',
+      multiLine: true,
+    );
+    final match = fencedJson.firstMatch(raw);
+    if (match != null) {
+      return match.group(1)?.trim() ?? '';
+    }
+    return raw;
+  }
+
+  bool shouldHideFromRawView(String logJson) {
+    try {
+      final data = jsonDecode(logJson) as Map<String, dynamic>;
+      final key = data['key'];
+      if (key == 'protection_record_snapshot') return false;
+      return key == 'proxy_stream_delta' ||
+          key == 'monitor_upstream_stream_delta';
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 将结构化日志 JSON 翻译为本地化字符串
   String translateLog(String logJson, AppLocalizations l10n) {
     try {
@@ -18,6 +47,36 @@ mixin ProtectionMonitorTranslationMixin on State<ProtectionMonitorPage> {
       }
 
       switch (key) {
+        case 'protection_record_snapshot':
+          final reqId = params?['request_id']?.toString() ?? '';
+          final phase = params?['phase']?.toString() ?? '';
+          final model = params?['model']?.toString() ?? '';
+          final toolCount = (params?['tool_calls'] as List?)?.length ?? 0;
+          return '[ProtectionRecord] $reqId phase=$phase model=$model tools=$toolCount';
+        case 'monitor_request_created':
+          return '[Monitor] Request created';
+        case 'monitor_client_message_received':
+          return '[Monitor] Client message received';
+        case 'monitor_upstream_request_built':
+          return '[Monitor] Upstream request built';
+        case 'monitor_upstream_request_sent':
+          return '[Monitor] Upstream request sent';
+        case 'monitor_upstream_stream_started':
+          return '[Monitor] Upstream stream started';
+        case 'monitor_upstream_stream_delta':
+          return params?['content']?.toString() ?? '';
+        case 'monitor_upstream_tool_call':
+          return '[Monitor] Upstream tool call: ${params?['name']?.toString() ?? ''}';
+        case 'monitor_upstream_tool_result':
+          return '[Monitor] Upstream tool result: ${params?['summary']?.toString() ?? ''}';
+        case 'monitor_upstream_completed':
+          return '[Monitor] Upstream completed';
+        case 'monitor_security_decision':
+          return '[Monitor] Security decision: ${params?['status']?.toString() ?? ''}';
+        case 'monitor_response_returned':
+          return '[Monitor] Response returned: ${params?['status']?.toString() ?? ''}';
+        case 'monitor_request_failed':
+          return '[Monitor] Request failed: ${params?['error']?.toString() ?? ''}';
         // Proxy logs
         case 'proxy_new_request':
           return l10n.proxyNewRequest;
@@ -31,7 +90,9 @@ mixin ProtectionMonitorTranslationMixin on State<ProtectionMonitorPage> {
           return l10n.proxyMessageInfo(
             params?['index'] as int? ?? 0,
             params?['role']?.toString() ?? '',
-            params?['content']?.toString() ?? '',
+            normalizeVisibleMessageContent(
+              params?['content']?.toString() ?? '',
+            ),
           );
         case 'proxy_tool_activity_detected':
           return l10n.proxyToolActivityDetected;
@@ -102,9 +163,12 @@ mixin ProtectionMonitorTranslationMixin on State<ProtectionMonitorPage> {
         case 'proxy_tool_calls_in_stream':
           return l10n.proxyToolCallsInStream;
         case 'proxy_stream_content_no_tools':
+        case 'proxy_stream_content_with_tools':
           return l10n.proxyStreamContentNoTools(
             params?['content']?.toString() ?? '',
           );
+        case 'proxy_stream_delta':
+          return params?['content']?.toString() ?? '';
         case 'proxy_agent_not_available':
           return l10n.proxyAgentNotAvailable;
         case 'proxy_sending_analysis':
@@ -117,7 +181,9 @@ mixin ProtectionMonitorTranslationMixin on State<ProtectionMonitorPage> {
           return l10n.proxyAnalyzeMessage(
             params?['index'] as int? ?? 0,
             params?['role']?.toString() ?? '',
-            params?['content']?.toString() ?? '',
+            normalizeVisibleMessageContent(
+              params?['content']?.toString() ?? '',
+            ),
           );
         case 'proxy_analysis_error':
           return l10n.proxyAnalysisError(params?['error']?.toString() ?? '');
@@ -262,13 +328,6 @@ mixin ProtectionMonitorTranslationMixin on State<ProtectionMonitorPage> {
       // 非 JSON 格式,返回原始字符串(兼容旧格式)
       return logJson;
     }
-  }
-
-  /// 若存在 skill 信息则追加到事件描述末尾
-  String _appendSkillInfo(String base, String skill, AppLocalizations l10n) {
-    if (skill.isEmpty) return base;
-    final skillLabel = translateSkillName(skill, l10n);
-    return '$base\n${l10n.skillAnalysis(skillLabel)}';
   }
 
   /// 将技能 ID 翻译为本地化的可读名称

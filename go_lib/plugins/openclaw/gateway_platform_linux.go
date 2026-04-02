@@ -70,14 +70,17 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 	}
 
 	if unitPath == "" {
-		// 无 unit file，退化为直接启动
-		logging.Info("[GatewayManager] No unit file found, fallback to direct start")
+		// Security first: when sandbox is requested, never silently fall back to direct start.
+		if req.SandboxEnabled {
+			return nil, fmt.Errorf("sandbox enabled but no systemd unit found; refusing insecure fallback")
+		}
+		logging.Info("[GatewayManager] No unit file found, fallback to direct start (sandbox disabled)")
 		_, _ = runOpenclawGatewayCommand(binaryPath, []string{"start"}, homeDir)
 		return map[string]interface{}{
 			"success":        true,
 			"modified":       true,
 			"unit":           "",
-			"message":        "started without systemd unit (fallback)",
+			"message":        "started without systemd unit (sandbox disabled fallback)",
 			"install_output": installOutput,
 		}, nil
 	}
@@ -89,10 +92,13 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 		policyDir = filepath.Join(homeDir, ".botsec", "policies")
 	}
 	_ = os.MkdirAll(policyDir, 0755)
+	logDir := filepath.Join(homeDir, ".botsec", "logs")
+	_ = os.MkdirAll(logDir, 0755)
 
 	var modified bool
 	if req.SandboxEnabled {
 		instanceKey := buildGatewayInstanceKey(req.AssetName, req.AssetID)
+		logPath := filepath.Join(logDir, fmt.Sprintf("botsec_%s_hook.log", sandbox.SanitizeAssetNamePublic(instanceKey)))
 		policyPath, err := writeGatewayPolicyFile(policyDir, instanceKey, sandbox.SandboxConfig{
 			AssetName:         instanceKey,
 			GatewayBinaryPath: binaryPath,
@@ -108,14 +114,14 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 		// 查找 preload 库路径
 		preloadLib := findPreloadLibrary(policyDir)
 		if preloadLib == "" {
-			logging.Warning("[GatewayManager] libsandbox_preload.so not found, sandbox injection skipped")
-		} else {
-			m, err := injectSandboxIntoUnit(unitPath, preloadLib, policyPath)
-			if err != nil {
-				return nil, fmt.Errorf("inject sandbox into unit failed: %v", err)
-			}
-			modified = m
+			return nil, fmt.Errorf("sandbox enabled but libsandbox_preload.so not found")
 		}
+
+		m, err := injectSandboxIntoUnit(unitPath, preloadLib, policyPath, logPath)
+		if err != nil {
+			return nil, fmt.Errorf("inject sandbox into unit failed: %v", err)
+		}
+		modified = m
 
 		if modified {
 			logging.Info("[GatewayManager] Sandbox injected into unit, reloading systemd...")
@@ -127,15 +133,31 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 		}
 		time.Sleep(2 * time.Second)
 
+		sandbox.StartHookLogWatcherByKey(instanceKey, logPath, func(event sandbox.HookLogEvent) {
+			eventType, actionDesc, riskType, source := sandbox.MapHookEventToSecurityEvent(event)
+			GetSecurityEventBuffer().AddSecurityEvent(SecurityEvent{
+				EventType:  eventType,
+				ActionDesc: actionDesc,
+				RiskType:   riskType,
+				Source:     source,
+				Detail:     event.Detail,
+				AssetName:  req.AssetName,
+				AssetID:    req.AssetID,
+			})
+		})
+
 		return map[string]interface{}{
-			"success":  true,
-			"modified": modified,
-			"unit":     unitPath,
-			"message":  "gateway synced with sandbox protection",
+			"success":          true,
+			"modified":         modified,
+			"unit":             unitPath,
+			"sandbox_log_path": logPath,
+			"message":          "gateway synced with sandbox protection",
 		}, nil
 	}
 
 	// normal mode: remove LD_PRELOAD if present
+	instanceKey := buildGatewayInstanceKey(req.AssetName, req.AssetID)
+	sandbox.StopHookLogWatcherByKey(instanceKey)
 	m, err := removeSandboxFromUnit(unitPath)
 	if err != nil {
 		logging.Warning("[GatewayManager] remove sandbox from unit failed: %v", err)
@@ -310,8 +332,14 @@ func findPreloadLibrary(policyDir string) string {
 	return ""
 }
 
-// injectSandboxIntoUnit 向 systemd unit 文件中注入 LD_PRELOAD 环境变量
-func injectSandboxIntoUnit(unitPath string, preloadLib string, policyPath string) (bool, error) {
+// leadingWhitespace 返回行首连续的空格与制表符, 用于替换 unit 行时保留缩进, 避免破坏 systemd 解析
+func leadingWhitespace(line string) string {
+	trimmedLeft := strings.TrimLeft(line, " \t")
+	return line[:len(line)-len(trimmedLeft)]
+}
+
+// injectSandboxIntoUnit 向 systemd unit 文件中注入 LD_PRELOAD/SANDBOX_POLICY_FILE 环境变量
+func injectSandboxIntoUnit(unitPath string, preloadLib string, policyPath string, logPath string) (bool, error) {
 	contentBytes, err := os.ReadFile(unitPath)
 	if err != nil {
 		return false, err
@@ -320,24 +348,36 @@ func injectSandboxIntoUnit(unitPath string, preloadLib string, policyPath string
 
 	ldPreloadLine := fmt.Sprintf("Environment=LD_PRELOAD=%s", preloadLib)
 	policyLine := fmt.Sprintf("Environment=SANDBOX_POLICY_FILE=%s", policyPath)
+	logLine := fmt.Sprintf("Environment=SANDBOX_LOG_FILE=%s", logPath)
 
-	// 检查是否已注入
-	hasPreload := strings.Contains(content, "Environment=LD_PRELOAD=")
-	hasPolicy := strings.Contains(content, "Environment=SANDBOX_POLICY_FILE=")
+	envPrefixes := []struct {
+		prefix  string
+		desired string
+	}{
+		{"Environment=LD_PRELOAD=", ldPreloadLine},
+		{"Environment=SANDBOX_POLICY_FILE=", policyLine},
+		{"Environment=SANDBOX_LOG_FILE=", logLine},
+	}
 
-	if hasPreload && hasPolicy {
-		// 更新已有的环境变量
+	// 检查已有的环境变量行
+	allPresent := true
+	for _, ep := range envPrefixes {
+		if !strings.Contains(content, ep.prefix) {
+			allPresent = false
+			break
+		}
+	}
+
+	if allPresent {
 		lines := strings.Split(content, "\n")
 		changed := false
 		for i, line := range lines {
 			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "Environment=LD_PRELOAD=") && trimmed != ldPreloadLine {
-				lines[i] = ldPreloadLine
-				changed = true
-			}
-			if strings.HasPrefix(trimmed, "Environment=SANDBOX_POLICY_FILE=") && trimmed != policyLine {
-				lines[i] = policyLine
-				changed = true
+			for _, ep := range envPrefixes {
+				if strings.HasPrefix(trimmed, ep.prefix) && trimmed != ep.desired {
+					lines[i] = leadingWhitespace(line) + ep.desired
+					changed = true
+				}
 			}
 		}
 		if !changed {
@@ -347,7 +387,7 @@ func injectSandboxIntoUnit(unitPath string, preloadLib string, policyPath string
 		return writeIfChanged(unitPath, contentBytes, []byte(newContent))
 	}
 
-	// 需要添加新的环境变量行，插入到 [Service] 段中 ExecStart 之前
+	// 需要添加缺失的环境变量行，插入到 [Service] 段中 ExecStart 之前
 	var newLines []string
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	injected := false
@@ -355,30 +395,26 @@ func injectSandboxIntoUnit(unitPath string, preloadLib string, policyPath string
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
 
-		// 在 ExecStart 行之前插入环境变量
 		if !injected && strings.HasPrefix(trimmed, "ExecStart=") {
-			if !hasPreload {
-				newLines = append(newLines, ldPreloadLine)
-			}
-			if !hasPolicy {
-				newLines = append(newLines, policyLine)
+			for _, ep := range envPrefixes {
+				if !strings.Contains(content, ep.prefix) {
+					newLines = append(newLines, ep.desired)
+				}
 			}
 			injected = true
 		}
 		newLines = append(newLines, line)
 	}
 
-	// 如果未找到 ExecStart，追加到 [Service] 段末尾
 	if !injected {
 		for i, line := range newLines {
 			if strings.TrimSpace(line) == "[Service]" {
 				insertIdx := i + 1
-				insert := []string{}
-				if !hasPreload {
-					insert = append(insert, ldPreloadLine)
-				}
-				if !hasPolicy {
-					insert = append(insert, policyLine)
+				var insert []string
+				for _, ep := range envPrefixes {
+					if !strings.Contains(content, ep.prefix) {
+						insert = append(insert, ep.desired)
+					}
 				}
 				newLines = append(newLines[:insertIdx], append(insert, newLines[insertIdx:]...)...)
 				break
@@ -390,7 +426,7 @@ func injectSandboxIntoUnit(unitPath string, preloadLib string, policyPath string
 	return writeIfChanged(unitPath, contentBytes, []byte(newContent))
 }
 
-// removeSandboxFromUnit 从 systemd unit 文件中移除 LD_PRELOAD 环境变量
+// removeSandboxFromUnit 从 systemd unit 文件中移除沙箱相关环境变量
 func removeSandboxFromUnit(unitPath string) (bool, error) {
 	contentBytes, err := os.ReadFile(unitPath)
 	if err != nil {
@@ -398,7 +434,20 @@ func removeSandboxFromUnit(unitPath string) (bool, error) {
 	}
 	content := string(contentBytes)
 
-	if !strings.Contains(content, "Environment=LD_PRELOAD=") && !strings.Contains(content, "Environment=SANDBOX_POLICY_FILE=") {
+	sandboxPrefixes := []string{
+		"Environment=LD_PRELOAD=",
+		"Environment=SANDBOX_POLICY_FILE=",
+		"Environment=SANDBOX_LOG_FILE=",
+	}
+
+	hasAny := false
+	for _, prefix := range sandboxPrefixes {
+		if strings.Contains(content, prefix) {
+			hasAny = true
+			break
+		}
+	}
+	if !hasAny {
 		return false, nil
 	}
 
@@ -407,11 +456,16 @@ func removeSandboxFromUnit(unitPath string) (bool, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "Environment=LD_PRELOAD=") ||
-			strings.HasPrefix(trimmed, "Environment=SANDBOX_POLICY_FILE=") {
-			continue // 跳过这些行
+		skip := false
+		for _, prefix := range sandboxPrefixes {
+			if strings.HasPrefix(trimmed, prefix) {
+				skip = true
+				break
+			}
 		}
-		newLines = append(newLines, line)
+		if !skip {
+			newLines = append(newLines, line)
+		}
 	}
 
 	newContent := strings.Join(newLines, "\n")

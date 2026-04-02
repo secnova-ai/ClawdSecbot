@@ -7,6 +7,7 @@ import '../models/llm_config_model.dart';
 import '../models/audit_log_model.dart';
 import '../models/protection_analysis_model.dart';
 import '../models/protection_config_model.dart';
+import '../models/truth_record_model.dart';
 import '../models/security_event_model.dart';
 import '../utils/locale_utils.dart';
 import 'model_config_database_service.dart';
@@ -84,6 +85,7 @@ class ProtectionService {
   Stream<ApiMetrics> get metricsStream => _monitor.metricsStream;
   Stream<List<SecurityEvent>> get securityEventStream =>
       _monitor.securityEventStream;
+  Stream<TruthRecordModel> get truthRecordStream => _monitor.truthRecordStream;
 
   // === 统计透传 ===
   bool get isAnalyzing => _monitor.isAnalyzing;
@@ -422,12 +424,16 @@ class ProtectionService {
         throw Exception('Plugin library not found');
       }
 
+      final hasAssetBinding = _hasAssetBinding;
+      final assetName = _assetName;
+      final assetID = _assetID;
+
       final resultStr = await Isolate.run(() {
-        if (_hasAssetBinding) {
+        if (hasAssetBinding && assetName != null) {
           return ProtectionProxyFFI.stopProtectionProxyByAssetInIsolate(
             libPath,
-            _assetName!,
-            _assetID,
+            assetName,
+            assetID,
           );
         }
         return ProtectionProxyFFI.stopProtectionProxyInIsolate(libPath);
@@ -668,12 +674,16 @@ class ProtectionService {
         return false;
       }
 
+      final hasAssetBinding = _hasAssetBinding;
+      final assetName = _assetName;
+      final assetID = _assetID;
+
       final resultStr = await Isolate.run(() {
-        if (_hasAssetBinding) {
+        if (hasAssetBinding && assetName != null) {
           return ProtectionProxyFFI.syncGatewaySandboxByAssetInIsolate(
             libPath,
-            _assetName!,
-            _assetID,
+            assetName,
+            assetID,
           );
         }
         return ProtectionProxyFFI.syncGatewaySandboxInIsolate(libPath);
@@ -941,6 +951,10 @@ class ProtectionService {
     }
   }
 
+  /// 非破坏性获取所有 TruthRecord 最新快照（catch-up 补漏用）。
+  List<TruthRecordModel> fetchAllTruthRecordSnapshots() =>
+      _monitor.fetchAllTruthRecordSnapshots();
+
   AuditLogQueryResult getAuditLogsFromBuffer({
     int limit = 100,
     int offset = 0,
@@ -975,14 +989,17 @@ class ProtectionService {
     searchQuery: searchQuery,
   );
 
+  /// 审计日志条数（[searchQuery] 与 [getAuditLogs] 全文条件一致）.
   Future<int> getAuditLogCount({
     bool riskOnly = false,
     String? assetName,
     String? assetID,
+    String? searchQuery,
   }) async => _monitor.getAuditLogCount(
     riskOnly: riskOnly,
     assetName: assetName,
     assetID: assetID,
+    searchQuery: searchQuery,
   );
 
   Future<Map<String, dynamic>> getAuditLogStatistics({
@@ -1086,11 +1103,14 @@ class ProtectionService {
       }
 
       // 通过 Isolate 执行恢复操作，避免阻塞 UI 线程
+      final hasAssetBinding = _hasAssetBinding;
+      final assetName = _assetName;
+
       final resultStr = await Isolate.run(() {
-        if (_hasAssetBinding) {
+        if (hasAssetBinding && assetName != null) {
           return ProtectionProxyFFI.restoreToInitialConfigByAssetInIsolate(
             libPath,
-            _assetName!,
+            assetName,
           );
         }
         return ProtectionProxyFFI.restoreToInitialConfigInIsolate(libPath);

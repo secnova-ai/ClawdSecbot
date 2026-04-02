@@ -1,18 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../models/protection_analysis_model.dart';
-import '../../models/request_log_group_model.dart';
+import '../../models/truth_record_model.dart';
 import '../../services/protection_service.dart';
+import '../../utils/app_logger.dart';
 import '../protection_monitor_window.dart';
 
-/// 日志处理 Mixin
-/// 负责结构化日志解析、请求分组、批量刷新、滚动控制
 mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
   // ============ 需要主 State 提供的状态 ============
   List<LogEntry> get logsList;
   int get maxLogCount;
-  Map<String, RequestLogGroup> get requestGroups;
+  Map<String, TruthRecordModel> get requestGroups;
   List<String> get requestOrder;
   List<LogEntry> get pendingLogs;
   Timer? get logUpdateTimer;
@@ -23,7 +23,6 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
   bool get userScrolledAway;
   set userScrolledAway(bool value);
 
-  // 结果批处理状态
   ProtectionAnalysisResult? get pendingResult;
   set pendingResult(ProtectionAnalysisResult? value);
   Timer? get resultUpdateTimer;
@@ -31,11 +30,8 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
   set latestResult(ProtectionAnalysisResult? value);
   set currentRiskLevel(RiskLevel value);
 
-  // 统计更新回调
   ProtectionService get protectionService;
   void updateCountersFromService();
-
-  // ============ 日志批量刷新 ============
 
   void flushPendingLogs() {
     if (!mounted || pendingLogs.isEmpty) {
@@ -43,7 +39,6 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
       return;
     }
 
-    // 快照待处理日志,避免在 setState 期间持有列表
     final logsToAdd = List<LogEntry>.from(pendingLogs);
     pendingLogs.clear();
 
@@ -54,7 +49,6 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
       }
     });
 
-    // 如果启用自动滚动,滚动到底部
     if (autoScrollEnabled && !userScrolledAway) {
       scrollToBottom();
     }
@@ -62,16 +56,12 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
     logUpdateTimer = null;
   }
 
-  // ============ 滚动控制 ============
-
-  /// 检测用户滚动行为
   void onLogScroll() {
     if (!logScrollController.hasClients || useGroupedView) return;
 
     final position = logScrollController.position;
     final maxScroll = position.maxScrollExtent;
     final currentScroll = position.pixels;
-
     final isAtBottom = (maxScroll - currentScroll).abs() < 50;
 
     if (isAtBottom && userScrolledAway) {
@@ -85,7 +75,6 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
     }
   }
 
-  /// 动画滚动到日志底部
   void scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (logScrollController.hasClients) {
@@ -97,8 +86,6 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
       }
     });
   }
-
-  // ============ 结果批量刷新 ============
 
   void flushPendingResult() {
     if (!mounted || pendingResult == null) {
@@ -117,170 +104,98 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
     });
   }
 
-  // ============ Token 估算 ============
-
-  int estimateTokenCount(String text) {
-    if (text.isEmpty) return 0;
-    double count = 0;
-    for (var i = 0; i < text.length; i++) {
-      final codeUnit = text.codeUnitAt(i);
-      if (codeUnit < 128) {
-        count += 0.25;
-      } else {
-        count += 1.5;
-      }
+  /// 更新分组映射与顺序列表(不排序); 须在 [setState] 内与 [_finalizeTruthRecordOrder] 成对使用.
+  void _applyTruthRecordMutation(TruthRecordModel record) {
+    final requestId = record.requestId.trim();
+    if (requestId.isEmpty) {
+      return;
     }
-    return count.ceil();
-  }
 
-  // ============ 结构化日志处理 ============
+    var existed = requestGroups.containsKey(requestId);
+    String? mergedKey;
 
-  /// 解析结构化日志并更新请求分组
-  void processStructuredLog(String logJson) {
-    try {
-      final data = jsonDecode(logJson);
-      final key = data['key'] as String?;
-      final params = data['params'] as Map<String, dynamic>?;
-      if (key == null) return;
-      var reqId = params?['request_id']?.toString() ?? '';
-      if (reqId.isEmpty) {
-        if (requestOrder.isNotEmpty) {
-          reqId = requestOrder.last;
-        } else {
-          return;
+    if (!existed && record.isComplete) {
+      for (final entry in requestGroups.entries) {
+        final existing = entry.value;
+        final sameAsset = existing.assetID == record.assetID;
+        final sameModel = existing.model == record.model;
+        final sameContent =
+            existing.primaryContent.isNotEmpty &&
+            existing.primaryContent == record.primaryContent;
+        final closeInTime =
+            existing.startedAt.difference(record.startedAt).abs().inSeconds <=
+            10;
+        final inFlight = !existing.isComplete;
+        if (sameAsset && sameModel && sameContent && closeInTime && inFlight) {
+          mergedKey = entry.key;
+          break;
         }
       }
-      var group = requestGroups[reqId];
-      if (group == null) {
-        group = RequestLogGroup(reqId, DateTime.now());
-        requestGroups[reqId] = group;
-        requestOrder.add(reqId);
+    }
+
+    final targetKey = mergedKey ?? requestId;
+    if (kDebugMode) {
+      appLogger.debug(
+        '[TruthRecord] process request_id=$requestId target_key=$targetKey existed=$existed phase=${record.phase} type=${record.primaryContentType} complete=${record.isComplete}',
+      );
+    }
+    requestGroups[targetKey] = record;
+    if (!requestOrder.contains(targetKey)) {
+      requestOrder.add(targetKey);
+    }
+  }
+
+  /// 去重并排序请求卡片顺序.
+  void _finalizeTruthRecordOrder() {
+    final seen = <String>{};
+    requestOrder.retainWhere(seen.add);
+    requestOrder.sort((a, b) {
+      final left = requestGroups[a];
+      final right = requestGroups[b];
+      if (left == null || right == null) {
+        return 0;
       }
-      switch (key) {
-        case 'proxy_request_info':
-          group.model = params?['model']?.toString() ?? group.model;
-          group.messageCount =
-              params?['messageCount'] as int? ?? group.messageCount;
-          group.stream = params?['stream']?.toString() ?? group.stream;
-          break;
-        case 'proxy_message_info':
-          final idx = params?['index'] as int? ?? 0;
-          final role = params?['role']?.toString() ?? '';
-          final content = params?['content']?.toString() ?? '';
-          group.messages.add(RequestMessageSummary(idx, role, content));
-          break;
-        case 'proxy_stream_finished':
-          group.finishReason =
-              params?['reason']?.toString() ?? group.finishReason;
-          break;
-        case 'proxy_stream_content_no_tools':
-          final c = params?['content']?.toString() ?? '';
-          if (c.isNotEmpty) {
-            group.streamContent = c;
-            group.originalStreamContent = c;
-          }
-          break;
-        case 'proxy_response_content':
-          final c2 = params?['content']?.toString() ?? '';
-          if (c2.isNotEmpty) group.responseContent = c2;
-          break;
-        case 'proxy_tool_result_content':
-          {
-            final c3 = params?['content']?.toString() ?? '';
-            if (c3.isNotEmpty) group.responseContent = c3;
-            break;
-          }
-        case 'proxy_tool_call_count':
-          group.toolCallCount = params?['count'] as int? ?? group.toolCallCount;
-          break;
-        case 'proxy_tool_call_name':
-          final name = params?['name']?.toString() ?? '';
-          if (name.isNotEmpty && !group.toolNames.contains(name)) {
-            group.toolNames.add(name);
-          }
-          break;
-        case 'tool_validator_passed':
-          {
-            final name = params?['toolName']?.toString() ?? '';
-            if (name.isNotEmpty && !group.toolNames.contains(name)) {
-              group.toolNames.add(name);
-            }
-            break;
-          }
-        case 'proxy_token_usage':
-          group.promptTokens =
-              params?['promptTokens'] as int? ?? group.promptTokens;
-          group.completionTokens =
-              params?['completionTokens'] as int? ?? group.completionTokens;
-          group.totalTokens =
-              params?['totalTokens'] as int? ?? group.totalTokens;
-          break;
-        case 'proxy_token_usage_estimated':
-          group.promptTokens =
-              params?['promptTokens'] as int? ?? group.promptTokens;
-          if (group.originalStreamContent.isNotEmpty) {
-            final estimatedCompletion = estimateTokenCount(
-              group.originalStreamContent,
-            );
-            group.completionTokens = estimatedCompletion;
-            group.totalTokens = group.promptTokens + estimatedCompletion;
-          } else {
-            group.completionTokens =
-                params?['completionTokens'] as int? ?? group.completionTokens;
-            group.totalTokens =
-                params?['totalTokens'] as int? ?? group.totalTokens;
-          }
-          break;
-        case 'proxy_tool_result_decision':
-          group.decisionStatus =
-              params?['status']?.toString() ?? group.decisionStatus;
-          group.decisionReason =
-              params?['reason']?.toString() ?? group.decisionReason;
-          group.decisionBlocked =
-              params?['blocked'] as bool? ?? group.decisionBlocked;
-          break;
-        case 'proxy_stream_security_message':
-          {
-            final sm = params?['content']?.toString() ?? '';
-            if (sm.isNotEmpty) group.securityMessage = sm;
-            if (group.decisionStatus.isEmpty) {
-              final zhStatus = RegExp(r'状态:\s*([A-Z_]+)');
-              final enStatus = RegExp(r'Status:\s*([A-Z_]+)');
-              final zhReason = RegExp(r'原因:\s*(.+)');
-              final enReason = RegExp(r'Reason:\s*(.+)');
-              String? st;
-              String? rs;
-              final m1 = zhStatus.firstMatch(sm);
-              final m2 = enStatus.firstMatch(sm);
-              if (m1 != null && m1.groupCount >= 1) {
-                st = m1.group(1);
-              } else if (m2 != null && m2.groupCount >= 1) {
-                st = m2.group(1);
-              }
-              final r1 = zhReason.firstMatch(sm);
-              final r2 = enReason.firstMatch(sm);
-              if (r1 != null && r1.groupCount >= 1) {
-                rs = r1.group(1);
-              } else if (r2 != null && r2.groupCount >= 1) {
-                rs = r2.group(1);
-              }
-              if (st != null && st.isNotEmpty) {
-                group.decisionStatus = st;
-              }
-              if (rs != null && rs.isNotEmpty) {
-                group.decisionReason = rs;
-              }
-            }
-            break;
-          }
-        case 'proxy_stream_intercepted_content':
-          {
-            final ic = params?['content']?.toString() ?? '';
-            if (ic.isNotEmpty) group.streamContent = ic;
-            break;
-          }
+      final cmp = left.startedAt.compareTo(right.startedAt);
+      if (cmp != 0) {
+        return cmp;
       }
-      // 不调用 setState 以避免过度重建,UI 由 flushPendingLogs 定时器刷新
+      return a.compareTo(b);
+    });
+  }
+
+  /// 处理 TruthRecord 快照，每次收到完整快照直接替换（不做 merge）。
+  void processProtectionRecord(TruthRecordModel record) {
+    final requestId = record.requestId.trim();
+    if (!mounted || requestId.isEmpty) {
+      return;
+    }
+    setState(() {
+      _applyTruthRecordMutation(record);
+      _finalizeTruthRecordOrder();
+    });
+  }
+
+  /// 批量应用 TruthRecord: 单次 setState、单次排序, 避免 Go 侧快照突发时 Windows UI 未响应.
+  void processProtectionRecordBatch(Iterable<TruthRecordModel> records) {
+    if (!mounted) {
+      return;
+    }
+    final list = records.where((r) => r.requestId.trim().isNotEmpty).toList();
+    if (list.isEmpty) {
+      return;
+    }
+    setState(() {
+      for (final r in list) {
+        _applyTruthRecordMutation(r);
+      }
+      _finalizeTruthRecordOrder();
+    });
+  }
+
+  /// 解析结构化 JSON 日志; 分组视图以 [processProtectionRecord] 为主, 此处仅校验格式避免上层异常。
+  void processStructuredLog(String logJson) {
+    try {
+      jsonDecode(logJson);
     } catch (_) {}
   }
 }

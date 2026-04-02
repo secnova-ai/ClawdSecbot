@@ -488,6 +488,7 @@ class _MainPageState extends State<MainPage>
     }
   }
 
+  /// 按启用资产逐个恢复 proxy,每个资产幂等启动(已运行则跳过)。
   Future<void> _startProxyInBackground() async {
     try {
       final securityModelConfig = await ModelConfigDatabaseService()
@@ -504,21 +505,36 @@ class _MainPageState extends State<MainPage>
         return;
       }
 
-      final assetID = _protectedAssetIDs.isNotEmpty
-          ? _protectedAssetIDs.first
-          : '';
-      final assetName = _protectedAssetNamesByID[assetID] ?? 'Openclaw';
+      for (final assetID in _protectedAssetIDs.toList()) {
+        final assetName = _protectedAssetNamesByID[assetID] ?? '';
+        if (assetName.isEmpty) continue;
 
-      final service = ProtectionService();
-      service.setAssetName(assetName, assetID);
+        try {
+          final service = ProtectionService.forAsset(assetName, assetID);
+          service.setAssetName(assetName, assetID);
 
-      final result = await service.startProtectionProxy(
-        securityModelConfig,
-        ProtectionRuntimeConfig(),
-      );
-      appLogger.info(
-        '[MainPage] Background proxy start result: success=${result['success']}, already_running=${result['already_running']}',
-      );
+          final status = await service.getProtectionProxyStatus();
+          if (status['running'] == true) {
+            appLogger.info(
+              '[MainPage] Proxy already running for $assetName/$assetID, skip',
+            );
+            continue;
+          }
+
+          final result = await service.startProtectionProxy(
+            securityModelConfig,
+            ProtectionRuntimeConfig(),
+          );
+          appLogger.info(
+            '[MainPage] Background proxy start for $assetName/$assetID: success=${result['success']}, already_running=${result['already_running']}',
+          );
+        } catch (e) {
+          appLogger.error(
+            '[MainPage] Background proxy start failed for $assetName/$assetID',
+            e,
+          );
+        }
+      }
 
       if (mounted) {
         setState(() {
@@ -1421,8 +1437,7 @@ class _MainPageState extends State<MainPage>
           final securityModelConfig = await ModelConfigDatabaseService()
               .getSecurityModelConfig();
           if (securityModelConfig != null) {
-            final service = ProtectionService();
-            service.setAssetName(asset.name, asset.id);
+            final service = ProtectionService.forAsset(asset.name, asset.id);
             final updateResult = await service.updateSecurityModelConfig(
               securityModelConfig,
             );
@@ -1541,7 +1556,7 @@ class _MainPageState extends State<MainPage>
                         alignment: Alignment.topCenter,
                         children: [
                           ...previousChildren,
-                          if (currentChild case final child?) child,
+                          ?currentChild,
                         ],
                       );
                     },

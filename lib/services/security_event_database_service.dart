@@ -77,6 +77,21 @@ class SecurityEventDatabaseService {
     _callFFI('ClearSecurityEventsFFI', jsonEncode({'asset_id': assetID}));
   }
 
+  /// 按 request_id 查询关联的安全事件
+  Future<List<SecurityEvent>> getSecurityEventsByRequestID(String requestID) async {
+    if (requestID.isEmpty) return [];
+
+    final result = _callFFI('GetSecurityEventsByRequestIDFFI', requestID);
+    if (result['success'] != true) return [];
+
+    final data = result['data'];
+    if (data == null || data is! List) return [];
+
+    return data.map((item) {
+      return SecurityEvent.fromJson(item as Map<String, dynamic>);
+    }).toList();
+  }
+
   // --- Helper methods ---
 
   Map<String, dynamic> _callFFINoArg(String funcName) {

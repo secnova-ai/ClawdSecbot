@@ -8,6 +8,11 @@ import '../models/version_info.dart';
 import '../utils/app_logger.dart';
 import 'native_library_service.dart' hide FreeStringDart;
 
+/// 供 [Isolate.run] 在后台 isolate 中解析桥接 JSON, 避免大 payload 阻塞 UI isolate.
+Map<String, dynamic> _decodeBridgeMessageForIsolate(String trimmed) {
+  return jsonDecode(trimmed) as Map<String, dynamic>;
+}
+
 // FFI 类型定义 - 回调相关
 typedef DartMessageCallbackNative = ffi.Void Function(ffi.Pointer<Utf8>);
 typedef RegisterMessageCallbackC =
@@ -29,7 +34,14 @@ typedef FreeStringC = ffi.Void Function(ffi.Pointer<Utf8>);
 typedef FreeStringDart = void Function(ffi.Pointer<Utf8>);
 
 /// 消息类型
-enum BridgeMessageType { log, metrics, status, versionUpdate, securityEvent }
+enum BridgeMessageType {
+  log,
+  metrics,
+  status,
+  versionUpdate,
+  securityEvent,
+  truthRecord,
+}
 
 /// 桥接消息结构
 class BridgeMessage {
@@ -69,6 +81,8 @@ class BridgeMessage {
         return BridgeMessageType.versionUpdate;
       case 'security_event':
         return BridgeMessageType.securityEvent;
+      case 'truth_record':
+        return BridgeMessageType.truthRecord;
       default:
         return BridgeMessageType.log;
     }
@@ -83,6 +97,9 @@ class MessageBridgeService {
   MessageBridgeService._internal();
 
   ffi.DynamicLibrary? _dylib;
+
+  /// 释放 Go 侧 C.CString 传入回调的缓冲区(与 RegisterMessageCallback 闭包配对, 避免异步 listener 下 use-after-free).
+  FreeStringDart? _bridgeCStringFree;
 
   // FFI 回调相关
   ReceivePort? _receivePort;
@@ -125,6 +142,11 @@ class MessageBridgeService {
       .where((msg) => msg.type == BridgeMessageType.securityEvent)
       .map((msg) => msg.payload);
 
+  /// TruthRecord 快照流（分组卡片事实来源）
+  Stream<Map<String, dynamic>> get truthRecordStream => messageStream
+      .where((msg) => msg.type == BridgeMessageType.truthRecord)
+      .map((msg) => msg.payload);
+
   /// 错误流
   Stream<Exception> get errorStream => _errorController.stream;
 
@@ -153,13 +175,17 @@ class MessageBridgeService {
 
       _dylib = nativeLib.dylib;
 
+      _bridgeCStringFree = _dylib!.lookupFunction<FreeStringC, FreeStringDart>(
+        'FreeString',
+      );
+
       // 创建接收端口用于跨线程通信
       _receivePort = ReceivePort();
 
-      // 监听来自回调的消息
+      // 监听来自回调的消息: 勿在 ReceivePort 回调栈内同步 jsonDecode, 否则会长时间占用 UI isolate, Windows 易显示「未响应」.
       _receivePort!.listen((message) {
         if (message is String) {
-          _processMessage(message);
+          unawaited(_processMessageAsync(message));
         }
       });
 
@@ -176,13 +202,9 @@ class MessageBridgeService {
             RegisterMessageCallbackDart
           >('RegisterMessageCallback');
 
-      final freeString = _dylib!.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-
       final resultPtr = registerCallback(_nativeCallable!.nativeFunction);
       final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
+      _bridgeCStringFree!(resultPtr);
 
       final result = jsonDecode(resultStr);
       if (result['success'] != true) {
@@ -204,6 +226,14 @@ class MessageBridgeService {
       _disposeCallback();
       return false;
     }
+  }
+
+  /// 释放回调路径上的 C 字符串(Go 不再 defer free, 必须由 Dart 在拷贝后调用).
+  void _freeBridgeCString(ffi.Pointer<Utf8> ptr) {
+    if (ptr.address == 0) {
+      return;
+    }
+    _bridgeCStringFree?.call(ptr);
   }
 
   /// 原生回调处理函数 - 运行在独立原生线程
@@ -229,23 +259,39 @@ class MessageBridgeService {
     } catch (e) {
       // 在回调中不能打印日志,因为可能不在主线程
       // 忽略任何异常,防止崩溃
+    } finally {
+      _freeBridgeCString(messagePtr);
     }
   }
 
-  void _processMessage(String data) {
+  /// 异步处理 FFI 推送的 JSON: 先让出事件循环, 大报文在独立 isolate 中 jsonDecode.
+  Future<void> _processMessageAsync(String data) async {
+    await Future<void>.delayed(Duration.zero);
+    if (!_isRunning || _messageController.isClosed) {
+      return;
+    }
     try {
-      // 验证 JSON 格式
       if (data.isEmpty || data.length < 10) {
-        return; // 跳过空消息或过短消息
+        return;
       }
 
-      // 检查消息完整性(简单启发式:必须以 { 开头,} 结尾)
       final trimmed = data.trim();
       if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
         return;
       }
 
-      final json = jsonDecode(data);
+      late final Map<String, dynamic> json;
+      // TruthRecord 等单条 JSON 常达数万字符, 阈值略低以尽量走后台解析.
+      const int heavyJsonChars = 12000;
+      if (trimmed.length >= heavyJsonChars) {
+        json = await Isolate.run(() => _decodeBridgeMessageForIsolate(trimmed));
+      } else {
+        json = jsonDecode(trimmed) as Map<String, dynamic>;
+      }
+
+      if (!_isRunning || _messageController.isClosed) {
+        return;
+      }
       final message = BridgeMessage.fromJson(json);
       if (!_messageController.isClosed) {
         _messageController.add(message);
@@ -262,6 +308,7 @@ class MessageBridgeService {
     _nativeCallable = null;
     _receivePort?.close();
     _receivePort = null;
+    _bridgeCStringFree = null;
   }
 
   /// 检查 Go 层回调桥接器是否运行
@@ -306,13 +353,9 @@ class MessageBridgeService {
               UnregisterMessageCallbackDart
             >('UnregisterMessageCallback');
 
-        final freeString = _dylib!.lookupFunction<FreeStringC, FreeStringDart>(
-          'FreeString',
-        );
-
         final resultPtr = unregisterCallback();
         final resultStr = resultPtr.toDartString();
-        freeString(resultPtr);
+        _bridgeCStringFree?.call(resultPtr);
         appLogger.info('[MessageBridge] Go callback unregistered: $resultStr');
 
         // 注意: 之前使用同步 sleep(100ms) 等待 Go 端停止回调,

@@ -61,12 +61,23 @@ func (m *SandboxManager) buildSandboxCommand() (*exec.Cmd, string, error) {
 		return nil, "", fmt.Errorf("failed to write preload policy: %w", err)
 	}
 
+	logDir := m.logDir
+	if logDir == "" {
+		logDir = m.policyDir
+	}
+	if err := os.MkdirAll(logDir, 0700); err != nil {
+		return nil, "", fmt.Errorf("failed to create sandbox log directory: %w", err)
+	}
+	logPath := filepath.Join(logDir, fmt.Sprintf("botsec_%s_hook.log", sanitizeAssetName(m.config.AssetName)))
+
 	// Build: openclaw <gatewayArgs...> with LD_PRELOAD environment variables
 	cmd := exec.Command("openclaw", m.gatewayArgs...)
 	cmd.Env = append(os.Environ(), m.gatewayEnv...)
+
 	cmd.Env = append(cmd.Env,
 		fmt.Sprintf("LD_PRELOAD=%s", m.preloadLib),
 		fmt.Sprintf("SANDBOX_POLICY_FILE=%s", policyPath),
+		fmt.Sprintf("SANDBOX_LOG_FILE=%s", logPath),
 	)
 
 	setSysProcAttr(cmd)
