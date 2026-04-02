@@ -1400,14 +1400,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                     },
                     onRemove: (index) =>
                         setState(() => _pathList.removeAt(index)),
-                    onBrowse: () async {
-                      final result = await FilePicker.platform.getDirectoryPath(
-                        dialogTitle: l10n.pathPermissionTitle,
-                      );
-                      if (result != null && !_pathList.contains(result)) {
-                        setState(() => _pathList.add(result));
-                      }
-                    },
+                    onBrowse: () => _handlePathBrowse(l10n),
                   ),
                   const SizedBox(height: 20),
 
@@ -2144,6 +2137,108 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     }
     setState(() => list.add(addr));
     controller.clear();
+  }
+
+  Future<void> _handlePathBrowse(AppLocalizations l10n) async {
+    try {
+      final result = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: l10n.pathPermissionTitle,
+      );
+      if (!mounted || result == null || _pathList.contains(result)) {
+        return;
+      }
+      setState(() => _pathList.add(result));
+    } on Exception catch (e) {
+      appLogger.warning('[ProtectionConfig] Path picker unavailable: $e');
+      if (!mounted) return;
+      await _showPathPickerFallback(l10n, e.toString());
+    }
+  }
+
+  Future<void> _showPathPickerFallback(
+    AppLocalizations l10n,
+    String errorMessage,
+  ) async {
+    final controller = TextEditingController(text: _pathInputController.text);
+    final fallbackMessage = Platform.isLinux
+        ? 'Linux 缺少可用的目录选择器，请手动输入路径，或安装 zenity、qarma、kdialog 后重试。\n$errorMessage'
+        : '无法打开目录选择器，请手动输入路径后重试。\n$errorMessage';
+
+    try {
+      final selectedPath = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: const Color(0xFF1F2937),
+          title: Text(
+            l10n.pathPermissionTitle,
+            style: AppFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                fallbackMessage,
+                style: AppFonts.inter(fontSize: 12, color: Colors.white70),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                style: AppFonts.firaCode(fontSize: 12, color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: l10n.pathPermissionDesc,
+                  hintStyle: AppFonts.inter(
+                    fontSize: 11,
+                    color: Colors.white38,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: Colors.white.withValues(alpha: 0.15),
+                    ),
+                  ),
+                  focusedBorder: const OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(8)),
+                    borderSide: BorderSide(color: Color(0xFF6366F1)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text('取消', style: AppFonts.inter(color: Colors.white70)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                Navigator.of(dialogContext).pop(value.isEmpty ? null : value);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6366F1),
+              ),
+              child: Text('添加', style: AppFonts.inter(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted ||
+          selectedPath == null ||
+          _pathList.contains(selectedPath)) {
+        return;
+      }
+      setState(() => _pathList.add(selectedPath));
+      _pathInputController.clear();
+    } finally {
+      controller.dispose();
+    }
   }
 
   /// 构建单方向的网络配置子区块

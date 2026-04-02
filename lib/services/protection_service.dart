@@ -424,12 +424,16 @@ class ProtectionService {
         throw Exception('Plugin library not found');
       }
 
+      final hasAssetBinding = _hasAssetBinding;
+      final assetName = _assetName;
+      final assetID = _assetID;
+
       final resultStr = await Isolate.run(() {
-        if (_hasAssetBinding) {
+        if (hasAssetBinding && assetName != null) {
           return ProtectionProxyFFI.stopProtectionProxyByAssetInIsolate(
             libPath,
-            _assetName!,
-            _assetID,
+            assetName,
+            assetID,
           );
         }
         return ProtectionProxyFFI.stopProtectionProxyInIsolate(libPath);
@@ -670,12 +674,16 @@ class ProtectionService {
         return false;
       }
 
+      final hasAssetBinding = _hasAssetBinding;
+      final assetName = _assetName;
+      final assetID = _assetID;
+
       final resultStr = await Isolate.run(() {
-        if (_hasAssetBinding) {
+        if (hasAssetBinding && assetName != null) {
           return ProtectionProxyFFI.syncGatewaySandboxByAssetInIsolate(
             libPath,
-            _assetName!,
-            _assetID,
+            assetName,
+            assetID,
           );
         }
         return ProtectionProxyFFI.syncGatewaySandboxInIsolate(libPath);
@@ -1095,11 +1103,14 @@ class ProtectionService {
       }
 
       // 通过 Isolate 执行恢复操作，避免阻塞 UI 线程
+      final hasAssetBinding = _hasAssetBinding;
+      final assetName = _assetName;
+
       final resultStr = await Isolate.run(() {
-        if (_hasAssetBinding) {
+        if (hasAssetBinding && assetName != null) {
           return ProtectionProxyFFI.restoreToInitialConfigByAssetInIsolate(
             libPath,
-            _assetName!,
+            assetName,
           );
         }
         return ProtectionProxyFFI.restoreToInitialConfigInIsolate(libPath);
