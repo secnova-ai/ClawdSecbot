@@ -443,6 +443,39 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 					}
 				}
 
+				skipShepherdForSandboxBlock := false
+				for _, tr := range toolResultInfos {
+					if !isClawdSecbotSandboxBlockedToolResult(tr.Content) {
+						continue
+					}
+					if !pp.markSandboxBlockedToolResultIfFirst(tr.ToolCallID) {
+						continue
+					}
+
+					skipShepherdForSandboxBlock = true
+					pp.sendTerminalLog(fmt.Sprintf(
+						"检测到 ClawdSecbot 沙箱已阻止工具结果，跳过 ShepherdGate 二次确认: tool=%s, tool_call_id=%s",
+						tr.FuncName,
+						tr.ToolCallID,
+					))
+					pp.sendLog("proxy_tool_result_sandbox_blocked", map[string]interface{}{
+						"tool_id":  tr.ToolCallID,
+						"tool":     tr.FuncName,
+						"detected": true,
+					})
+					break
+				}
+
+				if skipShepherdForSandboxBlock {
+					pp.emitMonitorSecurityDecision(
+						"SANDBOX_BLOCKED",
+						"tool result already blocked by ClawdSecbot sandbox",
+						false,
+						"",
+					)
+					return nil, true
+				}
+
 				var toolNames []string
 				for _, tc := range toolCallInfos {
 					toolNames = append(toolNames, tc.Name)
@@ -576,7 +609,7 @@ func (pp *ProxyProtection) onResponse(ctx context.Context, resp *openai.ChatComp
 			pp.sendTerminalLog(fmt.Sprintf("onResponse tool_call: %s", tc.Function.Name))
 		}
 
-			if msg.Content != "" {
+		if msg.Content != "" {
 			logContent := msg.Content
 			if len(logContent) > 2000 {
 				logContent = truncateString(logContent, 2000)
@@ -700,7 +733,6 @@ func (pp *ProxyProtection) onResponse(ctx context.Context, resp *openai.ChatComp
 			r.FinishReason = string(resp.Choices[0].FinishReason)
 		}
 	})
-
 	return true
 }
 

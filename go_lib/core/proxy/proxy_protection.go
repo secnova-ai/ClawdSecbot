@@ -69,6 +69,9 @@ type ProxyProtection struct {
 	recoveryMu           *sync.Mutex
 	pendingRecovery      *pendingToolCallRecovery
 	pendingRecoveryArmed bool
+	sandboxBlockSeenMu   sync.Mutex
+	sandboxBlockSeen     map[string]struct{}
+	sandboxBlockOrder    []string
 
 	// Server management
 	listener net.Listener
@@ -853,6 +856,45 @@ func (pp *ProxyProtection) sendTerminalLog(message string) {
 	}
 
 	logging.Info("[Proxy] %s", message)
+}
+
+const sandboxBlockedToolResultLimit = 20
+
+func isClawdSecbotSandboxBlockedToolResult(content string) bool {
+	if content == "" {
+		return false
+	}
+	return strings.Contains(content, "[ClawdSecbot]") &&
+		strings.Contains(content, "ACTION=BLOCK")
+}
+
+func (pp *ProxyProtection) markSandboxBlockedToolResultIfFirst(
+	toolCallID string,
+) bool {
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" {
+		return false
+	}
+
+	pp.sandboxBlockSeenMu.Lock()
+	defer pp.sandboxBlockSeenMu.Unlock()
+
+	if pp.sandboxBlockSeen == nil {
+		pp.sandboxBlockSeen = make(map[string]struct{})
+	}
+	if _, exists := pp.sandboxBlockSeen[toolCallID]; exists {
+		return false
+	}
+
+	pp.sandboxBlockSeen[toolCallID] = struct{}{}
+	pp.sandboxBlockOrder = append(pp.sandboxBlockOrder, toolCallID)
+	for len(pp.sandboxBlockOrder) > sandboxBlockedToolResultLimit {
+		evicted := pp.sandboxBlockOrder[0]
+		pp.sandboxBlockOrder = pp.sandboxBlockOrder[1:]
+		delete(pp.sandboxBlockSeen, evicted)
+	}
+
+	return true
 }
 
 // finalizeTruthRecord 完成请求记录：设置输出内容、token、生成的工具调用，并标记为 completed。
