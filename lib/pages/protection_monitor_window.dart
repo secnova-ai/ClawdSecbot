@@ -763,10 +763,13 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
 
       await Future.delayed(const Duration(milliseconds: 50));
 
-      // Step 2: 设置资产名称
+      // Step 2: 设置资产名称（临时值，后续加载配置后可能校正）
       _protectionService.setAssetName(widget.assetName, widget.assetID);
 
-      // Step 3: 启用 Callback Bridge
+      // Step 3: 加载防护配置并校正 asset_id 绑定（必须在启用回调桥之前完成）
+      await _loadProtectionConfig();
+
+      // Step 4: 启用 Callback Bridge（此时 asset_id 已校正，过滤不会漏掉数据）
       final callbackEnabled = await _protectionService.enableCallbackBridge();
       if (kDebugMode) {
         debugPrint(
@@ -778,11 +781,8 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
 
       await Future.delayed(const Duration(milliseconds: 50));
 
-      // Step 4: 加载历史统计数据
+      // Step 5: 加载历史统计数据
       await _protectionService.loadStatisticsFromDatabase();
-
-      // Step 4.1: 加载防护配置
-      await _loadProtectionConfig();
 
       if (mounted) {
         setState(() {

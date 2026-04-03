@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/openai/openai-go"
@@ -194,4 +196,95 @@ func sdkToolCallsToInterface(toolCalls []openai.ChatCompletionMessageToolCall) i
 // sdkParamToolCallsToInterface converts SDK param tool calls to interface{} for ConversationMessage.ToolCalls
 func sdkParamToolCallsToInterface(toolCalls []openai.ChatCompletionMessageToolCallParam) interface{} {
 	return toolCalls
+}
+
+// ============================================================
+// DinTalClaw 文本嵌入式工具协议（Inline Tool Protocol）解析
+// ============================================================
+
+var (
+	inlineToolUseRe    = regexp.MustCompile(`(?s)<tool_use>\s*(.*?)\s*</tool_use>`)
+	inlineToolResultRe = regexp.MustCompile(`(?s)<tool_result>\s*(.*?)\s*</tool_result>`)
+	// 匹配 DinTalClaw 模板中的 SYSTEM->USER 区间，用于忽略其中示例工具协议。
+	inlineSystemToUserRe = regexp.MustCompile(`(?is)===\s*system\s*===.*?(===\s*user\s*===)`)
+)
+
+// InlineToolUse 表示从文本中提取的内嵌工具调用
+type InlineToolUse struct {
+	Name    string
+	RawArgs string
+}
+
+// stripInlineProtocolTemplateNoise 忽略 DinTalClaw 模板中 SYSTEM 到 USER 之间的示例工具内容。
+func stripInlineProtocolTemplateNoise(content string) string {
+	if strings.TrimSpace(content) == "" {
+		return content
+	}
+	return inlineSystemToUserRe.ReplaceAllString(content, "$1")
+}
+
+// extractInlineToolUses 从消息内容中提取 <tool_use> 标签（DinTalClaw 协议）
+func extractInlineToolUses(content string) []InlineToolUse {
+	content = stripInlineProtocolTemplateNoise(content)
+	matches := inlineToolUseRe.FindAllStringSubmatch(content, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	var result []InlineToolUse
+	for _, m := range matches {
+		body := strings.TrimSpace(m[1])
+		if body == "" {
+			continue
+		}
+		var parsed struct {
+			Name string          `json:"name"`
+			Args json.RawMessage `json:"arguments"`
+		}
+		if err := json.Unmarshal([]byte(body), &parsed); err == nil && parsed.Name != "" {
+			result = append(result, InlineToolUse{
+				Name:    parsed.Name,
+				RawArgs: string(parsed.Args),
+			})
+		} else {
+			result = append(result, InlineToolUse{
+				Name:    "inline_tool",
+				RawArgs: body,
+			})
+		}
+	}
+	return result
+}
+
+// extractInlineToolResults 从消息内容中提取 <tool_result> 标签内容（DinTalClaw 协议）
+func extractInlineToolResults(content string) []string {
+	content = stripInlineProtocolTemplateNoise(content)
+	matches := inlineToolResultRe.FindAllStringSubmatch(content, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	var result []string
+	for _, m := range matches {
+		body := strings.TrimSpace(m[1])
+		if body != "" {
+			result = append(result, body)
+		}
+	}
+	return result
+}
+
+// hasInlineToolUse 检查内容是否包含 <tool_use> 标签
+func hasInlineToolUse(content string) bool {
+	content = stripInlineProtocolTemplateNoise(content)
+	return inlineToolUseRe.MatchString(content)
+}
+
+// hasInlineToolResult 检查内容是否包含 <tool_result> 标签
+func hasInlineToolResult(content string) bool {
+	content = stripInlineProtocolTemplateNoise(content)
+	return inlineToolResultRe.MatchString(content)
+}
+
+// generateInlineToolCallID 生成内嵌工具调用的合成 ID
+func generateInlineToolCallID(msgIndex, toolIndex int) string {
+	return fmt.Sprintf("inline_%d_%d", msgIndex, toolIndex)
 }

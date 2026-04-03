@@ -642,12 +642,9 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
   }
 
   Widget _buildTitleBar() {
-    if (Platform.isLinux) {
-      return const SizedBox.shrink();
-    }
-
     final l10n = AppLocalizations.of(context);
     final isWindows = Platform.isWindows;
+    final isLinux = Platform.isLinux;
 
     return Container(
       height: 48,
@@ -661,14 +658,16 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
         children: [
           Expanded(
             child: GestureDetector(
-              onPanStart: (_) {
-                try {
-                  windowManager.startDragging();
-                } catch (_) {}
-              },
+              onPanStart: isLinux
+                  ? null
+                  : (_) {
+                      try {
+                        windowManager.startDragging();
+                      } catch (_) {}
+                    },
               behavior: HitTestBehavior.translucent,
               child: Padding(
-                padding: isWindows
+                padding: isWindows || isLinux
                     ? const EdgeInsets.only(left: 16)
                     : const EdgeInsets.only(left: 78),
                 child: Row(
@@ -746,7 +745,6 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
               isClose: true,
             ),
           ],
-          // macOS only: custom -/x
           if (Platform.isMacOS) ...[
             const SizedBox(width: 8),
             _buildWindowButton(

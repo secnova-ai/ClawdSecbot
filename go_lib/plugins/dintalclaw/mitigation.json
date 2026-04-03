@@ -1,0 +1,92 @@
+[
+  {
+    "risk_id": "config_perm_unsafe",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "fix_permission",
+          "label": "修复权限（Windows: ACL / Unix: chmod 600）",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "memory_dir_perm_unsafe",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "fix_permission",
+          "label": "修复权限（Windows: ACL / Unix: chmod 700）",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "process_running_as_root",
+    "mitigation": {
+      "type": "suggestion",
+      "title": "进程以 root 运行风险",
+      "description": "DinTalClaw 进程以 root 用户运行，存在权限过大风险。建议以普通用户身份启动。",
+      "suggestions": [
+        {
+          "priority": "P0",
+          "category": "立即措施",
+          "items": [
+            {
+              "action": "以普通用户运行",
+              "detail": "停止当前进程，切换到普通用户后重新启动 DinTalClaw"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "log_dir_perm_unsafe",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "fix_permission",
+          "label": "修复权限（Windows: ACL / Unix: chmod 700）",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "skills_not_scanned",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "scan_skills",
+          "label": "扫描未检测的 Skills",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "skill_agent_risk",
+    "mitigation": {
+      "type": "form",
+      "form_schema": [
+        {
+          "key": "delete_skill",
+          "label": "删除此 Skill",
+          "type": "boolean",
+          "default_value": false
+        }
+      ]
+    }
+  }
+]

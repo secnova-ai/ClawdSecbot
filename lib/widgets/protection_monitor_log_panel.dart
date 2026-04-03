@@ -100,18 +100,14 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
     // 1. 优先处理 <final> ... </final> 结构
     String trimmed = text.trimLeft();
     if (trimmed.startsWith('<final>')) {
-      // 提取 <final> 后内容
       final finalTagLength = '<final>'.length;
       final contentStart = trimmed.indexOf('<final>') + finalTagLength;
 
-      // 截取到结尾标签或到末尾
       final endTagIndex = trimmed.indexOf('</final>', contentStart);
       if (endTagIndex != -1) {
-        // 提取 <final> 和 </final> 之间的内容
         final inner = trimmed.substring(contentStart, endTagIndex).trimLeft();
         return inner;
       } else {
-        // 没有结束标签，返回 <final> 后所有内容
         return trimmed.substring(contentStart).trimLeft();
       }
     }
@@ -127,12 +123,101 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
       if (content.isNotEmpty) {
         return content;
       }
-      // 若内容空则返回原文本
       return text;
     }
 
     // 3. 默认情况：去除前后空白后返回
     return text.trim();
+  }
+
+  // ==================== 资产特有消息预处理 ====================
+
+  /// 按资产类型对原始消息内容做预处理，提取实际展示文本。
+  /// 不同资产的消息格式差异在此集中处理，避免侵入通用逻辑。
+  String _preprocessMessageForAsset(String content, String assetName, String role) {
+    final lowerAsset = assetName.toLowerCase();
+
+    if (lowerAsset.contains('dintalclaw')) {
+      return _preprocessDinTalClaw(content, role);
+    }
+
+    // 其他资产类型在此扩展，例如：
+    // if (lowerAsset.contains('other_asset')) {
+    //   return _preprocessOtherAsset(content, role);
+    // }
+
+    return content;
+  }
+
+  // ---- DinTalClaw 消息预处理 ----
+
+  static final _dintalclawSectionRe = RegExp(
+    r'===\s*(SYSTEM|USER|ASSISTANT)\s*===',
+    caseSensitive: false,
+  );
+
+  /// DinTalClaw 消息预处理：提取 "=== ROLE ===" 段落中对应角色的实际内容
+  String _preprocessDinTalClaw(String content, String role) {
+    String result;
+    if (!_dintalclawSectionRe.hasMatch(content)) {
+      result = content;
+    } else {
+      final section = role.toLowerCase() == 'assistant' ? 'ASSISTANT' : 'USER';
+      result = _extractDinTalClawSection(content, section) ?? content;
+    }
+    if (role.toLowerCase() == 'user') {
+      result = _stripDinTalClawProtocolNoise(result);
+    }
+    return result;
+  }
+
+  /// 去除 DinTalClaw 用户消息中的协议噪声内容
+  static final _workingMemoryBlockRe = RegExp(
+    r'###\s*\[WORKING MEMORY\][\s\S]*?</history>',
+    caseSensitive: false,
+  );
+  static final _historyBlockRe = RegExp(
+    r'<history>[\s\S]*?</history>',
+    caseSensitive: false,
+  );
+  static final _workingMemoryTrailingRe = RegExp(
+    r'###\s*\[WORKING MEMORY\][\s\S]*$',
+  );
+  static final _systemLineRe = RegExp(
+    r'^[ \t]*\[System\].*$',
+    multiLine: true,
+  );
+  static final _protocolViolationLineRe = RegExp(
+    r'^[ \t]*PROTOCOL_VIOLATION.*$',
+    multiLine: true,
+  );
+  static final _excessiveNewlinesRe = RegExp(r'\n{3,}');
+
+  String _stripDinTalClawProtocolNoise(String content) {
+    var result = content;
+    result = result.replaceAll(_workingMemoryBlockRe, '');
+    result = result.replaceAll(_historyBlockRe, '');
+    result = result.replaceAll(_workingMemoryTrailingRe, '');
+    result = result.replaceAll(_systemLineRe, '');
+    result = result.replaceAll(_protocolViolationLineRe, '');
+    result = result.replaceAll(_excessiveNewlinesRe, '\n\n');
+    return result.trim();
+  }
+
+  /// 从 DinTalClaw "=== SECTION ===" 格式中提取指定段内容
+  String? _extractDinTalClawSection(String text, String section) {
+    final startRe = RegExp('===\\s*$section\\s*===', caseSensitive: false);
+    final startMatch = startRe.firstMatch(text);
+    if (startMatch == null) return null;
+    final contentStart = startMatch.end;
+    final nextMatch = _dintalclawSectionRe.firstMatch(
+      text.substring(contentStart),
+    );
+    final body = nextMatch != null
+        ? text.substring(contentStart, contentStart + nextMatch.start)
+        : text.substring(contentStart);
+    final trimmed = body.trim();
+    return trimmed.isNotEmpty ? trimmed : null;
   }
 
   String _formatRoleLabel(String role) {
@@ -143,6 +228,10 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
         return 'Assistant';
       case 'tool':
         return 'Tool';
+      case 'tool_request':
+        return 'Tool Call';
+      case 'tool_result':
+        return 'Tool Result';
       case 'system':
         return 'System';
       default:
@@ -150,6 +239,51 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
         if (trimmed.isEmpty) return '';
         return trimmed[0].toUpperCase() + trimmed.substring(1);
     }
+  }
+
+  /// 从消息内容中提取 `<summary>...</summary>` 标签中的摘要文本
+  String? _extractSummary(String content) {
+    final pattern = RegExp(r'<summary>\s*([\s\S]*?)\s*</summary>');
+    final match = pattern.firstMatch(content);
+    return match?.group(1)?.trim();
+  }
+
+  /// 去除消息内容中的 `<thinking>` / `<summary>` / `<tool_use>` / `<tool_result>` 等元标签，保留可读正文
+  String _stripMetaTags(String content) {
+    var result = content;
+    result = result.replaceAll(
+      RegExp(r'<thinking>[\s\S]*?</thinking>', caseSensitive: false),
+      '',
+    );
+    result = result.replaceAll(
+      RegExp(r'<summary>[\s\S]*?</summary>', caseSensitive: false),
+      '',
+    );
+    result = result.replaceAll(
+      RegExp(r'<tool_use>[\s\S]*?</tool_use>', caseSensitive: false),
+      '',
+    );
+    result = result.replaceAll(
+      RegExp(r'<tool_result>[\s\S]*?</tool_result>', caseSensitive: false),
+      '',
+    );
+    return result.trim();
+  }
+
+
+  /// 将 Markdown 风格的列表内容（- **Field**: Value）解析为结构化字段列表
+  List<({String field, String value})> _parseStructuredFields(String content) {
+    final fields = <({String field, String value})>[];
+    final lines = content.split('\n');
+    for (final line in lines) {
+      final match = RegExp(r'^[-*]\s+\*\*(.+?)\*\*\s*[:：]\s*(.+)$').firstMatch(
+        line.trim(),
+      );
+      if (match != null) {
+        fields.add((field: match.group(1)!.trim(), value: match.group(2)!.trim()));
+      }
+    }
+    return fields;
   }
 
 
@@ -830,11 +964,12 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
         ? '${group.promptTokens} / ${group.completionTokens} / ${group.totalTokens}'
         : '';
 
-    // === 对话摘要：仅展示 user/assistant 的有效文本，不含工具信息 ===
+    // === 对话摘要：展示 user/assistant/tool 的有效文本 ===
     var displayMessages = group.messages
         .where((m) {
           final role = m.role.toLowerCase();
-          if (role == 'system' || role == 'tool') return false;
+          if (role == 'system') return false;
+          if (role == 'tool' && m.content.trim().isEmpty) return false;
           if (role == 'assistant' && m.content.trim().isEmpty) return false;
           return true;
         })
@@ -845,19 +980,59 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
     if (lastUserIdx >= 0) {
       displayMessages = displayMessages.sublist(lastUserIdx);
     }
-    // 取最新的后 5 条，确保摘要始终展示最近的对话上下文
-    const maxSummaryMessages = 5;
+    const maxSummaryMessages = 7;
     final visibleMessages = displayMessages.length <= maxSummaryMessages
         ? displayMessages
         : displayMessages.sublist(displayMessages.length - maxSummaryMessages);
-    final summaryItems = <({String role, String content})>[
-      ...visibleMessages.map((message) {
-        var summary = _sanitizeCardContent(
-          message.content.replaceAll(RegExp(r'^\[.*?\]\s*'), ''),
-        ).trim();
-        return (role: message.role, content: summary);
-      }),
-    ];
+
+    // === 工具区域 ===
+    final responseToolCalls = group.toolCalls
+        .where((tc) => tc.source == 'response')
+        .toList();
+
+    final assetName = group.assetName;
+
+    final summaryItems = <({String role, String content, List<({String field, String value})> fields})>[];
+    for (final message in visibleMessages) {
+      final rawContent = message.content.replaceAll(RegExp(r'^\[.*?\]\s*'), '');
+      final role = message.role.toLowerCase();
+      // 资产特有预处理（DinTalClaw 提取段落标记、其他资产可扩展）
+      final preprocessed = _preprocessMessageForAsset(rawContent, assetName, role);
+
+      if (role == 'user') {
+        final stripped = _stripMetaTags(preprocessed);
+        final cleaned = _sanitizeCardContent(stripped).trim();
+        if (cleaned.isNotEmpty) {
+          summaryItems.add((role: 'user', content: cleaned, fields: const []));
+        }
+      } else if (role == 'assistant') {
+        final summaryText = _extractSummary(preprocessed);
+        final body = _stripMetaTags(preprocessed);
+        final sanitized = _sanitizeCardContent(body);
+        final fields = _parseStructuredFields(sanitized);
+        final displayText = summaryText ?? sanitized;
+        final bodyWithoutFields = fields.isNotEmpty
+            ? sanitized.split('\n').where((line) {
+                return !RegExp(r'^[-*]\s+\*\*.+?\*\*\s*[:：]').hasMatch(
+                  line.trim(),
+                );
+              }).join('\n').trim()
+            : '';
+        final finalContent = summaryText != null && bodyWithoutFields.isNotEmpty
+            ? '$displayText\n$bodyWithoutFields'
+            : displayText;
+        if (finalContent.trim().isNotEmpty) {
+          summaryItems.add((role: 'assistant', content: finalContent, fields: fields));
+        }
+      } else if (role == 'tool') {
+        final cleaned = _sanitizeCardContent(rawContent).trim();
+        summaryItems.add((role: 'tool_result', content: cleaned, fields: const []));
+      } else {
+        final cleaned = _sanitizeCardContent(rawContent).trim();
+        summaryItems.add((role: message.role, content: cleaned, fields: const []));
+      }
+    }
+
     // 兜底：若摘要中无 assistant 消息但 primaryContent 有值，补入摘要
     if (hasContent &&
         group.primaryContentType.trim().toLowerCase() == 'assistant_response' &&
@@ -866,19 +1041,32 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
               item.role.toLowerCase() == 'assistant' &&
               item.content.trim().isNotEmpty,
         )) {
-      summaryItems.add((role: 'Assistant', content: contentText));
+      final fields = _parseStructuredFields(contentText);
+      summaryItems.add((role: 'assistant', content: contentText, fields: fields));
     }
 
-    // === 工具区域 ===
-    // 工具参数：来自 provider 返回的当前轮工具调用请求（source=response）
-    final responseToolCalls = group.toolCalls
-        .where((tc) => tc.source == 'response')
-        .toList();
-
-    // 有工具调用时在摘要末尾补一行 Tool 提示
+    // 有工具调用时在摘要中插入 tool_request 条目（排除内嵌协议的合成条目，它们仅在工具区展示）
     if (responseToolCalls.isNotEmpty) {
-      final toolNames = responseToolCalls.map((tc) => tc.name).toSet().join(', ');
-      summaryItems.add((role: 'tool', content: '${_cardText(l10n, 'requestUseTool')} $toolNames'));
+      final standardToolCalls = responseToolCalls.where((tc) => !tc.id.startsWith('inline_')).toList();
+      if (standardToolCalls.isNotEmpty) {
+        final toolEntries = standardToolCalls.map((tc) {
+          final argsSummary = tc.arguments.isNotEmpty
+              ? _sanitizeCardContent(tc.arguments)
+              : '';
+          final display = argsSummary.isNotEmpty
+              ? '${tc.name}: $argsSummary'
+              : tc.name;
+          return (role: 'tool_request', content: display, fields: const <({String field, String value})>[]);
+        }).toList();
+        summaryItems.addAll(toolEntries);
+      }
+    }
+
+    // 资产特有过滤：DinTalClaw 等使用内嵌工具协议的资产，摘要区不展示 tool_request / tool_result
+    if (assetName.toLowerCase().contains('dintalclaw')) {
+      summaryItems.removeWhere(
+        (item) => item.role == 'tool_request' || item.role == 'tool_result',
+      );
     }
     final toolArgs = responseToolCalls
         .where((tc) => tc.arguments.isNotEmpty)
@@ -1008,38 +1196,99 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
                     roleColor = const Color(0xFF22C55E);
                   } else if (role == 'assistant') {
                     roleColor = const Color(0xFF6366F1);
+                  } else if (role == 'tool_request') {
+                    roleColor = const Color(0xFFEC4899);
+                  } else if (role == 'tool_result') {
+                    roleColor = const Color(0xFF14B8A6);
                   } else if (role == 'tool') {
                     roleColor = const Color(0xFFEC4899);
                   } else {
                     roleColor = Colors.white70;
                   }
                   return Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Row(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SizedBox(
-                          width: 72,
-                          child: Text(
-                            _formatRoleLabel(item.role),
-                            style: AppFonts.inter(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: roleColor,
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: 80,
+                              child: Text(
+                                _formatRoleLabel(item.role),
+                                style: AppFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: roleColor,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Text(
+                                item.content,
+                                style: AppFonts.inter(
+                                  fontSize: 11,
+                                  color: Colors.white,
+                                ),
+                                maxLines: role == 'assistant' ? 4 : 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (item.fields.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 80),
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: roleColor.withValues(alpha: 0.06),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: roleColor.withValues(alpha: 0.15),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: item.fields.map((f) {
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 2),
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${f.field}: ',
+                                          style: AppFonts.firaCode(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                            color: roleColor.withValues(
+                                              alpha: 0.8,
+                                            ),
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: Text(
+                                            f.value,
+                                            style: AppFonts.firaCode(
+                                              fontSize: 10,
+                                              color: Colors.white70,
+                                            ),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
                             ),
                           ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            item.content,
-                            style: AppFonts.inter(
-                              fontSize: 11,
-                              color: Colors.white,
-                            ),
-                            maxLines: role == 'assistant' ? 3 : 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
+                        ],
                       ],
                     ),
                   );
