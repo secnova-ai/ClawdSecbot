@@ -23,6 +23,56 @@ mixin ProtectionMonitorTranslationMixin on State<ProtectionMonitorPage> {
     return raw;
   }
 
+  /// 从消息内容中提取 `<summary>...</summary>` 标签中的摘要文本
+  String? _extractSummaryTag(String content) {
+    final pattern = RegExp(r'<summary>\s*([\s\S]*?)\s*</summary>');
+    final match = pattern.firstMatch(content);
+    return match?.group(1)?.trim();
+  }
+
+  static final _inlineToolUseRe = RegExp(
+    r'<tool_use>\s*([\s\S]*?)\s*</tool_use>',
+    caseSensitive: false,
+  );
+  static final _inlineToolResultRe = RegExp(
+    r'<tool_result>\s*([\s\S]*?)\s*</tool_result>',
+    caseSensitive: false,
+  );
+  static final _thinkingTagRe = RegExp(
+    r'<thinking>[\s\S]*?</thinking>',
+    caseSensitive: false,
+  );
+
+  /// 将 DinTalClaw 文本嵌入式工具标签转换为可读格式（用于原始视图）
+  String _formatInlineToolTags(String content) {
+    var result = content;
+    result = result.replaceAll(_thinkingTagRe, '');
+    result = result.replaceAllMapped(_inlineToolUseRe, (m) {
+      final body = m.group(1)?.trim() ?? '';
+      try {
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        final name = json['name']?.toString() ?? 'tool';
+        final args = json['arguments'];
+        final argsStr = args is Map ? jsonEncode(args) : args?.toString() ?? '';
+        final preview = argsStr.length > 80
+            ? '${argsStr.substring(0, 80)}...'
+            : argsStr;
+        return '🔧 [$name] $preview';
+      } catch (_) {
+        final preview = body.length > 80 ? '${body.substring(0, 80)}...' : body;
+        return '🔧 [tool] $preview';
+      }
+    });
+    result = result.replaceAllMapped(_inlineToolResultRe, (m) {
+      final body = m.group(1)?.trim() ?? '';
+      final preview = body.length > 120
+          ? '${body.substring(0, 120)}...'
+          : body;
+      return '📋 [result] $preview';
+    });
+    return result.trim();
+  }
+
   bool shouldHideFromRawView(String logJson) {
     try {
       final data = jsonDecode(logJson) as Map<String, dynamic>;
@@ -87,13 +137,27 @@ mixin ProtectionMonitorTranslationMixin on State<ProtectionMonitorPage> {
             params?['stream']?.toString() ?? '',
           );
         case 'proxy_message_info':
-          return l10n.proxyMessageInfo(
-            params?['index'] as int? ?? 0,
-            params?['role']?.toString() ?? '',
-            normalizeVisibleMessageContent(
-              params?['content']?.toString() ?? '',
-            ),
-          );
+          {
+            final role = (params?['role']?.toString() ?? '').toLowerCase();
+            final rawContent = params?['content']?.toString() ?? '';
+            final content = normalizeVisibleMessageContent(rawContent);
+            final formatted = _formatInlineToolTags(content);
+            final summary = _extractSummaryTag(content);
+            if ((role == 'user' || role == 'assistant') &&
+                summary != null &&
+                summary.isNotEmpty) {
+              return l10n.proxyMessageInfo(
+                params?['index'] as int? ?? 0,
+                params?['role']?.toString() ?? '',
+                summary,
+              );
+            }
+            return l10n.proxyMessageInfo(
+              params?['index'] as int? ?? 0,
+              params?['role']?.toString() ?? '',
+              formatted,
+            );
+          }
         case 'proxy_tool_activity_detected':
           return l10n.proxyToolActivityDetected;
         case 'proxy_tool_calls_found':
@@ -178,13 +242,27 @@ mixin ProtectionMonitorTranslationMixin on State<ProtectionMonitorPage> {
         case 'proxy_message_count_log':
           return l10n.proxyMessageCountLog(params?['count'] as int? ?? 0);
         case 'proxy_analyze_message':
-          return l10n.proxyAnalyzeMessage(
-            params?['index'] as int? ?? 0,
-            params?['role']?.toString() ?? '',
-            normalizeVisibleMessageContent(
-              params?['content']?.toString() ?? '',
-            ),
-          );
+          {
+            final role = (params?['role']?.toString() ?? '').toLowerCase();
+            final rawContent = params?['content']?.toString() ?? '';
+            final content = normalizeVisibleMessageContent(rawContent);
+            final formatted = _formatInlineToolTags(content);
+            final summary = _extractSummaryTag(content);
+            if ((role == 'user' || role == 'assistant') &&
+                summary != null &&
+                summary.isNotEmpty) {
+              return l10n.proxyAnalyzeMessage(
+                params?['index'] as int? ?? 0,
+                params?['role']?.toString() ?? '',
+                summary,
+              );
+            }
+            return l10n.proxyAnalyzeMessage(
+              params?['index'] as int? ?? 0,
+              params?['role']?.toString() ?? '',
+              formatted,
+            );
+          }
         case 'proxy_analysis_error':
           return l10n.proxyAnalysisError(params?['error']?.toString() ?? '');
         case 'proxy_analysis_result':

@@ -113,7 +113,11 @@ class BotScanner {
             ? _l10n!.riskSkillSecurityIssue(skillName)
             : 'Risky Skill: $skillName';
         final description = _l10n != null
-            ? _l10n!.riskSkillSecurityIssueDesc(skillName, issueCount)
+            ? (issueCount > 0
+                  ? _l10n!.riskSkillSecurityIssueDesc(skillName, issueCount)
+                  : (_l10n!.localeName.startsWith('zh')
+                        ? '技能 "$skillName" 存在安全风险。建议删除此技能。'
+                        : 'Skill "$skillName" is risky. Consider deleting it.'))
             : (issueCount > 0
                   ? 'Skill "$skillName" has $issueCount security issue(s): ${issues.join("; ")}'
                   : 'Skill "$skillName" was flagged as potentially risky.');

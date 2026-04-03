@@ -160,6 +160,24 @@ class ProtectionMonitorService {
     return metricAssetID == _assetID;
   }
 
+  /// 带兜底的 asset_id 匹配：精确优先，漂移时按 asset_name 兜底并记录诊断日志。
+  bool _matchesTruthRecordAsset(TruthRecordModel record) {
+    if (_assetID.isEmpty) return false;
+    if (record.assetID == _assetID) return true;
+    if (_assetName != null &&
+        _assetName!.isNotEmpty &&
+        record.assetName == _assetName) {
+      appLogger.warning(
+        '[ProtectionMonitor] asset_id drift detected: '
+        'expected=$_assetID got=${record.assetID} '
+        'fallback matched by asset_name=$_assetName '
+        'request_id=${record.requestId}',
+      );
+      return true;
+    }
+    return false;
+  }
+
   int _deltaWithReset(int current, int previous) {
     if (current >= previous) {
       return current - previous;
@@ -312,7 +330,8 @@ class ProtectionMonitorService {
       appLogger.debug(
         '[TruthRecord] bridge_received request_id=${record.requestId} asset_id=${record.assetID} expected_asset_id=$_assetID phase=${record.phase} type=${record.primaryContentType} complete=${record.isComplete}',
       );
-      if (record.assetID == _assetID && !_truthRecordController.isClosed) {
+      if (_matchesTruthRecordAsset(record) &&
+          !_truthRecordController.isClosed) {
         _truthRecordController.add(record);
         if (record.isComplete) {
           _persistCompletedRecord(record);
@@ -775,7 +794,7 @@ class ProtectionMonitorService {
           final record = TruthRecordModel.fromJson(
             Map<String, dynamic>.from(item),
           );
-          if (record.assetID == _assetID) {
+          if (_matchesTruthRecordAsset(record)) {
             latestByRequestId[record.requestId] = record;
           }
         }
@@ -924,7 +943,7 @@ class ProtectionMonitorService {
       return decoded
           .whereType<Map<String, dynamic>>()
           .map((e) => TruthRecordModel.fromJson(e))
-          .where((r) => r.assetID == _assetID)
+          .where(_matchesTruthRecordAsset)
           .toList();
     } catch (e) {
       appLogger.error('[ProtectionMonitor] Fetch truth record snapshots failed', e);

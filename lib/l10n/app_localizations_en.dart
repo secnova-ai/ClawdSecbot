@@ -503,6 +503,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get oneClickProtection => 'Enable Protection';
 
   @override
+  String get protectionAssetNotRunning =>
+      'Asset not running, cannot enable protection';
+
+  @override
   String get protectionMonitor => 'Protection Monitor';
 
   @override

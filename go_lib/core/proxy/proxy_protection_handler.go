@@ -228,28 +228,173 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 		pp.sendTerminalLog("未找到需要检测的 assistant tool_calls")
 	}
 
-	// 独立于 ShepherdGate 清除逻辑，收集最新一轮 assistant 工具调用 ID，用于 TruthRecord 标记。
-	// 仅当工具结果尚未被后续 assistant 回复消费时才标记 — 即 tool 消息后面不能紧跟非 tool 消息。
-	latestRoundTCIDs := make(map[string]bool)
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		msg := req.Messages[i]
-		if msg.OfAssistant != nil && len(msg.OfAssistant.ToolCalls) > 0 {
-			hasToolFollowing := false
+	// ==================== DinTalClaw 内嵌工具协议回退检测 ====================
+	// 当标准 OpenAI tool_calls 未找到时，检查消息 content 中的 <tool_use> / <tool_result> 标签。
+	// DinTalClaw 可能将 assistant 内容（含 <tool_use>）嵌入 user 角色消息中，因此也需扫描 user 消息。
+	isInlineToolProtocol := false
+	var inlineToolResultsMap map[string]string
+	if len(latestAssistantToolCalls) == 0 {
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			msg := req.Messages[i]
+			var content string
+			if msg.OfAssistant != nil {
+				content = extractMessageContent(msg)
+			} else if msg.OfUser != nil {
+				userContent := extractMessageContent(msg)
+				if hasInlineToolUse(userContent) {
+					content = userContent
+				}
+			}
+			if content == "" {
+				continue
+			}
+			inlineTools := extractInlineToolUses(content)
+			if len(inlineTools) == 0 {
+				continue
+			}
+
+			latestAssistantIndex = i
+			isInlineToolProtocol = true
+			for j, it := range inlineTools {
+				syntheticID := generateInlineToolCallID(i, j)
+				latestAssistantToolCalls = append(latestAssistantToolCalls, toolCallRef{
+					ID:       syntheticID,
+					FuncName: it.Name,
+					RawArgs:  it.RawArgs,
+				})
+			}
+			pp.sendTerminalLog(fmt.Sprintf("[InlineTool] Found %d inline <tool_use> in message at index %d", len(inlineTools), i))
+
+			inlineToolResultsMap = make(map[string]string)
 			consumed := false
+
+			// DinTalClaw 单消息模式：同一条 user 消息可能同时包含 <tool_use> 和 <tool_result>
+			if msg.OfUser != nil {
+				sameResults := extractInlineToolResults(content)
+				if len(sameResults) > 0 {
+					hasToolResultMessages = true
+					for k, result := range sameResults {
+						if k < len(latestAssistantToolCalls) {
+							tcID := latestAssistantToolCalls[k].ID
+							inlineToolResultsMap[tcID] = result
+							toolResultIndices = append(toolResultIndices, i)
+						}
+					}
+					pp.sendTerminalLog(fmt.Sprintf("[InlineTool] Found %d inline <tool_result> in same user message at index %d", len(sameResults), i))
+				}
+			}
+
 			for j := i + 1; j < len(req.Messages); j++ {
-				if req.Messages[j].OfTool != nil {
-					hasToolFollowing = true
-				} else if hasToolFollowing {
-					consumed = true
+				nextMsg := req.Messages[j]
+				if nextMsg.OfUser != nil {
+					nextContent := extractMessageContent(nextMsg)
+					// 后续 user 消息中出现新 <tool_use> 且无 <tool_result>，视为新工具轮次
+					if hasInlineToolUse(nextContent) && !hasInlineToolResult(nextContent) {
+						consumed = true
+						pp.sendTerminalLog(fmt.Sprintf("[InlineTool] New <tool_use> cycle in user message at index %d, previous results consumed", j))
+						break
+					}
+					inlineResults := extractInlineToolResults(nextContent)
+					if len(inlineResults) > 0 {
+						hasToolResultMessages = true
+						for k, result := range inlineResults {
+							if k < len(latestAssistantToolCalls) {
+								tcID := latestAssistantToolCalls[k].ID
+								inlineToolResultsMap[tcID] = result
+								toolResultIndices = append(toolResultIndices, j)
+							}
+						}
+						pp.sendTerminalLog(fmt.Sprintf("[InlineTool] Found %d inline <tool_result> in user at index %d", len(inlineResults), j))
+					}
+				} else if nextMsg.OfAssistant != nil {
+					nextAssistContent := extractMessageContent(nextMsg)
+					if !hasInlineToolUse(nextAssistContent) {
+						consumed = true
+						pp.sendTerminalLog(fmt.Sprintf("[InlineTool] Inline tool results consumed by assistant at index %d", j))
+					}
 					break
 				}
 			}
-			if hasToolFollowing && !consumed {
-				for _, tc := range msg.OfAssistant.ToolCalls {
-					latestRoundTCIDs[tc.ID] = true
-				}
+			if consumed {
+				latestAssistantToolCalls = nil
+				latestAssistantIndex = -1
+				hasToolResultMessages = false
+				inlineToolResultsMap = nil
+				isInlineToolProtocol = false
 			}
 			break
+		}
+	}
+
+	// DinTalClaw 孤儿 <tool_result> 检测：
+	// 当请求中没有任何 <tool_use>（标准 / 内嵌均未找到），但 user 消息中包含 <tool_result> 时，
+	// 仍将其提取为工具结果记录，确保分组视图能展示。
+	if !isInlineToolProtocol && len(latestAssistantToolCalls) == 0 {
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			msg := req.Messages[i]
+			if msg.OfUser == nil {
+				continue
+			}
+			content := extractMessageContent(msg)
+			results := extractInlineToolResults(content)
+			if len(results) == 0 {
+				continue
+			}
+			isInlineToolProtocol = true
+			latestAssistantIndex = i
+			inlineToolResultsMap = make(map[string]string)
+			hasToolResultMessages = true
+			for k, result := range results {
+				synID := generateInlineToolCallID(i, k)
+				latestAssistantToolCalls = append(latestAssistantToolCalls, toolCallRef{
+					ID:       synID,
+					FuncName: "tool_result",
+					RawArgs:  "",
+				})
+				inlineToolResultsMap[synID] = result
+				toolResultIndices = append(toolResultIndices, i)
+				toolCallsInHistory = append(toolCallsInHistory, toolCallRef{
+					ID:       synID,
+					FuncName: "tool_result",
+					RawArgs:  "",
+				})
+			}
+			pp.sendTerminalLog(fmt.Sprintf("[InlineTool] Found %d orphan <tool_result> in user message at index %d (no matching <tool_use>)", len(results), i))
+			break
+		}
+	}
+
+	// 独立于 ShepherdGate 清除逻辑，收集最新一轮 assistant 工具调用 ID，用于 TruthRecord 标记。
+	// 仅当工具结果尚未被后续 assistant 回复消费时才标记 — 即 tool 消息后面不能紧跟非 tool 消息。
+	latestRoundTCIDs := make(map[string]bool)
+	if isInlineToolProtocol {
+		// DinTalClaw 内嵌协议：使用合成 ID 标记最新一轮
+		if hasToolResultMessages {
+			for _, tc := range latestAssistantToolCalls {
+				latestRoundTCIDs[tc.ID] = true
+			}
+		}
+	} else {
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			msg := req.Messages[i]
+			if msg.OfAssistant != nil && len(msg.OfAssistant.ToolCalls) > 0 {
+				hasToolFollowing := false
+				consumed := false
+				for j := i + 1; j < len(req.Messages); j++ {
+					if req.Messages[j].OfTool != nil {
+						hasToolFollowing = true
+					} else if hasToolFollowing {
+						consumed = true
+						break
+					}
+				}
+				if hasToolFollowing && !consumed {
+					for _, tc := range msg.OfAssistant.ToolCalls {
+						latestRoundTCIDs[tc.ID] = true
+					}
+				}
+				break
+			}
 		}
 	}
 
@@ -305,6 +450,27 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			}
 		}
 
+		// DinTalClaw 内嵌协议：收集消息内容中的 <tool_use> 到历史工具调用（assistant 或 user 消息）
+		if isInlineToolProtocol {
+			shouldCollect := false
+			if msg.OfAssistant != nil && len(msg.OfAssistant.ToolCalls) == 0 {
+				shouldCollect = true
+			} else if msg.OfUser != nil && hasInlineToolUse(content) {
+				shouldCollect = true
+			}
+			if shouldCollect {
+				inlineTools := extractInlineToolUses(content)
+				for j, it := range inlineTools {
+					synID := generateInlineToolCallID(i, j)
+					toolCallsInHistory = append(toolCallsInHistory, toolCallRef{
+						ID:       synID,
+						FuncName: it.Name,
+						RawArgs:  it.RawArgs,
+					})
+				}
+			}
+		}
+
 		if msg.OfTool != nil {
 			toolCallID := msg.OfTool.ToolCallID
 			toolContent := content
@@ -357,6 +523,12 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 				content := extractMessageContent(msg)
 				toolResultsMap[strings.TrimSpace(toolCallID)] = content
 			}
+		}
+	}
+	// DinTalClaw 内嵌协议：将 <tool_result> 结果合并到 toolResultsMap
+	if isInlineToolProtocol && inlineToolResultsMap != nil {
+		for id, result := range inlineToolResultsMap {
+			toolResultsMap[id] = result
 		}
 	}
 
@@ -421,6 +593,9 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 						Name:       tcRef.FuncName,
 						RawArgs:    tcRef.RawArgs,
 						ToolCallID: tcRef.ID,
+					}
+					if pp.toolValidator != nil {
+						info.IsSensitive = pp.toolValidator.IsSensitive(tcRef.FuncName)
 					}
 					if tcRef.RawArgs != "" {
 						var args map[string]interface{}
@@ -930,25 +1105,67 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 					logContent = truncateString(logContent, 300)
 				}
 				recordContent := truncateToBytes(accumulatedContent, maxRecordMessageBytes)
-				pp.sendLogForRequest(requestID, "proxy_stream_content_no_tools", map[string]interface{}{
-					"content": logContent,
-				})
-				pp.updateTruthRecord(requestID, func(r *TruthRecord) {
-					assistantIndex := len(r.Messages)
-					if assistantIndex < r.MessageCount {
-						assistantIndex = r.MessageCount
-					}
-					if len(r.Messages) == 0 ||
-						r.Messages[len(r.Messages)-1].Role != "assistant" ||
-						r.Messages[len(r.Messages)-1].Content != recordContent {
+
+				// DinTalClaw 内嵌协议：检测流式响应中的 <tool_use> 标签
+				inlineResponseTools := extractInlineToolUses(accumulatedContent)
+				if len(inlineResponseTools) > 0 {
+					pp.sendLogForRequest(requestID, "proxy_stream_content_with_tools", map[string]interface{}{
+						"content": logContent,
+					})
+					pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+						for j, it := range inlineResponseTools {
+							synID := generateInlineToolCallID(r.MessageCount, j)
+							isSensitive := false
+							if pp.toolValidator != nil {
+								isSensitive = pp.toolValidator.IsSensitive(it.Name)
+							}
+							r.ToolCalls = append(r.ToolCalls, RecordToolCall{
+								ID:          synID,
+								Name:        it.Name,
+								Arguments:   truncateToBytes(it.RawArgs, maxRecordToolArgsBytes),
+								IsSensitive: isSensitive,
+								Source:      "response",
+							})
+						}
+						assistantIndex := len(r.Messages)
+						if assistantIndex < r.MessageCount {
+							assistantIndex = r.MessageCount
+						}
 						r.Messages = append(r.Messages, RecordMessage{
 							Index:   assistantIndex,
 							Role:    "assistant",
 							Content: recordContent,
 						})
+						applyRecordPrimaryContent(r, RecordContentNoText, "Assistant generated inline tool calls.", false)
+					})
+					pp.sendTerminalLog(fmt.Sprintf("[InlineTool] Detected %d <tool_use> in stream response", len(inlineResponseTools)))
+					for i, it := range inlineResponseTools {
+						pp.sendLogForRequest(requestID, "proxy_tool_call_name", map[string]interface{}{
+							"index": i,
+							"name":  it.Name,
+						})
 					}
-					applyRecordPrimaryContent(r, RecordContentAssistant, previewRecordContent(accumulatedContent, 300).Content, true)
-				})
+				} else {
+					pp.sendLogForRequest(requestID, "proxy_stream_content_no_tools", map[string]interface{}{
+						"content": logContent,
+					})
+					pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+						assistantIndex := len(r.Messages)
+						if assistantIndex < r.MessageCount {
+							assistantIndex = r.MessageCount
+						}
+						if len(r.Messages) == 0 ||
+							r.Messages[len(r.Messages)-1].Role != "assistant" ||
+							r.Messages[len(r.Messages)-1].Content != recordContent {
+							r.Messages = append(r.Messages, RecordMessage{
+								Index:   assistantIndex,
+								Role:    "assistant",
+								Content: recordContent,
+							})
+						}
+						applyRecordPrimaryContent(r, RecordContentAssistant, previewRecordContent(accumulatedContent, 300).Content, true)
+					})
+				}
 			}
 		}
 

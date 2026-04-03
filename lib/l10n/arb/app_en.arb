@@ -232,6 +232,7 @@
   },
 
   "oneClickProtection": "Enable Protection",
+  "protectionAssetNotRunning": "Asset not running, cannot enable protection",
   "protectionMonitor": "Protection Monitor",
   "protectionStarting": "Starting...",
   "launchAtStartup": "Launch at Startup",
