@@ -284,11 +284,29 @@ class _ProtectionMonitorEventPanelState
 }
 
 /// 安全事件详情弹窗
-class _SecurityEventDetailDialog extends StatelessWidget {
+class _SecurityEventDetailDialog extends StatefulWidget {
   final SecurityEvent event;
   final AppLocalizations l10n;
 
   const _SecurityEventDetailDialog({required this.event, required this.l10n});
+
+  @override
+  State<_SecurityEventDetailDialog> createState() =>
+      _SecurityEventDetailDialogState();
+}
+
+class _SecurityEventDetailDialogState
+    extends State<_SecurityEventDetailDialog> {
+  final ScrollController _dialogScrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _dialogScrollController.dispose();
+    super.dispose();
+  }
+
+  SecurityEvent get event => widget.event;
+  AppLocalizations get l10n => widget.l10n;
 
   @override
   Widget build(BuildContext context) {
@@ -306,13 +324,13 @@ class _SecurityEventDetailDialog extends StatelessWidget {
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 480, maxHeight: 400),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              child: Row(
                 children: [
                   Icon(
                     event.isBlocked
@@ -341,36 +359,62 @@ class _SecurityEventDetailDialog extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildDetailRow(
-                        l10n.eventTime,
-                        _formatFullTime(event.timestamp),
-                      ),
-                      if (event.actionDesc.isNotEmpty)
-                        _buildDetailRow(l10n.eventActionDesc, event.actionDesc),
-                      if (event.riskType.isNotEmpty)
-                        _buildDetailRow(l10n.eventRiskType, event.riskType),
-                      _buildDetailRow(
-                        l10n.eventSource,
-                        event.isFromReactAgent
-                            ? l10n.eventSourceAgent
-                            : l10n.eventSourceHeuristic,
-                      ),
-                      _buildDetailRow(l10n.eventType, event.eventType),
-                      if (event.detail.isNotEmpty)
-                        _buildDetailRow(l10n.eventDetail, event.detail),
-                      _buildDetailRow('ID', event.id),
-                    ],
+            ),
+            const SizedBox(height: 16),
+            Flexible(
+              child: ScrollbarTheme(
+                data: ScrollbarThemeData(
+                  thumbColor: WidgetStateProperty.all(
+                    Colors.white.withValues(alpha: 0.3),
+                  ),
+                  trackColor: WidgetStateProperty.all(
+                    Colors.white.withValues(alpha: 0.05),
+                  ),
+                  trackBorderColor: WidgetStateProperty.all(
+                    Colors.white.withValues(alpha: 0.08),
+                  ),
+                  thickness: WidgetStateProperty.all(8.0),
+                  radius: const Radius.circular(4),
+                ),
+                child: Scrollbar(
+                  controller: _dialogScrollController,
+                  thumbVisibility: true,
+                  trackVisibility: true,
+                  child: SingleChildScrollView(
+                    controller: _dialogScrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildDetailRow(
+                          l10n.eventTime,
+                          _formatFullTime(event.timestamp),
+                        ),
+                        if (event.actionDesc.isNotEmpty)
+                          _buildDetailRow(
+                              l10n.eventActionDesc, event.actionDesc),
+                        if (event.riskType.isNotEmpty)
+                          _buildDetailRow(
+                              l10n.eventRiskType, event.riskType),
+                        _buildDetailRow(
+                          l10n.eventSource,
+                          event.isFromReactAgent
+                              ? l10n.eventSourceAgent
+                              : l10n.eventSourceHeuristic,
+                        ),
+                        _buildDetailRow(l10n.eventType, event.eventType),
+                        if (event.detail.isNotEmpty)
+                          _buildDetailRow(l10n.eventDetail, event.detail),
+                        _buildDetailRow('ID', event.id),
+                      ],
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
-              Align(
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+              child: Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
                   icon: const Icon(LucideIcons.copy, size: 14),
@@ -387,8 +431,8 @@ class _SecurityEventDetailDialog extends StatelessWidget {
                   },
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

@@ -705,12 +705,18 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 					securityMsg := pp.shepherdGate.FormatSecurityMessage(decision)
 					securityMsg = pp.shepherdGate.TranslateForUser(pp.ctx, securityMsg, cachedLastUserMsg)
 					pp.emitMonitorSecurityDecision(decision.Status, decision.Reason, true, securityMsg)
+					recordAction := "BLOCK"
+					recordRiskLevel := "BLOCKED"
+					if decision.Status == "NEEDS_CONFIRMATION" {
+						recordAction = "NEEDS_CONFIRMATION"
+						recordRiskLevel = "NEEDS_CONFIRMATION"
+					}
 					pp.updateTruthRecord(requestID, func(r *TruthRecord) {
 						r.Phase = RecordPhaseStopped
 						r.CompletedAt = time.Now().Format(time.RFC3339Nano)
 						r.Decision = &SecurityDecision{
-							Action:     "BLOCK",
-							RiskLevel:  "BLOCKED",
+							Action:     recordAction,
+							RiskLevel:  recordRiskLevel,
 							Reason:     decision.Reason,
 							Confidence: 100,
 						}

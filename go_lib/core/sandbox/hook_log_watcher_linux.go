@@ -47,6 +47,11 @@ func (w *HookLogWatcher) Start() {
 	}
 	w.running = true
 	w.stopCh = make(chan struct{})
+
+	// Skip existing content so previously logged events are not re-emitted.
+	if info, err := os.Stat(w.logPath); err == nil {
+		w.offset = info.Size()
+	}
 	w.mu.Unlock()
 
 	go w.watchLoop()

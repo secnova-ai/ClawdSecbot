@@ -685,81 +685,90 @@ class _AssetCardState extends State<_AssetCard> {
             cursor: SystemMouseCursors.click,
             child: GestureDetector(
               onTap: _toggleExpand,
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      onTap: _showIconPicker,
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
+                  Row(
+                    children: [
+                      MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          onTap: _showIconPicker,
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: _currentIconColor.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              _currentIcon,
+                              color: _currentIconColor,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _getAssetDisplayName(asset.name),
+                          style: AppFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildProtectionBadge(l10n),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color: _currentIconColor.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(8),
+                          color: Colors.white.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
                         ),
-                        child: Icon(
-                          _currentIcon,
-                          color: _currentIconColor,
-                          size: 18,
+                        child: Text(
+                          _buildAssetTypeBadgeText(
+                            asset,
+                            l10n.localeName.startsWith('zh'),
+                          ),
+                          style: AppFonts.firaCode(
+                            fontSize: 10,
+                            color: Colors.white70,
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      _getAssetDisplayName(asset.name),
-                      style: AppFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                  // 绑定地址 + 端口摘要
-                  if (asset.ports.isNotEmpty) ...[
-                    Text(
-                      _buildBindPortSummary(asset),
-                      style: AppFonts.firaCode(
-                        fontSize: 10,
+                      const SizedBox(width: 8),
+                      Icon(
+                        _isExpanded
+                            ? LucideIcons.chevronDown
+                            : LucideIcons.chevronRight,
+                        size: 16,
                         color: Colors.white54,
                       ),
+                    ],
+                  ),
+                  if (asset.ports.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 46),
+                      child: Text(
+                        _buildBindPortSummary(asset),
+                        style: AppFonts.firaCode(
+                          fontSize: 10,
+                          color: Colors.white54,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    const SizedBox(width: 8),
                   ],
-                  // 防护状态徽章
-                  _buildProtectionBadge(l10n),
-                  const SizedBox(width: 8),
-                  // 类型徽章
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      _buildAssetTypeBadgeText(
-                        asset,
-                        l10n.localeName.startsWith('zh'),
-                      ),
-                      style: AppFonts.firaCode(
-                        fontSize: 10,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // 折叠/展开指示器
-                  Icon(
-                    _isExpanded
-                        ? LucideIcons.chevronDown
-                        : LucideIcons.chevronRight,
-                    size: 16,
-                    color: Colors.white54,
-                  ),
                 ],
               ),
             ),

@@ -37,6 +37,12 @@ class ProtectionMonitorLogPanel extends StatefulWidget {
   final void Function(String text, AppLocalizations l10n) onCopyText;
   final VoidCallback onScrollToBottom;
 
+  /// 日志面板是否处于放大状态(隐藏趋势图后扩展)
+  final bool isExpanded;
+
+  /// 切换日志面板放大/还原
+  final VoidCallback? onToggleExpand;
+
   /// bot 资产配置的默认模型名,当日志未携带模型信息时作为兜底显示
   final String defaultModelName;
 
@@ -53,6 +59,8 @@ class ProtectionMonitorLogPanel extends StatefulWidget {
     required this.onClearLogs,
     required this.onCopyText,
     required this.onScrollToBottom,
+    this.isExpanded = false,
+    this.onToggleExpand,
     this.defaultModelName = '',
   });
 
@@ -481,63 +489,81 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
   }
 
   Widget _buildHeader(AppLocalizations l10n) {
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Row(
-        children: [
-          const Icon(LucideIcons.terminal, color: Color(0xFF6366F1), size: 16),
-          const SizedBox(width: 8),
-          Text(
-            l10n.analysisLogs,
-            style: AppFonts.inter(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
+    return GestureDetector(
+      onDoubleTap: widget.onToggleExpand,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            const Icon(LucideIcons.terminal, color: Color(0xFF6366F1), size: 16),
+            const SizedBox(width: 8),
+            Text(
+              l10n.analysisLogs,
+              style: AppFonts.inter(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
             ),
-          ),
-          const Spacer(),
-          _buildViewToggle(l10n),
-          const SizedBox(width: 8),
-          IconButton(
-            icon: const Icon(LucideIcons.copy, size: 16),
-            color: _selectedIndices.isNotEmpty
-                ? Colors.white54
-                : Colors.white24,
-            tooltip: _cardText(l10n, 'copySelected'),
-            onPressed: _selectedIndices.isNotEmpty
-                ? () {
-                    final text = _joinSelectedLines();
-                    widget.onCopyText(text, l10n);
-                  }
-                : null,
-          ),
-          IconButton(
-            icon: const Icon(LucideIcons.copy, size: 16),
-            color: Colors.white54,
-            tooltip: _cardText(l10n, 'copyAll'),
-            onPressed: () {
-              final allText = widget.logs.map((e) => e.text).join('\n');
-              widget.onCopyText(allText, l10n);
-            },
-          ),
-          MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              onTap: widget.onClearLogs,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(4),
+            const Spacer(),
+            _buildViewToggle(l10n),
+            const SizedBox(width: 8),
+            if (widget.onToggleExpand != null)
+              IconButton(
+                icon: Icon(
+                  widget.isExpanded
+                      ? LucideIcons.minimize2
+                      : LucideIcons.maximize2,
+                  size: 14,
                 ),
-                child: Text(
-                  l10n.clear,
-                  style: AppFonts.inter(fontSize: 11, color: Colors.white54),
+                color: Colors.white54,
+                tooltip: widget.isExpanded ? 'Restore' : 'Expand',
+                onPressed: widget.onToggleExpand,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                padding: EdgeInsets.zero,
+                iconSize: 14,
+              ),
+            IconButton(
+              icon: const Icon(LucideIcons.copy, size: 16),
+              color: _selectedIndices.isNotEmpty
+                  ? Colors.white54
+                  : Colors.white24,
+              tooltip: _cardText(l10n, 'copySelected'),
+              onPressed: _selectedIndices.isNotEmpty
+                  ? () {
+                      final text = _joinSelectedLines();
+                      widget.onCopyText(text, l10n);
+                    }
+                  : null,
+            ),
+            IconButton(
+              icon: const Icon(LucideIcons.copy, size: 16),
+              color: Colors.white54,
+              tooltip: _cardText(l10n, 'copyAll'),
+              onPressed: () {
+                final allText = widget.logs.map((e) => e.text).join('\n');
+                widget.onCopyText(allText, l10n);
+              },
+            ),
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: widget.onClearLogs,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    l10n.clear,
+                    style: AppFonts.inter(fontSize: 11, color: Colors.white54),
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -631,73 +657,28 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
       );
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return ScrollbarTheme(
-          data: ScrollbarThemeData(
-            thumbColor: WidgetStateProperty.all(
-              Colors.white.withValues(alpha: 0.3),
-            ),
-            trackColor: WidgetStateProperty.all(
-              Colors.white.withValues(alpha: 0.05),
-            ),
-            trackBorderColor: WidgetStateProperty.all(
-              Colors.white.withValues(alpha: 0.08),
-            ),
-            thickness: WidgetStateProperty.all(8.0),
-            radius: const Radius.circular(4),
-          ),
-          child: widget.useGroupedView
-              ? Scrollbar(
-                  controller: widget.logScrollController,
-                  thumbVisibility: true,
-                  trackVisibility: true,
-                  notificationPredicate: (notif) => notif.depth == 1,
-                  child: Scrollbar(
-                    controller: widget.horizontalScrollController,
-                    thumbVisibility: true,
-                    trackVisibility: true,
-                    child: SingleChildScrollView(
-                      controller: widget.horizontalScrollController,
-                      scrollDirection: Axis.horizontal,
-                      child: Container(
-                        constraints: BoxConstraints(
-                          minWidth: constraints.maxWidth,
-                        ),
-                        width: constraints.maxWidth > 2000
-                            ? constraints.maxWidth
-                            : 2000,
-                        child: _buildGroupedView(l10n),
-                      ),
-                    ),
-                  ),
-                )
-              : Scrollbar(
-                  controller: widget.logScrollController,
-                  thumbVisibility: true,
-                  trackVisibility: true,
-                  notificationPredicate: (notif) => notif.depth == 1,
-                  child: Scrollbar(
-                    controller: widget.horizontalScrollController,
-                    thumbVisibility: true,
-                    trackVisibility: true,
-                    child: SingleChildScrollView(
-                      controller: widget.horizontalScrollController,
-                      scrollDirection: Axis.horizontal,
-                      child: Container(
-                        constraints: BoxConstraints(
-                          minWidth: constraints.maxWidth,
-                        ),
-                        width: constraints.maxWidth > 3000
-                            ? constraints.maxWidth
-                            : 3000,
-                        child: _buildRawView(l10n),
-                      ),
-                    ),
-                  ),
-                ),
-        );
-      },
+    return ScrollbarTheme(
+      data: ScrollbarThemeData(
+        thumbColor: WidgetStateProperty.all(
+          Colors.white.withValues(alpha: 0.3),
+        ),
+        trackColor: WidgetStateProperty.all(
+          Colors.white.withValues(alpha: 0.05),
+        ),
+        trackBorderColor: WidgetStateProperty.all(
+          Colors.white.withValues(alpha: 0.08),
+        ),
+        thickness: WidgetStateProperty.all(8.0),
+        radius: const Radius.circular(4),
+      ),
+      child: Scrollbar(
+        controller: widget.logScrollController,
+        thumbVisibility: true,
+        trackVisibility: true,
+        child: widget.useGroupedView
+            ? _buildGroupedView(l10n)
+            : _buildRawView(l10n),
+      ),
     );
   }
 
@@ -796,7 +777,6 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
       controller: widget.logScrollController,
       padding: const EdgeInsets.all(12),
       itemCount: widget.logs.length,
-      itemExtent: 20.0,
       cacheExtent: 500.0,
       itemBuilder: (context, index) {
         final logEntry = widget.logs[index];
@@ -875,9 +855,10 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
                 widget.onCopyText(allText, l10n);
               }
             },
-            child: SizedBox(
-              height: 20.0,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 1),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Container(
@@ -898,18 +879,15 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
                         logEntry.text,
                         style: AppFonts.firaCode(
                           fontSize: 12,
-                          height: 1.0,
+                          height: 1.4,
                           color: Color(logEntry.color),
                         ),
-                        softWrap: false,
-                        overflow: TextOverflow.visible,
-                        maxLines: 1,
+                        softWrap: true,
                       ),
                     ),
                   ),
                   SizedBox(
                     width: 22,
-                    height: 20,
                     child: Opacity(
                       opacity: _hoverLogIndex == index ? 1.0 : 0.0,
                       child: IgnorePointer(

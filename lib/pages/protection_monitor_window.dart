@@ -300,6 +300,7 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
   final ScrollController _logScrollController = ScrollController();
   final ScrollController _horizontalScrollController = ScrollController();
   bool _useGroupedView = true;
+  bool _isLogPanelExpanded = false;
   final Map<String, TruthRecordModel> _requestGroups = {};
   final List<String> _requestOrder = [];
 
@@ -1374,23 +1375,25 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
                         Expanded(
                           child: Row(
                             children: [
-                              Expanded(
-                                flex: 2,
-                                child: Column(
-                                  children: [
-                                    Expanded(
-                                      child: charts.buildTokenTrendChart(l10n),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    Expanded(
-                                      child: charts.buildToolCallChart(l10n),
-                                    ),
-                                  ],
+                              if (!_isLogPanelExpanded) ...[
+                                Expanded(
+                                  flex: 2,
+                                  child: Column(
+                                    children: [
+                                      Expanded(
+                                        child: charts.buildTokenTrendChart(l10n),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Expanded(
+                                        child: charts.buildToolCallChart(l10n),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 12),
+                                const SizedBox(width: 12),
+                              ],
                               Expanded(
-                                flex: 3,
+                                flex: _isLogPanelExpanded ? 5 : 3,
                                 child: ProtectionMonitorLogPanel(
                                   logs: _logsList,
                                   useGroupedView: _useGroupedView,
@@ -1405,6 +1408,12 @@ class _ProtectionMonitorPageState extends State<ProtectionMonitorPage>
                                           ?.botModelConfig
                                           ?.model ??
                                       '',
+                                  isExpanded: _isLogPanelExpanded,
+                                  onToggleExpand: () {
+                                    setState(() {
+                                      _isLogPanelExpanded = !_isLogPanelExpanded;
+                                    });
+                                  },
                                   onViewModeChanged: (grouped) {
                                     setState(() => _useGroupedView = grouped);
                                   },
