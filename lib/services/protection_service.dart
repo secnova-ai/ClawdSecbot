@@ -50,8 +50,13 @@ class ProtectionService {
   factory ProtectionService.scoped(String instanceKey) =>
       ProtectionService(instanceKey);
 
-  factory ProtectionService.forAsset(String assetName, [String assetID = '']) =>
-      ProtectionService(buildAssetScopedInstanceKey(assetName, assetID));
+  /// 按资产创建/获取防护服务实例，自动绑定资产名与 ID。
+  factory ProtectionService.forAsset(String assetName, [String assetID = '']) {
+    final service =
+        ProtectionService(buildAssetScopedInstanceKey(assetName, assetID));
+    service.setAssetName(assetName, assetID);
+    return service;
+  }
 
   ProtectionService._internal(this._instanceKey) {
     _monitor = ProtectionMonitorService(_instanceKey);
@@ -281,24 +286,9 @@ class ProtectionService {
       initialDailyTokenUsage: initialDailyTokenUsage,
     );
 
-    final proxyStatus = await getProtectionProxyStatus();
-    if (proxyStatus['running'] == true) {
-      appLogger.info(
-        '[Protection] Proxy already running, performing hot config update',
-      );
-      final updated = await updateRuntimeConfig(
-        securityConfig,
-        finalRuntimeConfig,
-      );
-      return {
-        'success': true,
-        'already_running': true,
-        'config_updated': updated,
-        'port': _proxyPort,
-        'proxy_url': _proxyURL,
-        'provider_name': _providerName,
-      };
-    }
+    // 不再提前返回 already_running：Go 层 StartProtectionProxy 已正确处理
+    // 代理已运行的场景（关闭旧 session、创建新 session 并返回 session_id），
+    // 确保 Dart 侧始终能拿到有效 session_id 进行日志轮询。
 
     final effectiveLanguage = LocaleUtils.resolveLanguageCode();
 

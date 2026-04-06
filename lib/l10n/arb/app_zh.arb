@@ -279,6 +279,7 @@
   },
 
   "oneClickProtection": "一键防护",
+  "protectionAssetNotRunning": "资产未运行，无法开启防护",
   "protectionMonitor": "防护监控",
   "protectionStarting": "防护启动中...",
   "launchAtStartup": "开机自启",

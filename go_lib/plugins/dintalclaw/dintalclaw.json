@@ -1,0 +1,24 @@
+[
+  {
+    "code": "dintalclaw_process_active",
+    "name": "Process Detection",
+    "life_cycle": 1,
+    "os": ["darwin", "linux", "windows"],
+    "desc": "Detects active DinTalClaw via Python process keywords",
+    "expression": {
+      "lang": "json_match",
+      "expr": "{\"process_keywords\": [\"agentmain.py\", \"stapp.py\", \"launch.pyw\"]}"
+    }
+  },
+  {
+    "code": "dintalclaw_install_exist",
+    "name": "Installation Detection",
+    "life_cycle": 2,
+    "os": ["darwin", "linux", "windows"],
+    "desc": "Detects DinTalClaw installation via portable_package/mykey.py",
+    "expression": {
+      "lang": "json_match",
+      "expr": "{\"file_paths\": [\"~/portable_package/mykey.py\"]}"
+    }
+  }
+]

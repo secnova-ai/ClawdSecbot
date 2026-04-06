@@ -492,6 +492,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get oneClickProtection => '一键防护';
 
   @override
+  String get protectionAssetNotRunning => '资产未运行，无法开启防护';
+
+  @override
   String get protectionMonitor => '防护监控';
 
   @override

@@ -51,6 +51,7 @@ import (
 	"go_lib/core/shepherd"
 
 	// Import all plugins to trigger init() registration
+	_ "go_lib/plugins/dintalclaw"
 	_ "go_lib/plugins/nullclaw"
 	_ "go_lib/plugins/openclaw"
 )
