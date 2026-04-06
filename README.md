@@ -201,6 +201,13 @@ flutter run -d macos   # or -d linux, -d windows
 ./scripts/build_linux_release.sh
 ```
 
+**Windows (self-extracting EXE; requires 7-Zip, MinGW-w64, CMake, etc. — see script prerequisite checks):**
+The current package is a custom installer EXE and no longer depends on a 7-Zip shell on the target machine.
+```powershell
+.\scripts\build_windows_release.ps1 --version 1.0.0 --build 202601011200
+```
+Produces `build\ClawdSecbot-<version>-<build>-x86_64-<type>.exe`. Double-click to open the branded installer, choose an install folder (default `%LOCALAPPDATA%\Programs\ClawdSecbot`), optionally create desktop and start menu shortcuts, and install or upgrade in place while keeping user data.
+
 ## Installation
 
 ### macOS
@@ -216,6 +223,10 @@ sudo dpkg -i clawsecbot_*.deb
 
 **Generic Linux:**
 Extract the release archive and run the executable directly.
+
+### Windows
+
+Download `ClawdSecbot-*.exe` from [Releases](../../releases), run it, choose an install folder (default `%LOCALAPPDATA%\Programs\ClawdSecbot`), and select whether to create desktop and start menu shortcuts. If an existing installation is detected, the installer will prompt before upgrading in place and will keep user data and configuration. After installation, `bot_sec_manager.exe` launches automatically by default, and you can also run it later from the install folder.
 
 ## Uninstallation
 

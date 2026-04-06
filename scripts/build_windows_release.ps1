@@ -4,7 +4,7 @@
     Build Windows release for ClawdSecbot.
 .DESCRIPTION
     Builds the Go shared library (DLL), Flutter Windows app, and packages the output
-    with GNU-style CLI options.
+    as a custom Windows installer EXE.
 .EXAMPLE
     .\scripts\build_windows_release.ps1 --help
     .\scripts\build_windows_release.ps1 --version 1.3.0 --build 202603230900 --type community
@@ -24,6 +24,7 @@ $Arch = "x86_64"
 $Type = "community"
 $Brand = ""
 $ForcePubGet = $false
+$PackageFormat = "exe"
 
 function Normalize-PackageType([string]$RawType) {
     $value = if ($null -eq $RawType) { '' } else { $RawType.ToLowerInvariant() }
@@ -31,7 +32,7 @@ function Normalize-PackageType([string]$RawType) {
         'personal' { return 'community' }
         'community' { return 'community' }
         'business' { return 'business' }
-        'appstore' { Stop-WithError "Windows zip does not support type=appstore" }
+        'appstore' { Stop-WithError "Windows release package does not support type=appstore" }
         default { Stop-WithError "Unsupported type: $RawType" }
     }
 }
@@ -41,7 +42,7 @@ function Normalize-Arch([string]$RawArch) {
     switch ($value) {
         'x86_64' { return 'x86_64' }
         'amd64' { return 'x86_64' }
-        default { Stop-WithError "Windows zip only supports arch=x86_64" }
+        default { Stop-WithError "Windows release supports only arch=x86_64" }
     }
 }
 
@@ -92,7 +93,7 @@ Usage:
   .\scripts\build_windows_release.ps1 [options]
 
 Description:
-  Build and package the Windows release artifact for ClawdSecbot.
+  Build and package the Windows release as either a custom installer EXE or a ZIP archive.
 
 Options:
   -v,  --version <X.Y.Z>     Semantic version (default: 1.0.0)
@@ -101,11 +102,14 @@ Options:
   -ar, --arch <ARCH>         Target arch: x86_64
   -t,  --type <TYPE>         Package type: community|business (default: community)
   -br, --brand <NAME>        Brand suffix, only allowed when type=business
+       --exe                 Build branded installer EXE (default)
+       --zip                 Build ZIP package instead of installer EXE
        --force-pub-get       Force flutter pub get before build
   -h,  --help                Show this help message and exit
 
 Examples:
   .\scripts\build_windows_release.ps1 --help
+  .\scripts\build_windows_release.ps1 --zip
   .\scripts\build_windows_release.ps1 --version 1.3.0 --build 202603230900
   .\scripts\build_windows_release.ps1 --version 1.3.0 --type business --brand acme
 '@ | Write-Host
@@ -149,6 +153,8 @@ function Parse-Args {
             '--brand' { $script:Brand = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
             '-br' { $script:Brand = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
             '-Brand' { $script:Brand = Get-RequiredOptionValue -CliArgs $CliArgs -Index $i -OptionName $arg; $i += 2; continue }
+            '--exe' { $script:PackageFormat = "exe"; $i += 1; continue }
+            '--zip' { $script:PackageFormat = "zip"; $i += 1; continue }
             '--force-pub-get' { $script:ForcePubGet = $true; $i += 1; continue }
             '-ForcePubGet' { $script:ForcePubGet = $true; $i += 1; continue }
             default { Stop-WithError "Unknown option: $arg" }
@@ -318,6 +324,230 @@ function Get-CMakeCommand() {
     return $null
 }
 
+function Get-CSharpCompiler() {
+    $cscCmd = Get-Command "csc" -ErrorAction SilentlyContinue
+    if ($cscCmd) {
+        return $cscCmd.Source
+    }
+
+    $candidates = @(
+        "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
+        "C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function New-ZipPayloadArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceDirectory,
+        [Parameter(Mandatory = $true)][string]$OutputZipPath
+    )
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    if (Test-Path -LiteralPath $OutputZipPath) {
+        Remove-Item -Force -LiteralPath $OutputZipPath
+    }
+
+    [System.IO.Compression.ZipFile]::CreateFromDirectory(
+        $SourceDirectory,
+        $OutputZipPath,
+        [System.IO.Compression.CompressionLevel]::Optimal,
+        $false
+    )
+}
+
+function New-CustomInstallerExe {
+    param(
+        [Parameter(Mandatory = $true)][string]$CSharpCompiler,
+        [Parameter(Mandatory = $true)][string]$BootstrapSourcePath,
+        [Parameter(Mandatory = $true)][string]$PayloadZipPath,
+        [Parameter(Mandatory = $true)][string]$OutputExePath,
+        [Parameter(Mandatory = $true)][string]$IconPath,
+        [Parameter(Mandatory = $true)][string]$IntermediateExePath
+    )
+
+    $referenceArgs = @(
+        "/r:System.dll",
+        "/r:System.Drawing.dll",
+        "/r:System.Windows.Forms.dll",
+        "/r:System.IO.Compression.dll",
+        "/r:System.IO.Compression.FileSystem.dll"
+    )
+
+    $compileArgs = @(
+        "/nologo",
+        "/target:winexe",
+        "/optimize+",
+        "/codepage:65001",
+        "/utf8output",
+        "/out:$IntermediateExePath",
+        "/win32icon:$IconPath"
+    ) + $referenceArgs + @($BootstrapSourcePath)
+
+    & $CSharpCompiler @compileArgs
+    if ($LASTEXITCODE -ne 0) {
+        Stop-WithError "Custom installer bootstrap compilation failed"
+    }
+
+    $stubBytes = [System.IO.File]::ReadAllBytes($IntermediateExePath)
+    $payloadBytes = [System.IO.File]::ReadAllBytes($PayloadZipPath)
+    $markerBytes = [System.Text.Encoding]::ASCII.GetBytes("BOTSEC_PAYLOAD_V1")
+    $payloadLengthBytes = [System.BitConverter]::GetBytes([Int64]$payloadBytes.Length)
+    $totalLength = $stubBytes.Length + $payloadBytes.Length + $payloadLengthBytes.Length + $markerBytes.Length
+    $combined = New-Object byte[] $totalLength
+
+    [System.Buffer]::BlockCopy($stubBytes, 0, $combined, 0, $stubBytes.Length)
+    [System.Buffer]::BlockCopy($payloadBytes, 0, $combined, $stubBytes.Length, $payloadBytes.Length)
+    [System.Buffer]::BlockCopy($payloadLengthBytes, 0, $combined, $stubBytes.Length + $payloadBytes.Length, $payloadLengthBytes.Length)
+    [System.Buffer]::BlockCopy($markerBytes, 0, $combined, $stubBytes.Length + $payloadBytes.Length + $payloadLengthBytes.Length, $markerBytes.Length)
+
+    $outDir = Split-Path -Parent $OutputExePath
+    if (-not (Test-Path -LiteralPath $outDir)) {
+        New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+    }
+    if (Test-Path -LiteralPath $OutputExePath) {
+        Remove-Item -Force -LiteralPath $OutputExePath
+    }
+    [System.IO.File]::WriteAllBytes($OutputExePath, $combined)
+}
+
+# 解析本机 7-Zip 安装路径，返回 7z.exe 与 GUI 自解压模块 7z.sfx
+function Resolve-SevenZipPaths {
+    if ($env:SEVENZIP_EXE -and $env:SEVENZIP_SFX) {
+        if ((Test-Path -LiteralPath $env:SEVENZIP_EXE) -and (Test-Path -LiteralPath $env:SEVENZIP_SFX)) {
+            return [PSCustomObject]@{ ExePath = $env:SEVENZIP_EXE; SfxPath = $env:SEVENZIP_SFX }
+        }
+    }
+
+    $exeCandidates = @(
+        (Join-Path $env:ProgramFiles "7-Zip\7z.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "7-Zip\7z.exe"),
+        (Join-Path $env:USERPROFILE "scoop\apps\7zip\current\7z.exe")
+    )
+    foreach ($exe in $exeCandidates) {
+        if (-not (Test-Path -LiteralPath $exe)) { continue }
+        $dir = Split-Path -Parent $exe
+        $sfx = Join-Path $dir "7z.sfx"
+        if (Test-Path -LiteralPath $sfx) {
+            return [PSCustomObject]@{ ExePath = $exe; SfxPath = $sfx }
+        }
+    }
+    $cmd7z = Get-Command "7z" -ErrorAction SilentlyContinue
+    if ($cmd7z -and $cmd7z.Source) {
+        $candidateDirs = @(
+            (Split-Path -Parent $cmd7z.Source)
+        )
+
+        if ($cmd7z.Source -like "*\scoop\shims\*") {
+            $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE "scoop" }
+            $candidateDirs += @(
+                (Join-Path $scoopRoot "apps\7zip\current"),
+                (Split-Path -Parent (Resolve-Path (Join-Path $scoopRoot "apps\7zip\current\7z.exe") -ErrorAction SilentlyContinue))
+            ) | Where-Object { $_ }
+        }
+
+        foreach ($dir in ($candidateDirs | Select-Object -Unique)) {
+            $exe = Join-Path $dir "7z.exe"
+            $sfx = Join-Path $dir "7z.sfx"
+            if ((Test-Path -LiteralPath $exe) -and (Test-Path -LiteralPath $sfx)) {
+                return [PSCustomObject]@{ ExePath = $exe; SfxPath = $sfx }
+            }
+        }
+    }
+
+    $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE "scoop" }
+    $scoopSfx = Get-ChildItem (Join-Path $scoopRoot "apps") -Recurse -Filter "7z.sfx" -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending |
+        Select-Object -First 1
+    if ($scoopSfx) {
+        $dir = Split-Path -Parent $scoopSfx.FullName
+        $exe = Join-Path $dir "7z.exe"
+        if (Test-Path -LiteralPath $exe) {
+            return [PSCustomObject]@{ ExePath = $exe; SfxPath = $scoopSfx.FullName }
+        }
+    }
+
+    return $null
+}
+
+# Write UTF-8 with BOM text file for 7-Zip SFX config.
+function Write-Utf8BomTextFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string]$Text
+    )
+    $utf8Bom = New-Object System.Text.UTF8Encoding $true
+    [System.IO.File]::WriteAllText($FilePath, $Text, $utf8Bom)
+}
+
+# 将 Release 目录打成 7z 并与 SFX 模块拼接为单一自解压 exe
+function New-SevenZipSfxInstaller {
+    param(
+        [Parameter(Mandatory = $true)][string]$SevenZipExe,
+        [Parameter(Mandatory = $true)][string]$SfxModulePath,
+        [Parameter(Mandatory = $true)][string]$BundleDirectory,
+        [Parameter(Mandatory = $true)][string]$TempArchivePath,
+        [Parameter(Mandatory = $true)][string]$SfxConfigPath,
+        [Parameter(Mandatory = $true)][string]$OutputExePath,
+        [Parameter(Mandatory = $true)][string]$MainExecutableName
+    )
+    if (Test-Path -LiteralPath $TempArchivePath) {
+        Remove-Item -Force -LiteralPath $TempArchivePath
+    }
+    Write-Step "Creating 7z payload for SFX"
+    Push-Location $BundleDirectory
+    try {
+        $sevenZipArgs = @("a", "-t7z", "-mx=7", "-y", $TempArchivePath, ".\*")
+        & $SevenZipExe @sevenZipArgs
+        if ($LASTEXITCODE -ne 0) {
+            Stop-WithError "7z archive creation failed (exit code $LASTEXITCODE)"
+        }
+    } finally {
+        Pop-Location
+    }
+
+    $sfxConfig = @"
+;!@Install@!UTF-8!
+Title="ClawdSecbot"
+BeginPrompt="将解压 ClawdSecbot 到所选目录并启动 ${MainExecutableName}。Extract to the selected folder and start ${MainExecutableName}. Continue?"
+ExtractPathTitle="ClawdSecbot"
+ExtractPathText="解压到 / Extract to:"
+InstallPath="%LOCALAPPDATA%\\ClawdSecbot"
+RunProgram="%T\${MainExecutableName}"
+GUIMode="1"
+;!@InstallEnd@!
+"@
+    Write-Utf8BomTextFile -FilePath $SfxConfigPath -Text $sfxConfig
+
+    Write-Step "Merging 7z.sfx, SFX config, and archive into single EXE"
+    $sfxBytes = [System.IO.File]::ReadAllBytes($SfxModulePath)
+    $cfgBytes = [System.IO.File]::ReadAllBytes($SfxConfigPath)
+    $arcBytes = [System.IO.File]::ReadAllBytes($TempArchivePath)
+    $totalLen = $sfxBytes.Length + $cfgBytes.Length + $arcBytes.Length
+    $combined = New-Object byte[] $totalLen
+    [System.Buffer]::BlockCopy($sfxBytes, 0, $combined, 0, $sfxBytes.Length)
+    [System.Buffer]::BlockCopy($cfgBytes, 0, $combined, $sfxBytes.Length, $cfgBytes.Length)
+    [System.Buffer]::BlockCopy($arcBytes, 0, $combined, $sfxBytes.Length + $cfgBytes.Length, $arcBytes.Length)
+
+    $outDir = Split-Path -Parent $OutputExePath
+    if (-not (Test-Path -LiteralPath $outDir)) {
+        New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+    }
+    if (Test-Path -LiteralPath $OutputExePath) {
+        Remove-Item -Force -LiteralPath $OutputExePath
+    }
+    [System.IO.File]::WriteAllBytes($OutputExePath, $combined)
+}
+
 Parse-Args -CliArgs $args
 
 # Validate version format
@@ -331,6 +561,9 @@ $Type = Normalize-PackageType $Type
 $Arch = Normalize-Arch $Arch
 if (-not [string]::IsNullOrWhiteSpace($Brand)) {
     $Brand = Normalize-Brand $Brand
+}
+if ($PackageFormat -notin @("exe", "zip")) {
+    Stop-WithError "Unsupported package format: $PackageFormat"
 }
 if ($Type -ne 'business' -and -not [string]::IsNullOrWhiteSpace($Brand)) {
     Stop-WithError "Brand is only allowed when Type=business"
@@ -364,6 +597,7 @@ Write-Host "Type:         $Type"
 if (-not [string]::IsNullOrWhiteSpace($Brand)) {
     Write-Host "Brand:        $Brand"
 }
+Write-Host "Package:      $PackageFormat"
 Write-Host "Arch:         $Arch"
 Write-Host "Project Root: $ProjectRoot"
 Write-Host ""
@@ -375,6 +609,14 @@ if (-not (Test-Command "gcc")) {
     Write-Warn "GCC not found. CGO requires a C compiler (e.g. mingw-w64)."
     Write-Warn "Install via: choco install mingw  or  scoop install mingw"
     Stop-WithError "C compiler required for CGO build"
+}
+$CSharpCompilerPath = $null
+if ($PackageFormat -eq "exe") {
+    $CSharpCompilerPath = Get-CSharpCompiler
+    if (-not $CSharpCompilerPath) {
+        Stop-WithError "C# compiler not found. Install .NET Framework build tools or Visual Studio Build Tools."
+    }
+    Write-Ok "Using C# compiler: $CSharpCompilerPath"
 }
 
 # Step 1: Update pubspec version
@@ -528,7 +770,13 @@ try {
 # Step 5: Package output
 $bundleDir = Join-Path $ProjectRoot "build\windows\x64\runner\Release"
 $outputDir = Join-Path $ProjectRoot "build\windows_release"
-$zipFile = Join-Path $ProjectRoot ("build\" + (Get-ArtifactFileName "zip"))
+$buildStagingDir = Join-Path $ProjectRoot "build"
+$installerExeFile = Join-Path $ProjectRoot ("build\" + (Get-ArtifactFileName "exe"))
+$releaseZipFile = Join-Path $ProjectRoot ("build\" + (Get-ArtifactFileName "zip"))
+$payloadZipFile = Join-Path $buildStagingDir "clawdsecbot_windows_release_payload.zip"
+$bootstrapExeFile = Join-Path $buildStagingDir "clawdsecbot_installer_bootstrap.exe"
+$bootstrapSourceFile = Join-Path $ProjectRoot "scripts\windows_installer\CustomInstallerBootstrap.cs"
+$bundleExeName = "bot_sec_manager.exe"
 
 if (-not (Test-Path $bundleDir)) {
     # Try alternative path for older Flutter versions
@@ -582,16 +830,46 @@ if (Test-Path $imagesSrc) {
     Write-Ok "Tray icons copied to $imagesDest"
 }
 
-# Create zip
-if (Test-Path $zipFile) { Remove-Item -Force $zipFile }
-Compress-Archive -Path "$outputDir\*" -DestinationPath $zipFile
-Write-Ok "Release packaged: $zipFile"
+$mainExePath = Join-Path $outputDir $bundleExeName
+if (-not (Test-Path -LiteralPath $mainExePath)) {
+    Stop-WithError "Main executable not found after packaging: $mainExePath"
+}
+
+if ($PackageFormat -eq "zip") {
+    if (Test-Path -LiteralPath $releaseZipFile) {
+        Remove-Item -Force -LiteralPath $releaseZipFile
+    }
+    Write-Step "Creating ZIP release package"
+    Compress-Archive -Path "$outputDir\*" -DestinationPath $releaseZipFile
+    Write-Ok "Release packaged: $releaseZipFile"
+} else {
+    if (-not (Test-Path -LiteralPath $bootstrapSourceFile)) {
+        Stop-WithError "Installer bootstrap source not found: $bootstrapSourceFile"
+    }
+    Write-Step "Creating installer payload ZIP"
+    New-ZipPayloadArchive -SourceDirectory $outputDir -OutputZipPath $payloadZipFile
+
+    Write-Step "Compiling custom Windows installer"
+    New-CustomInstallerExe `
+        -CSharpCompiler $CSharpCompilerPath `
+        -BootstrapSourcePath $bootstrapSourceFile `
+        -PayloadZipPath $payloadZipFile `
+        -OutputExePath $installerExeFile `
+        -IconPath $appIco `
+        -IntermediateExePath $bootstrapExeFile
+    Remove-Item -Force -ErrorAction SilentlyContinue $payloadZipFile, $bootstrapExeFile
+    Write-Ok "Release packaged: $installerExeFile"
+}
 
 # Summary
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Green
 Write-Host " Windows Release Build Complete"
 Write-Host "============================================" -ForegroundColor Green
-Write-Host "Bundle:  $outputDir"
-Write-Host "Archive: $zipFile"
+Write-Host "Bundle:              $outputDir"
+if ($PackageFormat -eq "zip") {
+    Write-Host "ZIP Package:         $releaseZipFile"
+} else {
+    Write-Host "Installer EXE:       $installerExeFile"
+}
 Write-Host ""
