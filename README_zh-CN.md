@@ -194,6 +194,12 @@ flutter run -d macos   # 或 -d linux, -d windows
 ./scripts/build_linux_release.sh
 ```
 
+**Windows（自解压 EXE，需本机安装 7-Zip 与 MinGW-w64、CMake 等，见脚本前置检查）:**
+```powershell
+.\scripts\build_windows_release.ps1 --version 1.0.0 --build 202601011200
+```
+产物为 `build\ClawdSecbot-<version>-<build>-x86_64-<type>.exe`，双击可自选解压目录（默认 `%LOCALAPPDATA%\ClawdSecbot`），解压后启动 `bot_sec_manager.exe`。
+
 ## 安装方式
 
 ### macOS
@@ -209,6 +215,12 @@ sudo dpkg -i clawsecbot_*.deb
 
 **通用 Linux:**
 解压发布包后直接运行可执行文件。
+
+### Windows
+
+当前 Windows 产物为品牌化安装器 EXE，不再依赖 7-Zip 自解压界面。运行后可选择安装目录（默认 `%LOCALAPPDATA%\Programs\ClawdSecbot`），并勾选桌面快捷方式与开始菜单快捷方式；如果检测到已有安装，安装器会提示是否执行升级覆盖，仅替换程序文件并保留用户数据与现有配置。
+
+从 [Releases](../../releases) 下载 `ClawdSecbot-*.exe` 自解压包，运行后选择解压目录（默认用户本地应用数据下的 `ClawdSecbot` 文件夹），完成后将启动 `bot_sec_manager.exe`。也可在解压目录中稍后手动运行该可执行文件。
 
 ## 卸载说明
 
