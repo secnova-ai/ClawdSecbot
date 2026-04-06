@@ -980,6 +980,12 @@ abstract class AppLocalizations {
   /// **'一键防护'**
   String get oneClickProtection;
 
+  /// No description provided for @protectionAssetNotRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'资产未运行，无法开启防护'**
+  String get protectionAssetNotRunning;
+
   /// No description provided for @protectionMonitor.
   ///
   /// In zh, this message translates to:

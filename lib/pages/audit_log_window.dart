@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import '../utils/app_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
@@ -16,6 +17,7 @@ import '../services/audit_log_database_service.dart';
 import '../services/security_event_database_service.dart';
 import '../services/protection_service.dart';
 import '../utils/audit_log_export_helper.dart';
+import '../utils/app_logger.dart';
 import '../utils/window_animation_helper.dart';
 import '../widgets/hide_window_shortcut.dart';
 
@@ -524,14 +526,11 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
           return b.requestId.compareTo(a.requestId);
         });
 
-      final savePath = await FilePicker.platform.saveFile(
-        dialogTitle: _isZh ? '选择导出位置' : 'Choose export location',
+      final outputPath = await _resolveExportPath(
         fileName:
             'audit_logs_batch_${DateTime.now().millisecondsSinceEpoch}.md',
-        type: FileType.custom,
-        allowedExtensions: const ['md'],
       );
-      if (savePath == null || savePath.trim().isEmpty) return;
+      if (outputPath == null || outputPath.trim().isEmpty) return;
 
       final contents = await Future.wait(
         selectedLogs.map((log) async {
@@ -569,8 +568,12 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
           ..write(content);
       }
 
-      final file = File(savePath);
-      await file.writeAsString(buffer.toString(), encoding: utf8);
+      final file = File(outputPath);
+      await file.writeAsString(
+        buffer.toString(),
+        encoding: const Utf8Codec(allowMalformed: true),
+        flush: true,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -582,12 +585,15 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
           duration: const Duration(seconds: 4),
         ),
       );
-    } catch (e) {
+    } catch (e, st) {
+      appLogger.error('[AuditLogWindow] Batch export failed', e, st);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            l10n?.auditLogExportFailed ?? 'Batch export failed: $e',
+            _isZh
+                ? '${l10n?.auditLogExportFailed ?? "导出失败"}: $e'
+                : '${l10n?.auditLogExportFailed ?? "Export failed"}: $e',
           ),
           duration: const Duration(seconds: 3),
         ),
@@ -642,12 +648,9 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
   }
 
   Widget _buildTitleBar() {
-    if (Platform.isLinux) {
-      return const SizedBox.shrink();
-    }
-
     final l10n = AppLocalizations.of(context);
     final isWindows = Platform.isWindows;
+    final isLinux = Platform.isLinux;
 
     return Container(
       height: 48,
@@ -661,14 +664,16 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
         children: [
           Expanded(
             child: GestureDetector(
-              onPanStart: (_) {
-                try {
-                  windowManager.startDragging();
-                } catch (_) {}
-              },
+              onPanStart: isLinux
+                  ? null
+                  : (_) {
+                      try {
+                        windowManager.startDragging();
+                      } catch (_) {}
+                    },
               behavior: HitTestBehavior.translucent,
               child: Padding(
-                padding: isWindows
+                padding: isWindows || isLinux
                     ? const EdgeInsets.only(left: 16)
                     : const EdgeInsets.only(left: 78),
                 child: Row(
@@ -746,7 +751,6 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
               isClose: true,
             ),
           ],
-          // macOS only: custom -/x
           if (Platform.isMacOS) ...[
             const SizedBox(width: 8),
             _buildWindowButton(
@@ -1288,14 +1292,12 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
     if (log == null) return;
     final l10n = AppLocalizations.of(context);
     try {
-      final savePath = await FilePicker.platform.saveFile(
-        dialogTitle: _isZh ? '选择导出位置' : 'Choose export location',
+      final safeId = _safeFileNameSegment(log.id);
+      final outputPath = await _resolveExportPath(
         fileName:
-            'audit_log_${log.id}_${DateTime.now().millisecondsSinceEpoch}.md',
-        type: FileType.custom,
-        allowedExtensions: const ['md'],
+            'audit_log_${safeId}_${DateTime.now().millisecondsSinceEpoch}.md',
       );
-      if (savePath == null || savePath.trim().isEmpty) return;
+      if (outputPath == null || outputPath.trim().isEmpty) return;
 
       final markdownContent = buildAuditLogMarkdownContent(
         isZh: _isZh,
@@ -1305,8 +1307,12 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
         actionText: _buildActionSectionText(log),
         eventText: _buildEventSectionText(_relatedEvents),
       );
-      final file = File(savePath);
-      await file.writeAsString(markdownContent, encoding: utf8);
+      final file = File(outputPath);
+      await file.writeAsString(
+        markdownContent,
+        encoding: const Utf8Codec(allowMalformed: true),
+        flush: true,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1316,15 +1322,104 @@ class _AuditLogWindowState extends State<AuditLogWindow> with WindowListener {
           duration: const Duration(seconds: 4),
         ),
       );
-    } catch (e) {
+    } catch (e, st) {
+      appLogger.error('[AuditLogWindow] Single export failed', e, st);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(l10n?.auditLogExportFailed ?? 'Export failed: $e'),
+          content: Text(
+            _isZh
+                ? '${l10n?.auditLogExportFailed ?? "导出失败"}: $e'
+                : '${l10n?.auditLogExportFailed ?? "Export failed"}: $e',
+          ),
           duration: const Duration(seconds: 3),
         ),
       );
     }
+  }
+
+  /// 解析导出路径：优先使用文件选择对话框，失败时自动降级到本地默认目录。
+  /// 该兜底用于 Linux 未安装 zenity 等依赖时，避免导出直接失败。
+  Future<String?> _resolveExportPath({required String fileName}) async {
+    final normalizedFileName = _ensureMarkdownExtension(fileName.trim());
+    try {
+      final savePath = await FilePicker.platform.saveFile(
+        dialogTitle: _isZh ? '选择导出位置' : 'Choose export location',
+        fileName: normalizedFileName,
+        type: FileType.custom,
+        allowedExtensions: const ['md'],
+      );
+      if (savePath == null || savePath.trim().isEmpty) {
+        return null;
+      }
+      return _ensureMarkdownExtension(savePath.trim());
+    } catch (e, st) {
+      appLogger.warning(
+        '[AuditLogWindow] save dialog unavailable, fallback to local path: $e',
+      );
+      appLogger.debug('[AuditLogWindow] save dialog stacktrace: $st');
+      final fallbackDir = await _resolveFallbackExportDirectory();
+      if (fallbackDir == null) {
+        return null;
+      }
+      return _ensureMarkdownExtension(
+        '${fallbackDir.path}${Platform.pathSeparator}$normalizedFileName',
+      );
+    }
+  }
+
+  /// 获取导出兜底目录：优先下载目录，其次主目录，最后应用文档目录。
+  Future<Directory?> _resolveFallbackExportDirectory() async {
+    try {
+      final downloads = await getDownloadsDirectory();
+      if (downloads != null) {
+        await downloads.create(recursive: true);
+        return downloads;
+      }
+    } catch (e) {
+      appLogger.warning(
+        '[AuditLogWindow] getDownloadsDirectory failed: $e',
+      );
+    }
+
+    try {
+      final home = Platform.environment['HOME'];
+      if (home != null && home.trim().isNotEmpty) {
+        final dir = Directory(home.trim());
+        if (await dir.exists()) {
+          return dir;
+        }
+      }
+    } catch (e) {
+      appLogger.warning('[AuditLogWindow] resolve HOME failed: $e');
+    }
+
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      await docs.create(recursive: true);
+      return docs;
+    } catch (e) {
+      appLogger.error(
+        '[AuditLogWindow] resolve fallback directory failed',
+        e,
+      );
+      return null;
+    }
+  }
+
+  /// 将导出文件名中的非法字符替换为下划线，避免跨平台写文件失败。
+  String _safeFileNameSegment(String input) {
+    final normalized = input.trim();
+    if (normalized.isEmpty) return 'log';
+    return normalized.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+  }
+
+  /// 确保导出路径包含 .md 扩展名，避免部分平台下文件类型不一致。
+  String _ensureMarkdownExtension(String path) {
+    if (path.toLowerCase().endsWith('.md')) {
+      return path;
+    }
+    return '$path.md';
   }
 
   List<_RawMessageItem> _buildRawMessagesWithToolFallback(AuditLog log) {

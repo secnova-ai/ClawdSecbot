@@ -40,6 +40,22 @@ func (t *ListSkillFilesTool) InvokableRun(ctx context.Context, argumentsInJSON s
 	}
 
 	var entries []FileEntry
+	rootInfo, statErr := os.Stat(t.skillPath)
+	if statErr != nil {
+		return "", fmt.Errorf("failed to stat skill path: %w", statErr)
+	}
+	if !rootInfo.IsDir() {
+		entries = append(entries, FileEntry{
+			Path:  filepath.Base(t.skillPath),
+			IsDir: false,
+			Size:  rootInfo.Size(),
+		})
+		result, err := json.MarshalIndent(entries, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal result: %w", err)
+		}
+		return string(result), nil
+	}
 
 	err := filepath.Walk(t.skillPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -124,7 +140,21 @@ func (t *ReadSkillFileTool) InvokableRun(ctx context.Context, argumentsInJSON st
 		return "", fmt.Errorf("path traversal is not allowed")
 	}
 
-	fullPath := filepath.Join(t.skillPath, cleanPath)
+	rootInfo, rootErr := os.Stat(t.skillPath)
+	if rootErr != nil {
+		return "", fmt.Errorf("failed to stat skill path: %w", rootErr)
+	}
+
+	fullPath := ""
+	if !rootInfo.IsDir() {
+		baseName := filepath.Base(t.skillPath)
+		if cleanPath != "." && cleanPath != baseName {
+			return "", fmt.Errorf("file_path must be '%s' for file skill target", baseName)
+		}
+		fullPath = t.skillPath
+	} else {
+		fullPath = filepath.Join(t.skillPath, cleanPath)
+	}
 
 	// Verify the file is within the skill directory
 	absSkillPath, err := filepath.Abs(t.skillPath)
@@ -135,7 +165,7 @@ func (t *ReadSkillFileTool) InvokableRun(ctx context.Context, argumentsInJSON st
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve file path: %w", err)
 	}
-	if !strings.HasPrefix(absFullPath, absSkillPath) {
+	if rootInfo.IsDir() && !strings.HasPrefix(absFullPath, absSkillPath) {
 		return "", fmt.Errorf("file path is outside skill directory")
 	}
 

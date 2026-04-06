@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/openai/openai-go"
@@ -194,4 +196,133 @@ func sdkToolCallsToInterface(toolCalls []openai.ChatCompletionMessageToolCall) i
 // sdkParamToolCallsToInterface converts SDK param tool calls to interface{} for ConversationMessage.ToolCalls
 func sdkParamToolCallsToInterface(toolCalls []openai.ChatCompletionMessageToolCallParam) interface{} {
 	return toolCalls
+}
+
+// ============================================================
+// DinTalClaw 文本嵌入式工具协议（Inline Tool Protocol）解析
+// ============================================================
+
+var (
+	inlineToolUseRe    = regexp.MustCompile(`(?s)<tool_use>\s*(.*?)\s*</tool_use>`)
+	inlineToolResultRe = regexp.MustCompile(`(?s)<tool_result>\s*(.*?)\s*</tool_result>`)
+	// DinTalClaw 段落标记
+	dintalclawSectionRe   = regexp.MustCompile(`(?i)===\s*(SYSTEM|USER|ASSISTANT)\s*===`)
+	dintalclawAssistantRe = regexp.MustCompile(`(?i)===\s*ASSISTANT\s*===`)
+	dintalclawUserRe      = regexp.MustCompile(`(?i)===\s*USER\s*===`)
+	dintalclawSystemRe    = regexp.MustCompile(`(?i)===\s*SYSTEM\s*===`)
+)
+
+// InlineToolUse 表示从文本中提取的内嵌工具调用
+type InlineToolUse struct {
+	Name    string
+	RawArgs string
+}
+
+// extractAllDinTalClawSections 提取 DinTalClaw 消息中所有匹配 sectionRe 的段落内容并合并。
+// DinTalClaw 可能在单条消息中包含多轮对话（多个 ASSISTANT / USER 段），
+// 必须遍历全部匹配段才能完整提取 <tool_use> 或 <tool_result>。
+func extractAllDinTalClawSections(content string, sectionRe *regexp.Regexp) string {
+	locs := sectionRe.FindAllStringIndex(content, -1)
+	if len(locs) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, loc := range locs {
+		body := content[loc[1]:]
+		if nextLoc := dintalclawSectionRe.FindStringIndex(body); nextLoc != nil {
+			body = body[:nextLoc[0]]
+		}
+		parts = append(parts, body)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// contentForToolUseExtraction 为 <tool_use> 提取准备内容。
+// DinTalClaw 消息返回所有 ASSISTANT 段的合并内容；无段落标记的消息返回原文。
+func contentForToolUseExtraction(content string) string {
+	if !dintalclawSectionRe.MatchString(content) {
+		return content
+	}
+	return extractAllDinTalClawSections(content, dintalclawAssistantRe)
+}
+
+// contentForToolResultExtraction 为 <tool_result> 提取准备内容。
+// DinTalClaw 消息返回所有 USER 段的合并内容（自动排除 SYSTEM 段模板噪声）；无段落标记的消息返回原文。
+func contentForToolResultExtraction(content string) string {
+	if !dintalclawSectionRe.MatchString(content) {
+		return content
+	}
+	return extractAllDinTalClawSections(content, dintalclawUserRe)
+}
+
+// extractInlineToolUses 从消息内容中提取 <tool_use> 标签（DinTalClaw 协议：仅 ASSISTANT 段）
+func extractInlineToolUses(content string) []InlineToolUse {
+	content = contentForToolUseExtraction(content)
+	matches := inlineToolUseRe.FindAllStringSubmatch(content, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	var result []InlineToolUse
+	for _, m := range matches {
+		body := strings.TrimSpace(m[1])
+		if body == "" {
+			continue
+		}
+		var parsed struct {
+			Name string          `json:"name"`
+			Args json.RawMessage `json:"arguments"`
+		}
+		if err := json.Unmarshal([]byte(body), &parsed); err == nil && parsed.Name != "" {
+			result = append(result, InlineToolUse{
+				Name:    parsed.Name,
+				RawArgs: string(parsed.Args),
+			})
+		} else {
+			result = append(result, InlineToolUse{
+				Name:    "inline_tool",
+				RawArgs: body,
+			})
+		}
+	}
+	return result
+}
+
+// extractInlineToolResults 从消息内容中提取 <tool_result> 标签内容（DinTalClaw 协议：仅 USER 段）
+func extractInlineToolResults(content string) []string {
+	content = contentForToolResultExtraction(content)
+	matches := inlineToolResultRe.FindAllStringSubmatch(content, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	var result []string
+	for _, m := range matches {
+		body := strings.TrimSpace(m[1])
+		if body != "" {
+			result = append(result, body)
+		}
+	}
+	return result
+}
+
+// hasInlineToolUse 检查内容的 ASSISTANT 段是否包含 <tool_use> 标签
+func hasInlineToolUse(content string) bool {
+	return inlineToolUseRe.MatchString(contentForToolUseExtraction(content))
+}
+
+// hasInlineToolResult 检查内容的 USER 段是否包含 <tool_result> 标签
+func hasInlineToolResult(content string) bool {
+	return inlineToolResultRe.MatchString(contentForToolResultExtraction(content))
+}
+
+// generateInlineToolCallID 生成内嵌工具调用的合成 ID（请求级唯一）。
+// 说明：
+// - 仅使用 msgIndex/toolIndex 会在不同请求间重复，导致前端跨卡去重误判。
+// - 将 requestID 纳入 ID，可保证 DinTalClaw 内嵌工具结果在跨请求场景下不被误去重。
+func generateInlineToolCallID(requestID string, msgIndex, toolIndex int) string {
+	normalizedRequestID := strings.TrimSpace(requestID)
+	if normalizedRequestID == "" {
+		normalizedRequestID = "unknown"
+	}
+	normalizedRequestID = strings.ReplaceAll(normalizedRequestID, " ", "_")
+	return fmt.Sprintf("inline_%s_%d_%d", normalizedRequestID, msgIndex, toolIndex)
 }

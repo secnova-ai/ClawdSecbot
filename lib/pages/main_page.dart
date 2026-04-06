@@ -513,14 +513,9 @@ class _MainPageState extends State<MainPage>
           final service = ProtectionService.forAsset(assetName, assetID);
           service.setAssetName(assetName, assetID);
 
-          final status = await service.getProtectionProxyStatus();
-          if (status['running'] == true) {
-            appLogger.info(
-              '[MainPage] Proxy already running for $assetName/$assetID, skip',
-            );
-            continue;
-          }
-
+          // 始终调用 startProtectionProxy，即使代理已在 Go 层运行。
+          // Go 层会为已运行的代理创建新 session 并返回 session_id，
+          // 确保 Dart 侧能正确建立日志轮询。
           final result = await service.startProtectionProxy(
             securityModelConfig,
             ProtectionRuntimeConfig(),
@@ -1045,7 +1040,10 @@ class _MainPageState extends State<MainPage>
 
   // ============ 扫描功能 ============
 
-  Future<void> _startScan({bool triggeredByScheduler = false}) async {
+  Future<void> _startScan({
+    bool triggeredByScheduler = false,
+    bool skipReconcile = false,
+  }) async {
     if (_scanState == ScanState.scanning) {
       if (triggeredByScheduler) {
         appLogger.info(
@@ -1068,6 +1066,8 @@ class _MainPageState extends State<MainPage>
 
     final l10n = AppLocalizations.of(context)!;
 
+    final beforeAssetIDs = _result?.assets.map((a) => a.id).toSet() ?? <String>{};
+
     setState(() {
       _scanState = ScanState.scanning;
       _logs.clear();
@@ -1086,7 +1086,6 @@ class _MainPageState extends State<MainPage>
       });
     });
 
-    // 设置本地化，确保风险标题显示中文
     if (!mounted) return;
     _scanner.setLocalization(l10n);
 
@@ -1107,6 +1106,23 @@ class _MainPageState extends State<MainPage>
         _scanState = ScanState.completed;
         _result = result;
       });
+
+      if (!skipReconcile) {
+        try {
+          await _reconcileAssetsAfterScan(
+            beforeAssetIDs,
+            result.assets,
+          );
+        } catch (e) {
+          appLogger.error('[MainPage] Reconcile failed unexpectedly: $e');
+        }
+      }
+
+      try {
+        await _syncProtectedAssetsWithScanResult(result.assets);
+      } catch (e) {
+        appLogger.error('[MainPage] Sync protected assets failed: $e');
+      }
     } catch (e) {
       appLogger.error('[MainPage] Scan failed', e);
       if (mounted) {
@@ -1118,6 +1134,156 @@ class _MainPageState extends State<MainPage>
       await _logSubscription?.cancel();
       _logSubscription = null;
       await windowManager.setSize(AppConstants.windowSize);
+    }
+  }
+
+  /// 扫描后对账：回收真正消失的资产（名字也不存在于新结果中）的代理与防护状态。
+  /// asset_id 变化但名字仍在的资产视为"重启中"，不回收。
+  /// 每个资产独立 try/catch，单个失败不影响其余资产。
+  Future<void> _reconcileAssetsAfterScan(
+    Set<String> beforeAssetIDs,
+    List<Asset> afterAssets,
+  ) async {
+    if (_protectedAssetIDs.isEmpty) return;
+
+    final afterAssetIDs = afterAssets.map((a) => a.id).toSet();
+    final afterAssetNames = afterAssets.map((a) => a.name).toSet();
+
+    final idDisappeared = _protectedAssetIDs
+        .where((id) => beforeAssetIDs.contains(id) && !afterAssetIDs.contains(id))
+        .toList();
+
+    if (idDisappeared.isEmpty) {
+      appLogger.info('[MainPage] Reconcile: all protected assets still present');
+      return;
+    }
+
+    final trulyMissing = idDisappeared.where((id) {
+      final name = _protectedAssetNamesByID[id] ?? '';
+      return name.isEmpty || !afterAssetNames.contains(name);
+    }).toList();
+
+    if (trulyMissing.isEmpty) {
+      appLogger.info(
+        '[MainPage] Reconcile: ${idDisappeared.length} asset ID(s) changed but names still present, skip teardown',
+      );
+      return;
+    }
+
+    appLogger.info(
+      '[MainPage] Reconcile: ${trulyMissing.length} protected asset(s) truly disappeared: '
+      '${trulyMissing.join(', ')}',
+    );
+
+    final removed = <String>[];
+
+    for (final assetID in trulyMissing) {
+      final assetName = _protectedAssetNamesByID[assetID] ?? '';
+      final label = assetID.isEmpty ? assetName : '$assetName/$assetID';
+
+      try {
+        await PluginService().notifyPluginAppExit(assetName, assetID);
+      } catch (e) {
+        appLogger.warning(
+          '[MainPage] Reconcile: plugin exit callback failed for $label: $e',
+        );
+      }
+
+      try {
+        final service = ProtectionService.forAsset(assetName, assetID);
+        service.setAssetName(assetName, assetID);
+        final stopResult = await service.stopProtectionProxy();
+        appLogger.info(
+          '[MainPage] Reconcile: stopped proxy for $label, success=${stopResult['success']}',
+        );
+      } catch (e) {
+        appLogger.error(
+          '[MainPage] Reconcile: failed to stop proxy for $label: $e',
+        );
+      }
+
+      try {
+        await ProtectionDatabaseService().setProtectionEnabled(
+          assetName,
+          false,
+          assetID,
+        );
+      } catch (e) {
+        appLogger.error(
+          '[MainPage] Reconcile: failed to disable protection config for $label: $e',
+        );
+      }
+
+      removed.add(assetID);
+    }
+
+    if (mounted && removed.isNotEmpty) {
+      setState(() {
+        for (final assetID in removed) {
+          _protectedAssetIDs.remove(assetID);
+          _protectedAssetNamesByID.remove(assetID);
+        }
+      });
+    }
+
+    appLogger.info(
+      '[MainPage] Reconcile completed: removed ${removed.length}/${trulyMissing.length} asset(s)',
+    );
+  }
+
+  /// 从 DB 重建 _protectedAssetIDs，按名字映射到扫描结果的最新 asset_id。
+  /// 解决 bot 重启导致 asset_id 临时变化时 UI 匹配不上的问题。
+  Future<void> _syncProtectedAssetsWithScanResult(List<Asset> assets) async {
+    final enabledConfigs = await ProtectionDatabaseService()
+        .getEnabledProtectionConfigs();
+
+    if (enabledConfigs.isEmpty) {
+      if (_protectedAssetIDs.isNotEmpty && mounted) {
+        setState(() {
+          _protectedAssetIDs.clear();
+          _protectedAssetNamesByID.clear();
+        });
+      }
+      return;
+    }
+
+    final scanIdByName = <String, String>{};
+    final scanIdSet = <String>{};
+    for (final asset in assets) {
+      scanIdByName[asset.name] = asset.id;
+      scanIdSet.add(asset.id);
+    }
+
+    final newIDs = <String>{};
+    final newNames = <String, String>{};
+
+    for (final config in enabledConfigs) {
+      if (scanIdSet.contains(config.assetID)) {
+        newIDs.add(config.assetID);
+        newNames[config.assetID] = config.assetName;
+      } else {
+        final scanID = scanIdByName[config.assetName];
+        if (scanID != null) {
+          appLogger.info(
+            '[MainPage] Sync: asset_id changed for ${config.assetName}: '
+            '${config.assetID} -> $scanID',
+          );
+          newIDs.add(scanID);
+          newNames[scanID] = config.assetName;
+        } else {
+          newIDs.add(config.assetID);
+          newNames[config.assetID] = config.assetName;
+        }
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _protectedAssetIDs.clear();
+        _protectedAssetIDs.addAll(newIDs);
+        _protectedAssetNamesByID.clear();
+        _protectedAssetNamesByID.addAll(newNames);
+      });
     }
   }
 
@@ -1394,6 +1560,25 @@ class _MainPageState extends State<MainPage>
     }
   }
 
+  // ============ 防护监控窗口 ============
+
+  /// 解析已启用防护配置中的有效 asset_id 后再打开监控窗口，避免用重扫后的临时 ID 绑定到错误实例。
+  Future<void> _showProtectionMonitorResolved(Asset asset) async {
+    final config = await ProtectionDatabaseService().getProtectionConfig(
+      asset.name,
+      asset.id,
+    );
+    final resolvedID = (config != null && config.assetID.isNotEmpty)
+        ? config.assetID
+        : asset.id;
+    if (resolvedID != asset.id) {
+      appLogger.info(
+        '[MainPage] Resolved monitor asset_id: scan=${asset.id} -> config=$resolvedID',
+      );
+    }
+    showProtectionMonitor(asset.name, resolvedID);
+  }
+
   // ============ 防护配置 ============
 
   void _showProtectionConfigDialog(
@@ -1414,7 +1599,15 @@ class _MainPageState extends State<MainPage>
         _protectedAssetIDs.add(asset.id);
         _protectedAssetNamesByID[asset.id] = asset.name;
       });
-      showProtectionMonitor(asset.name, asset.id);
+      _showProtectionMonitorResolved(asset);
+
+      // Bot restarts after protection enable; delay-rescan to refresh card info.
+      // skipReconcile: asset_id may change during restart, must not tear down proxy.
+      Future.delayed(const Duration(seconds: 5), () {
+        if (mounted && _scanState != ScanState.scanning) {
+          _startScan(skipReconcile: true);
+        }
+      });
     } else if (result != null && isEditMode) {
       if (_protectedAssetIDs.contains(asset.id)) {
         if (!mounted) return;
@@ -2077,7 +2270,7 @@ class _MainPageState extends State<MainPage>
       onViewSkillScanResults: _showSkillScanResultsDialog,
       onShowProtectionConfig: _showProtectionConfigDialog,
       onShowProtectionMonitor: (asset) =>
-          showProtectionMonitor(asset.name, asset.id),
+          _showProtectionMonitorResolved(asset),
       onShowMitigation: (risk) => _showMitigationDialog(context, risk),
     );
   }

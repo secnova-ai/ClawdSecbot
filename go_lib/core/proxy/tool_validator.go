@@ -66,7 +66,9 @@ func NewToolValidator(logChan chan string) *ToolValidator {
 			SensitiveTools: []string{
 				"execute_command", "run_shell", "bash", "shell",
 				"file_write", "file_delete", "write_file", "delete_file",
+				"file_patch",
 				"eval", "exec", "system",
+				"code_run",
 				"send_email", "http_request", "fetch_url",
 				"database_query", "sql_execute",
 			},

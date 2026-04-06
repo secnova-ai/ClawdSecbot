@@ -685,78 +685,90 @@ class _AssetCardState extends State<_AssetCard> {
             cursor: SystemMouseCursors.click,
             child: GestureDetector(
               onTap: _toggleExpand,
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      onTap: _showIconPicker,
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
+                  Row(
+                    children: [
+                      MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          onTap: _showIconPicker,
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: _currentIconColor.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              _currentIcon,
+                              color: _currentIconColor,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _getAssetDisplayName(asset.name),
+                          style: AppFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildProtectionBadge(l10n),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color: _currentIconColor.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(8),
+                          color: Colors.white.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
                         ),
-                        child: Icon(
-                          _currentIcon,
-                          color: _currentIconColor,
-                          size: 18,
+                        child: Text(
+                          _buildAssetTypeBadgeText(
+                            asset,
+                            l10n.localeName.startsWith('zh'),
+                          ),
+                          style: AppFonts.firaCode(
+                            fontSize: 10,
+                            color: Colors.white70,
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      asset.name,
-                      style: AppFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                  // 绑定地址 + 端口摘要
-                  if (asset.ports.isNotEmpty) ...[
-                    Text(
-                      _buildBindPortSummary(asset),
-                      style: AppFonts.firaCode(
-                        fontSize: 10,
+                      const SizedBox(width: 8),
+                      Icon(
+                        _isExpanded
+                            ? LucideIcons.chevronDown
+                            : LucideIcons.chevronRight,
+                        size: 16,
                         color: Colors.white54,
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                  // 防护状态徽章
-                  _buildProtectionBadge(l10n),
-                  const SizedBox(width: 8),
-                  // 类型徽章
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      asset.type,
-                      style: AppFonts.firaCode(
-                        fontSize: 10,
-                        color: Colors.white70,
+                    ],
+                  ),
+                  if (asset.ports.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 46),
+                      child: Text(
+                        _buildBindPortSummary(asset),
+                        style: AppFonts.firaCode(
+                          fontSize: 10,
+                          color: Colors.white54,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  // 折叠/展开指示器
-                  Icon(
-                    _isExpanded
-                        ? LucideIcons.chevronDown
-                        : LucideIcons.chevronRight,
-                    size: 16,
-                    color: Colors.white54,
-                  ),
+                  ],
                 ],
               ),
             ),
@@ -813,9 +825,73 @@ class _AssetCardState extends State<_AssetCard> {
     );
   }
 
+  /// 将资产内部名称映射为用户友好的展示名称
+  String _getAssetDisplayName(String name) {
+    const displayNames = {
+      'dintalclaw': '政务龙虾',
+    };
+    return displayNames[name] ?? name;
+  }
+
+  /// 根据资产状态生成折叠态右上角类型徽章文案
+  String _buildAssetTypeBadgeText(Asset asset, bool isZh) {
+    if (asset.name != 'dintalclaw') {
+      return asset.type;
+    }
+    final status = _getDintalclawAssetStatus(asset);
+    switch (status) {
+      case 'frontend_mode_running':
+        return isZh ? '前端' : 'Frontend';
+      case 'browser_mode_running':
+        return isZh ? '浏览器' : 'Browser';
+      case 'cli_mode_running':
+        return isZh ? '命令行' : 'CLI';
+      case 'installed_not_running':
+        return isZh ? '未运行' : 'Stopped';
+      default:
+        return asset.type;
+    }
+  }
+
+  /// 从资产展示区块中提取 dintalclaw 运行状态 key
+  String _getDintalclawAssetStatus(Asset asset) {
+    for (final section in asset.displaySections) {
+      if (section.title != 'Asset Status') continue;
+      for (final item in section.items) {
+        if (item.label == 'Status') {
+          return item.value;
+        }
+      }
+    }
+    return '';
+  }
+
+  /// 判断资产是否处于运行中状态，仅运行中的资产才能一键防护
+  bool _isAssetRunning(Asset asset) {
+    final status = asset.metadata['asset_status'] ?? '';
+    if (status.isEmpty) return true;
+    return status.endsWith('_running');
+  }
+
   /// 构建折叠态的绑定地址+端口摘要，如 "127.0.0.1:18789"
-  /// 绑定地址优先从 displaySections 的 Bind 值读取，确保与展开态一致
+  /// 优先从 displaySections 的 Listener/Bind 值读取
   String _buildBindPortSummary(Asset asset) {
+    // dintalclaw uses "Listener Address" items with full "addr:port" values
+    final listenerValues = <String>[];
+    for (final section in asset.displaySections) {
+      for (final item in section.items) {
+        if ((item.label == 'Listener' || item.label == 'Listener Address') &&
+            item.value.isNotEmpty &&
+            item.value != 'N/A (not running)' &&
+            item.value != 'N/A') {
+          listenerValues.add(item.value);
+        }
+      }
+    }
+    if (listenerValues.isNotEmpty) {
+      return listenerValues.join(', ');
+    }
+
     String bind = '';
     for (final section in asset.displaySections) {
       for (final item in section.items) {
@@ -885,6 +961,9 @@ class _AssetCardState extends State<_AssetCard> {
       'Sandbox': '沙箱',
       'Logging': '日志',
       'Config': '配置',
+      'Asset Status': '资产状态',
+      'Basic Info': '基本信息',
+      'Process Info': '进程信息',
       // Item labels
       'Bind': '绑定地址',
       'Port': '端口',
@@ -892,6 +971,24 @@ class _AssetCardState extends State<_AssetCard> {
       'Mode': '模式',
       'Redact': '脱敏',
       'Path': '路径',
+      'Runtime Listeners': '运行时监听',
+      'Listener': '监听地址',
+      'Listener Address': '监听地址',
+      'Installation': '安装信息',
+      'Root': '安装根目录',
+      'Status': '状态',
+      'Version': '版本号',
+      'Install Path': '安装路径',
+      'Config File': '配置文件',
+      'Log Path': '日志路径',
+      'Process Name': '进程名称',
+      'Audit': '审计',
+      'Host': '主机',
+      'Pairing Required': '配对认证',
+      'Allow Public Bind': '允许公网绑定',
+      'Backend': '后端',
+      'Workspace Only': '仅工作区',
+      'Enabled': '启用状态',
     };
     return zhMap[text] ?? text;
   }
@@ -907,6 +1004,10 @@ class _AssetCardState extends State<_AssetCard> {
       'none': '未启用',
       'on': '已开启',
       'off': '已关闭',
+      'frontend_mode_running': '前端模式运行中',
+      'browser_mode_running': '浏览器模式运行中',
+      'cli_mode_running': '命令行模式运行中',
+      'installed_not_running': '已安装未运行',
     };
     return zhMap[value] ?? value;
   }
@@ -931,6 +1032,10 @@ class _AssetCardState extends State<_AssetCard> {
         return LucideIcons.network;
       case 'settings':
         return LucideIcons.settings;
+      case 'radio':
+        return LucideIcons.radio;
+      case 'folder':
+        return LucideIcons.folder;
       default:
         return LucideIcons.info;
     }
@@ -1120,40 +1225,61 @@ class _AssetCardState extends State<_AssetCard> {
         ],
       );
     } else {
-      // 未防护资产：显示一键防护按钮
-      return MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          onTap: () => widget.onShowProtectionConfig(asset, isEditMode: false),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-              ),
-              borderRadius: BorderRadius.circular(8),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF6366F1).withValues(alpha: 0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(LucideIcons.shield, color: Colors.white, size: 14),
-                const SizedBox(width: 6),
-                Text(
-                  l10n.oneClickProtection,
-                  style: AppFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
+      // 未防护资产：显示一键防护按钮（仅运行中可点击）
+      final canProtect = _isAssetRunning(asset);
+      return Tooltip(
+        message: canProtect ? '' : l10n.protectionAssetNotRunning,
+        child: MouseRegion(
+          cursor: canProtect
+              ? SystemMouseCursors.click
+              : SystemMouseCursors.basic,
+          child: GestureDetector(
+            onTap: canProtect
+                ? () =>
+                      widget.onShowProtectionConfig(asset, isEditMode: false)
+                : null,
+            child: Opacity(
+              opacity: canProtect ? 1.0 : 0.4,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
                   ),
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: canProtect
+                      ? [
+                          BoxShadow(
+                            color: const Color(
+                              0xFF6366F1,
+                            ).withValues(alpha: 0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : [],
                 ),
-              ],
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      LucideIcons.shield,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      l10n.oneClickProtection,
+                      style: AppFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
