@@ -693,6 +693,7 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
     for (final reqId in widget.requestOrder) {
       final group = widget.requestGroups[reqId];
       if (group == null) continue;
+      final isDinTalClaw = group.assetName.toLowerCase().contains('dintalclaw');
 
       final responseToolCalls = group.toolCalls
           .where((tc) => tc.source == 'response')
@@ -703,6 +704,22 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
               tc.latestRound &&
               tc.result.isNotEmpty)
           .toList();
+
+      // DinTalClaw 使用内嵌工具协议，工具调用 ID 在多轮消息中更容易出现同形态序列。
+      // 为避免“跨卡去重”误杀有效内容，这里直接按原始结果全量展示，不做隐藏策略。
+      if (isDinTalClaw) {
+        contexts[reqId] = _ToolDedupContext(
+          visibleResultIds: latestHistoryResults
+              .map((tc) => tc.id)
+              .where((id) => id.isNotEmpty)
+              .toSet(),
+          hideToolArgs: false,
+          hideToolResults: false,
+        );
+        prevIsToolArgsOnly = false;
+        prevResponseToolIds = {};
+        continue;
+      }
 
       // 跨卡去重：仅对非空 ID 的工具结果做去重；空 ID 不参与去重以避免误过滤
       final visibleResultIds = <String>{};

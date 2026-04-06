@@ -256,7 +256,7 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			latestAssistantIndex = i
 			isInlineToolProtocol = true
 			for j, it := range inlineTools {
-				syntheticID := generateInlineToolCallID(i, j)
+				syntheticID := generateInlineToolCallID(requestID, i, j)
 				latestAssistantToolCalls = append(latestAssistantToolCalls, toolCallRef{
 					ID:       syntheticID,
 					FuncName: it.Name,
@@ -345,7 +345,7 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			inlineToolResultsMap = make(map[string]string)
 			hasToolResultMessages = true
 			for k, result := range results {
-				synID := generateInlineToolCallID(i, k)
+				synID := generateInlineToolCallID(requestID, i, k)
 				latestAssistantToolCalls = append(latestAssistantToolCalls, toolCallRef{
 					ID:       synID,
 					FuncName: "tool_result",
@@ -461,7 +461,7 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			if shouldCollect {
 				inlineTools := extractInlineToolUses(content)
 				for j, it := range inlineTools {
-					synID := generateInlineToolCallID(i, j)
+					synID := generateInlineToolCallID(requestID, i, j)
 					toolCallsInHistory = append(toolCallsInHistory, toolCallRef{
 						ID:       synID,
 						FuncName: it.Name,
@@ -1120,7 +1120,7 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 					})
 					pp.updateTruthRecord(requestID, func(r *TruthRecord) {
 						for j, it := range inlineResponseTools {
-							synID := generateInlineToolCallID(r.MessageCount, j)
+							synID := generateInlineToolCallID(requestID, r.MessageCount, j)
 							isSensitive := false
 							if pp.toolValidator != nil {
 								isSensitive = pp.toolValidator.IsSensitive(it.Name)
