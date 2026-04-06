@@ -18,6 +18,7 @@ on:
       - 'windows/**'
       - 'images/**'
       - 'pubspec.yaml'
+      - 'scripts/build_windows_release.ps1'
 
 jobs:
   build-go:
@@ -113,3 +114,53 @@ jobs:
 
       - name: Build Windows app
         run: flutter build windows --release --no-tree-shake-icons
+
+  package-windows-sfx:
+    name: Package Windows self-extracting EXE (7-Zip SFX)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go_lib/go.mod
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install MinGW-w64 and 7-Zip
+        run: choco install mingw 7zip -y --no-progress
+
+      - name: Add MinGW to PATH
+        shell: pwsh
+        run: |
+          $mingwBin = "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin"
+          if (-not (Test-Path $mingwBin)) {
+            Write-Error "MinGW bin not found at $mingwBin"
+            exit 1
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $mingwBin
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Sync app icon for executable
+        shell: pwsh
+        run: |
+          if (Test-Path "images\tray_icon.ico") {
+            Copy-Item -Force "images\tray_icon.ico" "windows\runner\resources\app_icon.ico"
+            Write-Host "Synced app_icon.ico from tray_icon.ico"
+          }
+
+      - name: Build full Windows release (SFX)
+        shell: pwsh
+        run: |
+          ./scripts/build_windows_release.ps1 --version 0.0.0 --build $env:GITHUB_RUN_NUMBER
+
+      - name: Upload SFX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-sfx-clawdsecbot
+          path: build/ClawdSecbot-*.exe
+          retention-days: 7
