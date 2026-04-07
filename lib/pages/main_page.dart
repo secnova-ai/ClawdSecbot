@@ -35,6 +35,7 @@ import '../services/bookmark_service.dart';
 import '../services/native_library_service.dart';
 import '../services/plugin_service.dart';
 import '../services/api_service.dart';
+import '../services/api_shutdown_service.dart';
 import '../utils/app_logger.dart';
 import '../widgets/mitigation_dialog.dart';
 import '../widgets/settings_dialog.dart';
@@ -103,6 +104,7 @@ class _MainPageState extends State<MainPage>
   bool _isApiServerToggling = false;
   Timer? _externalStateRefreshTimer;
   bool _isExternalStateRefreshing = false;
+  StreamSubscription<ApiShutdownRequest>? _apiShutdownSubscription;
 
   /// Future tracking heavy initialization (DB, plugins, etc.)
   Future<void>? _initFuture;
@@ -207,6 +209,7 @@ class _MainPageState extends State<MainPage>
     try {
       await NativeLibraryService().initialize();
       await _syncProtectionLanguage();
+      await _registerApiShutdownHandler();
     } catch (e) {
       appLogger.error('[MainPage] Failed to initialize native library', e);
     }
@@ -299,6 +302,8 @@ class _MainPageState extends State<MainPage>
     _onboardingCompletionTimer?.cancel();
     _scheduledScanTimer?.cancel();
     _externalStateRefreshTimer?.cancel();
+    _apiShutdownSubscription?.cancel();
+    unawaited(ApiShutdownService().dispose());
     disposeVersionMixin();
     stopVersionCheckService();
     _scanner.dispose();
@@ -1013,6 +1018,13 @@ class _MainPageState extends State<MainPage>
   }
 
   Future<void> _requestAppExit() async {
+    await _requestAppExitWithOptions(interactive: true, restoreConfig: null);
+  }
+
+  Future<void> _requestAppExitWithOptions({
+    required bool interactive,
+    required bool? restoreConfig,
+  }) async {
     if (_isExitFlowInProgress) {
       return;
     }
@@ -1020,21 +1032,32 @@ class _MainPageState extends State<MainPage>
 
     try {
       final enabledConfigs = await _loadExitTargets();
+      var shouldRestore = restoreConfig ?? false;
       if (enabledConfigs.isNotEmpty) {
-        if (mounted) {
+        if (interactive && mounted) {
           await showWindow();
         }
-        final confirmed = await _showExitRestoreDialog(enabledConfigs.length);
-        if (confirmed != true) {
-          return;
+        if (interactive) {
+          final confirmed = await _showExitRestoreDialog(enabledConfigs.length);
+          if (confirmed != true) {
+            return;
+          }
+          shouldRestore = true;
         }
-
-        final failures = await _runExitCleanupWithProgress(
-          () => _restoreTargetsForExit(enabledConfigs),
-        );
-        if (failures.isNotEmpty) {
-          await _showExitFailureDialog(failures);
-          return;
+        if (shouldRestore) {
+          final failures = await _runExitCleanupWithProgress(
+            () => _restoreTargetsForExit(enabledConfigs),
+          );
+          if (failures.isNotEmpty) {
+            if (interactive) {
+              await _showExitFailureDialog(failures);
+            } else {
+              appLogger.error(
+                '[MainPage] API-triggered exit restore failed: ${failures.join('; ')}',
+              );
+            }
+            return;
+          }
         }
       }
 
@@ -1042,6 +1065,26 @@ class _MainPageState extends State<MainPage>
     } finally {
       _isExitFlowInProgress = false;
     }
+  }
+
+  Future<void> _registerApiShutdownHandler() async {
+    final registered = await ApiShutdownService().register();
+    if (!registered) {
+      return;
+    }
+
+    await _apiShutdownSubscription?.cancel();
+    _apiShutdownSubscription = ApiShutdownService().requests.listen((request) {
+      appLogger.info(
+        '[MainPage] Received API shutdown request: restoreConfig=${request.restoreConfig}',
+      );
+      unawaited(
+        _requestAppExitWithOptions(
+          interactive: false,
+          restoreConfig: request.restoreConfig,
+        ),
+      );
+    });
   }
 
   Future<List<ProtectionConfig>> _loadExitTargets() async {
@@ -1415,7 +1458,8 @@ class _MainPageState extends State<MainPage>
 
     final l10n = AppLocalizations.of(context)!;
 
-    final beforeAssetIDs = _result?.assets.map((a) => a.id).toSet() ?? <String>{};
+    final beforeAssetIDs =
+        _result?.assets.map((a) => a.id).toSet() ?? <String>{};
 
     setState(() {
       _scanState = ScanState.scanning;
@@ -1458,10 +1502,7 @@ class _MainPageState extends State<MainPage>
 
       if (!skipReconcile) {
         try {
-          await _reconcileAssetsAfterScan(
-            beforeAssetIDs,
-            result.assets,
-          );
+          await _reconcileAssetsAfterScan(beforeAssetIDs, result.assets);
         } catch (e) {
           appLogger.error('[MainPage] Reconcile failed unexpectedly: $e');
         }
@@ -1499,11 +1540,15 @@ class _MainPageState extends State<MainPage>
     final afterAssetNames = afterAssets.map((a) => a.name).toSet();
 
     final idDisappeared = _protectedAssetIDs
-        .where((id) => beforeAssetIDs.contains(id) && !afterAssetIDs.contains(id))
+        .where(
+          (id) => beforeAssetIDs.contains(id) && !afterAssetIDs.contains(id),
+        )
         .toList();
 
     if (idDisappeared.isEmpty) {
-      appLogger.info('[MainPage] Reconcile: all protected assets still present');
+      appLogger.info(
+        '[MainPage] Reconcile: all protected assets still present',
+      );
       return;
     }
 
@@ -2617,8 +2662,7 @@ class _MainPageState extends State<MainPage>
       onRescan: _resetScan,
       onViewSkillScanResults: _showSkillScanResultsDialog,
       onShowProtectionConfig: _showProtectionConfigDialog,
-      onShowProtectionMonitor: (asset) =>
-          _showProtectionMonitorResolved(asset),
+      onShowProtectionMonitor: (asset) => _showProtectionMonitorResolved(asset),
       onShowMitigation: (risk) => _showMitigationDialog(context, risk),
     );
   }

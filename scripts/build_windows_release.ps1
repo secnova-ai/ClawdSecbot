@@ -479,6 +479,100 @@ function Resolve-SevenZipPaths {
     return $null
 }
 
+function Get-LatestDirectoryByName {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$CandidatePaths,
+        [string]$NamePattern = '*'
+    )
+
+    $dirs = @()
+    foreach ($path in $CandidatePaths) {
+        if (Test-Path -LiteralPath $path) {
+            $dirs += Get-ChildItem -LiteralPath $path -Directory -ErrorAction SilentlyContinue | Where-Object {
+                $_.Name -like $NamePattern
+            }
+        }
+    }
+
+    return $dirs | Sort-Object Name -Descending | Select-Object -First 1
+}
+
+function Resolve-AppLocalRuntimeFiles {
+    $runtimeFiles = New-Object System.Collections.Generic.List[string]
+
+    $vsInstallPath = $null
+    $vswhereCandidates = @(
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\Installer\vswhere.exe"
+    )
+    foreach ($vswhere in $vswhereCandidates) {
+        if (-not (Test-Path -LiteralPath $vswhere)) { continue }
+        $detected = & $vswhere -latest -products * -property installationPath 2>$null
+        if ($detected) {
+            $vsInstallPath = $detected.Trim()
+            break
+        }
+    }
+
+    $vcRedistRoots = @()
+    if ($vsInstallPath) {
+        $vcRedistRoots += (Join-Path $vsInstallPath "VC\Redist\MSVC")
+    }
+    $vcRedistRoots += @(
+        "C:\BuildTools\VC\Redist\MSVC",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools\VC\Redist\MSVC",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\VC\Redist\MSVC"
+    ) | Select-Object -Unique
+
+    $vcRedistVersionDir = Get-LatestDirectoryByName -CandidatePaths $vcRedistRoots -NamePattern '*.*'
+    if (-not $vcRedistVersionDir) {
+        Stop-WithError "VC runtime redistributable directory not found. Install Visual C++ x64 build tools/redist."
+    }
+
+    $vcRuntimeDir = $null
+    foreach ($candidate in @(
+        (Join-Path $vcRedistVersionDir.FullName "x64\Microsoft.VC143.CRT"),
+        (Join-Path $vcRedistVersionDir.FullName "x64\Microsoft.VC142.CRT")
+    )) {
+        if (Test-Path -LiteralPath $candidate) {
+            $vcRuntimeDir = $candidate
+            break
+        }
+    }
+    if (-not $vcRuntimeDir) {
+        Stop-WithError "VC runtime app-local directory not found under $($vcRedistVersionDir.FullName)"
+    }
+
+    foreach ($dll in @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")) {
+        $path = Join-Path $vcRuntimeDir $dll
+        if (-not (Test-Path -LiteralPath $path)) {
+            Stop-WithError "Required VC runtime DLL not found: $path"
+        }
+        $runtimeFiles.Add($path)
+    }
+
+    return $runtimeFiles | Select-Object -Unique
+}
+
+function Copy-AppLocalRuntimeFiles {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$RuntimeFiles,
+        [Parameter(Mandatory = $true)][string[]]$TargetDirectories
+    )
+
+    foreach ($targetDir in $TargetDirectories) {
+        if (-not (Test-Path -LiteralPath $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        }
+
+        foreach ($file in $RuntimeFiles) {
+            $dest = Join-Path $targetDir ([System.IO.Path]::GetFileName($file))
+            Copy-Item -LiteralPath $file -Destination $dest -Force
+        }
+        Write-Ok "Copied app-local runtimes to $targetDir"
+    }
+}
+
 # Write UTF-8 with BOM text file for 7-Zip SFX config.
 function Write-Utf8BomTextFile {
     param(
@@ -834,6 +928,12 @@ $mainExePath = Join-Path $outputDir $bundleExeName
 if (-not (Test-Path -LiteralPath $mainExePath)) {
     Stop-WithError "Main executable not found after packaging: $mainExePath"
 }
+
+$runtimeFiles = Resolve-AppLocalRuntimeFiles
+Write-Step "Bundling VC/UCRT app-local runtimes"
+Copy-AppLocalRuntimeFiles -RuntimeFiles $runtimeFiles -TargetDirectories @(
+    $outputDir
+)
 
 if ($PackageFormat -eq "zip") {
     if (Test-Path -LiteralPath $releaseZipFile) {

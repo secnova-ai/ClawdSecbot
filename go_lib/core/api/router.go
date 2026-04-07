@@ -12,6 +12,7 @@ func (s *APIServer) setupRoutes() http.Handler {
 	// Register API endpoints
 	// Status endpoint - returns system status
 	mux.HandleFunc("GET /api/v1/status", s.handleStatus)
+	mux.HandleFunc("POST /api/v1/app/shutdown", s.handleAppShutdown)
 
 	// Export endpoints - control data export service
 	mux.HandleFunc("POST /api/v1/export/start", s.handleExportStart)
