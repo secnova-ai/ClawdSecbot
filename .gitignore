@@ -62,6 +62,7 @@ plugins/*
 build/
 go_lib/botsec.dylib
 go_lib/botsec.h
+go_lib/go_lib.exe
 
 # Platform-specific build artifacts
 macos/Runner/*.dylib

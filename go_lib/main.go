@@ -54,6 +54,7 @@ import (
 	_ "go_lib/plugins/dintalclaw"
 	_ "go_lib/plugins/nullclaw"
 	_ "go_lib/plugins/openclaw"
+	_ "go_lib/plugins/qclaw"
 )
 
 func init() {
@@ -1041,9 +1042,19 @@ func StartBatchSkillScan() *C.char {
 	return C.CString(core.StartBatchSkillScanByPlugin(""))
 }
 
+//export StartBatchSkillScanByAssetFFI
+func StartBatchSkillScanByAssetFFI(assetName *C.char) *C.char {
+	return C.CString(core.StartBatchSkillScanByPlugin(C.GoString(assetName)))
+}
+
 //export GetBatchSkillScanLog
 func GetBatchSkillScanLog(batchID *C.char) *C.char {
 	return C.CString(core.GetBatchSkillScanLogByPlugin("", C.GoString(batchID)))
+}
+
+//export GetBatchSkillScanLogByAssetFFI
+func GetBatchSkillScanLogByAssetFFI(assetName, batchID *C.char) *C.char {
+	return C.CString(core.GetBatchSkillScanLogByPlugin(C.GoString(assetName), C.GoString(batchID)))
 }
 
 //export GetBatchSkillScanResults
@@ -1051,9 +1062,19 @@ func GetBatchSkillScanResults(batchID *C.char) *C.char {
 	return C.CString(core.GetBatchSkillScanResultsByPlugin("", C.GoString(batchID)))
 }
 
+//export GetBatchSkillScanResultsByAssetFFI
+func GetBatchSkillScanResultsByAssetFFI(assetName, batchID *C.char) *C.char {
+	return C.CString(core.GetBatchSkillScanResultsByPlugin(C.GoString(assetName), C.GoString(batchID)))
+}
+
 //export CancelBatchSkillScan
 func CancelBatchSkillScan(batchID *C.char) *C.char {
 	return C.CString(core.CancelBatchSkillScanByPlugin("", C.GoString(batchID)))
+}
+
+//export CancelBatchSkillScanByAssetFFI
+func CancelBatchSkillScanByAssetFFI(assetName, batchID *C.char) *C.char {
+	return C.CString(core.CancelBatchSkillScanByPlugin(C.GoString(assetName), C.GoString(batchID)))
 }
 
 // ==================== Model Connection FFI (plugin capability dispatch) ====================

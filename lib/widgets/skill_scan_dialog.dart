@@ -8,7 +8,9 @@ import '../services/skill_security_analyzer_service.dart';
 import '../l10n/app_localizations.dart';
 
 class SkillScanDialog extends StatefulWidget {
-  const SkillScanDialog({super.key});
+  final String? assetName;
+
+  const SkillScanDialog({super.key, this.assetName});
 
   @override
   State<SkillScanDialog> createState() => _SkillScanDialogState();
@@ -77,7 +79,7 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
     });
 
     try {
-      final result = await _service.startBatchScan();
+      final result = await _service.startBatchScan(widget.assetName);
       if (result['success'] != true) {
         final errorMsg = result['error'] as String? ?? 'Unknown error';
         if (result['message'] == 'no skills to scan') {
@@ -129,7 +131,10 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
     if (_batchID == null) return;
 
     try {
-      final response = await _service.getBatchScanResults(_batchID!);
+      final response = await _service.getBatchScanResults(
+        _batchID!,
+        widget.assetName,
+      );
       if (response['success'] == true && response['results'] != null) {
         final results = response['results'] as Map<String, dynamic>;
         for (final entry in results.entries) {

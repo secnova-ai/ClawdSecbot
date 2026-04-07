@@ -51,7 +51,7 @@ class BotScanner {
     _checkSystemRisks(finalRisks);
 
     // 3. Add Risky Skills from database
-    await _addRiskySkills(finalRisks);
+    await _addRiskySkills(finalRisks, pluginResult.risks);
 
     return ScanResult(
       config: pluginResult.config,
@@ -100,11 +100,33 @@ class BotScanner {
     }
   }
 
-  Future<void> _addRiskySkills(List<RiskInfo> risks) async {
+  Future<void> _addRiskySkills(
+    List<RiskInfo> risks,
+    List<RiskInfo> pluginRisks,
+  ) async {
     try {
+      final unscannedSkillNames = <String>{};
+      for (final risk in pluginRisks.where(
+        (r) => r.id == 'skills_not_scanned',
+      )) {
+        final names = risk.args?['skill_names'];
+        if (names is List) {
+          for (final name in names) {
+            final normalized = name?.toString().trim();
+            if (normalized != null && normalized.isNotEmpty) {
+              unscannedSkillNames.add(normalized.toLowerCase());
+            }
+          }
+        }
+      }
+
       final riskySkills = await ScanDatabaseService().getRiskySkills();
       for (var skill in riskySkills) {
         final skillName = skill['skill_name'] as String;
+        if (unscannedSkillNames.contains(skillName.trim().toLowerCase())) {
+          _log('Skip risky skill card for unscanned skill: $skillName');
+          continue;
+        }
         final issues = skill['issues'] as List<String>;
         final issueCount = issues.length;
 

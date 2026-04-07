@@ -66,8 +66,9 @@ type OpenclawConfig struct {
 	} `json:"gateway"`
 	Agents struct {
 		Defaults struct {
-			Model   interface{} `json:"model"` // Can be string or object
-			Sandbox struct {
+			Model     interface{} `json:"model"` // Can be string or object
+			Workspace string      `json:"workspace"`
+			Sandbox   struct {
 				Mode string `json:"mode"`
 			} `json:"sandbox"`
 		} `json:"defaults"`
@@ -76,6 +77,11 @@ type OpenclawConfig struct {
 		Mode      string                       `json:"mode"`
 		Providers map[string]*OpenclawProvider `json:"providers"`
 	} `json:"models"`
+	Skills struct {
+		Load struct {
+			ExtraDirs []string `json:"extraDirs"`
+		} `json:"load"`
+	} `json:"skills"`
 	Logging struct {
 		RedactSensitive string `json:"redactSensitive"`
 	} `json:"logging"`

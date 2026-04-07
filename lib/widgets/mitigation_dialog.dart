@@ -42,7 +42,9 @@ class _MitigationDialogState extends State<MitigationDialog> {
 
   void _redirectToSkillScan() {
     // Return special result to indicate skill scan is needed
-    Navigator.of(context).pop({'action': 'skill_scan'});
+    Navigator.of(
+      context,
+    ).pop({'action': 'skill_scan', 'asset_name': widget.risk.sourcePlugin});
   }
 
   Future<void> _submit() async {

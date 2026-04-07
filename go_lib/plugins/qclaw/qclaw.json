@@ -1,0 +1,24 @@
+[
+  {
+    "code": "qclaw_gateway_active",
+    "name": "Port and Process Detection",
+    "life_cycle": 1,
+    "os": ["darwin", "linux", "windows"],
+    "desc": "Detects active QClaw gateway via port and process",
+    "expression": {
+      "lang": "json_match",
+      "expr": "{\"ports\": [28789], \"process_keywords\": [\"qclaw\"]}"
+    }
+  },
+  {
+    "code": "qclaw_config_exist",
+    "name": "Config File Detection",
+    "life_cycle": 2,
+    "os": ["darwin", "linux", "windows"],
+    "desc": "Detects QClaw presence via config file",
+    "expression": {
+      "lang": "json_match",
+      "expr": "{\"file_paths\": [\"~/.qclaw\"]}"
+    }
+  }
+]

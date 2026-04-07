@@ -39,21 +39,37 @@ typedef CancelSkillSecurityScanDart =
 // C function signatures - 批量扫描
 typedef StartBatchSkillScanC = ffi.Pointer<Utf8> Function();
 typedef StartBatchSkillScanDart = ffi.Pointer<Utf8> Function();
+typedef StartBatchSkillScanByAssetC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
+typedef StartBatchSkillScanByAssetDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
 typedef GetBatchSkillScanLogC =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> batchID);
 typedef GetBatchSkillScanLogDart =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> batchID);
+typedef GetBatchSkillScanLogByAssetC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef GetBatchSkillScanLogByAssetDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 
 typedef GetBatchSkillScanResultsC =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> batchID);
 typedef GetBatchSkillScanResultsDart =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> batchID);
+typedef GetBatchSkillScanResultsByAssetC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef GetBatchSkillScanResultsByAssetDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 
 typedef CancelBatchSkillScanC =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> batchID);
 typedef CancelBatchSkillScanDart =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> batchID);
+typedef CancelBatchSkillScanByAssetC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef CancelBatchSkillScanByAssetDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 
 typedef TestModelConnectionFFIC =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> configJSON);
@@ -98,6 +114,7 @@ class SkillSecurityAnalyzerService {
       StreamController<BatchScanProgress>.broadcast();
   Timer? _pollTimer;
   String? _currentBatchID;
+  String? _currentAssetName;
 
   Stream<String> get logStream => _logController.stream;
   Stream<BatchScanProgress> get progressStream => _progressController.stream;
@@ -194,21 +211,34 @@ class SkillSecurityAnalyzerService {
   // ==================== 批量扫描 ====================
 
   /// 启动批量技能扫描（零参数，Go 层自动发现技能和配置）
-  Future<Map<String, dynamic>> startBatchScan() async {
+  Future<Map<String, dynamic>> startBatchScan([String? assetName]) async {
     if (_currentBatchID != null) {
       throw Exception('A batch scan is already in progress');
     }
 
     final dylib = _getDylib();
-    final startBatch = dylib
-        .lookupFunction<StartBatchSkillScanC, StartBatchSkillScanDart>(
-          'StartBatchSkillScan',
-        );
     final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
       'FreeString',
     );
-
-    final resultPtr = startBatch();
+    ffi.Pointer<Utf8> resultPtr;
+    if (assetName != null && assetName.trim().isNotEmpty) {
+      final startBatch = dylib
+          .lookupFunction<
+            StartBatchSkillScanByAssetC,
+            StartBatchSkillScanByAssetDart
+          >('StartBatchSkillScanByAssetFFI');
+      final assetNamePtr = assetName.toNativeUtf8();
+      resultPtr = startBatch(assetNamePtr);
+      malloc.free(assetNamePtr);
+      _currentAssetName = assetName;
+    } else {
+      final startBatch = dylib
+          .lookupFunction<StartBatchSkillScanC, StartBatchSkillScanDart>(
+            'StartBatchSkillScan',
+          );
+      resultPtr = startBatch();
+      _currentAssetName = null;
+    }
     final resultStr = resultPtr.toDartString();
     freeString(resultPtr);
 
@@ -232,25 +262,38 @@ class SkillSecurityAnalyzerService {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) {
       if (_currentBatchID != null) {
-        _pollBatchLogs(_currentBatchID!);
+        _pollBatchLogs(_currentBatchID!, _currentAssetName);
       }
     });
   }
 
-  void _pollBatchLogs(String batchID) {
+  void _pollBatchLogs(String batchID, String? assetName) {
     try {
       final dylib = _getDylib();
-      final getLog = dylib
-          .lookupFunction<GetBatchSkillScanLogC, GetBatchSkillScanLogDart>(
-            'GetBatchSkillScanLog',
-          );
       final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
         'FreeString',
       );
-
-      final batchIDPtr = batchID.toNativeUtf8();
-      final resultPtr = getLog(batchIDPtr);
-      malloc.free(batchIDPtr);
+      ffi.Pointer<Utf8> resultPtr;
+      if (assetName != null && assetName.trim().isNotEmpty) {
+        final getLog = dylib
+            .lookupFunction<
+              GetBatchSkillScanLogByAssetC,
+              GetBatchSkillScanLogByAssetDart
+            >('GetBatchSkillScanLogByAssetFFI');
+        final assetNamePtr = assetName.toNativeUtf8();
+        final batchIDPtr = batchID.toNativeUtf8();
+        resultPtr = getLog(assetNamePtr, batchIDPtr);
+        malloc.free(assetNamePtr);
+        malloc.free(batchIDPtr);
+      } else {
+        final getLog = dylib
+            .lookupFunction<GetBatchSkillScanLogC, GetBatchSkillScanLogDart>(
+              'GetBatchSkillScanLog',
+            );
+        final batchIDPtr = batchID.toNativeUtf8();
+        resultPtr = getLog(batchIDPtr);
+        malloc.free(batchIDPtr);
+      }
 
       final resultStr = resultPtr.toDartString();
       freeString(resultPtr);
@@ -280,6 +323,7 @@ class SkillSecurityAnalyzerService {
       if (result['completed'] == true) {
         _pollTimer?.cancel();
         _currentBatchID = null;
+        _currentAssetName = null;
 
         if (result['error'] != null && result['error'].toString().isNotEmpty) {
           _logController.add('Error: ${result['error']}');
@@ -291,20 +335,36 @@ class SkillSecurityAnalyzerService {
   }
 
   /// 获取批量扫描最终结果
-  Future<Map<String, dynamic>> getBatchScanResults(String batchID) async {
+  Future<Map<String, dynamic>> getBatchScanResults(
+    String batchID, [
+    String? assetName,
+  ]) async {
     final dylib = _getDylib();
-    final getResults = dylib
-        .lookupFunction<
-          GetBatchSkillScanResultsC,
-          GetBatchSkillScanResultsDart
-        >('GetBatchSkillScanResults');
     final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
       'FreeString',
     );
-
-    final batchIDPtr = batchID.toNativeUtf8();
-    final resultPtr = getResults(batchIDPtr);
-    malloc.free(batchIDPtr);
+    ffi.Pointer<Utf8> resultPtr;
+    if (assetName != null && assetName.trim().isNotEmpty) {
+      final getResults = dylib
+          .lookupFunction<
+            GetBatchSkillScanResultsByAssetC,
+            GetBatchSkillScanResultsByAssetDart
+          >('GetBatchSkillScanResultsByAssetFFI');
+      final assetNamePtr = assetName.toNativeUtf8();
+      final batchIDPtr = batchID.toNativeUtf8();
+      resultPtr = getResults(assetNamePtr, batchIDPtr);
+      malloc.free(assetNamePtr);
+      malloc.free(batchIDPtr);
+    } else {
+      final getResults = dylib
+          .lookupFunction<
+            GetBatchSkillScanResultsC,
+            GetBatchSkillScanResultsDart
+          >('GetBatchSkillScanResults');
+      final batchIDPtr = batchID.toNativeUtf8();
+      resultPtr = getResults(batchIDPtr);
+      malloc.free(batchIDPtr);
+    }
 
     final resultStr = resultPtr.toDartString();
     freeString(resultPtr);
@@ -318,23 +378,37 @@ class SkillSecurityAnalyzerService {
 
     try {
       final dylib = _getDylib();
-      final cancelBatch = dylib
-          .lookupFunction<CancelBatchSkillScanC, CancelBatchSkillScanDart>(
-            'CancelBatchSkillScan',
-          );
       final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
         'FreeString',
       );
-
-      final batchIDPtr = _currentBatchID!.toNativeUtf8();
-      final resultPtr = cancelBatch(batchIDPtr);
-      malloc.free(batchIDPtr);
+      ffi.Pointer<Utf8> resultPtr;
+      if (_currentAssetName != null && _currentAssetName!.trim().isNotEmpty) {
+        final cancelBatch = dylib
+            .lookupFunction<
+              CancelBatchSkillScanByAssetC,
+              CancelBatchSkillScanByAssetDart
+            >('CancelBatchSkillScanByAssetFFI');
+        final assetNamePtr = _currentAssetName!.toNativeUtf8();
+        final batchIDPtr = _currentBatchID!.toNativeUtf8();
+        resultPtr = cancelBatch(assetNamePtr, batchIDPtr);
+        malloc.free(assetNamePtr);
+        malloc.free(batchIDPtr);
+      } else {
+        final cancelBatch = dylib
+            .lookupFunction<CancelBatchSkillScanC, CancelBatchSkillScanDart>(
+              'CancelBatchSkillScan',
+            );
+        final batchIDPtr = _currentBatchID!.toNativeUtf8();
+        resultPtr = cancelBatch(batchIDPtr);
+        malloc.free(batchIDPtr);
+      }
       freeString(resultPtr);
     } catch (e) {
       appLogger.error('[SkillSecurityAnalyzer] Cancel batch scan error', e);
     } finally {
       _pollTimer?.cancel();
       _currentBatchID = null;
+      _currentAssetName = null;
     }
   }
 

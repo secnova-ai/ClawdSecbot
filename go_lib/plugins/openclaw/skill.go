@@ -2,6 +2,7 @@ package openclaw
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -18,10 +19,60 @@ func getSkillsDirs() ([]string, error) {
 	}
 
 	configDir := filepath.Dir(configPath)
-	return []string{
+	config, _, err := loadConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	dirs := []string{
 		filepath.Join(configDir, "skills"),
 		filepath.Join(configDir, "workspace", "skills"),
-	}, nil
+	}
+
+	if workspace := strings.TrimSpace(config.Agents.Defaults.Workspace); workspace != "" {
+		dirs = append(dirs, filepath.Join(expandSkillDir(workspace), "skills"))
+	}
+	for _, extraDir := range config.Skills.Load.ExtraDirs {
+		if expanded := strings.TrimSpace(expandSkillDir(extraDir)); expanded != "" {
+			dirs = append(dirs, expanded)
+		}
+	}
+
+	seen := make(map[string]struct{})
+	result := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			absDir = dir
+		}
+		key := strings.ToLower(strings.TrimSpace(absDir))
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, absDir)
+	}
+
+	return result, nil
+}
+
+func expandSkillDir(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "~\\") {
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(homeDir, path[2:])
+		}
+	}
+	return os.ExpandEnv(path)
 }
 
 // isWithinSkillsDirs checks whether a path is inside a valid skill directory

@@ -755,8 +755,11 @@ class _MainPageState extends State<MainPage>
           }
         }
 
+        final normalizedAssetName = assetName.toLowerCase();
         final requiresExplicitRestore =
-            assetName.toLowerCase() == 'openclaw' || !wasRunning;
+            normalizedAssetName == 'openclaw' ||
+            normalizedAssetName == 'qclaw' ||
+            !wasRunning;
         if (requiresExplicitRestore) {
           final restoreResult = await pluginService.restoreBotDefaultState(
             assetName,
@@ -1066,7 +1069,8 @@ class _MainPageState extends State<MainPage>
 
     final l10n = AppLocalizations.of(context)!;
 
-    final beforeAssetIDs = _result?.assets.map((a) => a.id).toSet() ?? <String>{};
+    final beforeAssetIDs =
+        _result?.assets.map((a) => a.id).toSet() ?? <String>{};
 
     setState(() {
       _scanState = ScanState.scanning;
@@ -1109,10 +1113,7 @@ class _MainPageState extends State<MainPage>
 
       if (!skipReconcile) {
         try {
-          await _reconcileAssetsAfterScan(
-            beforeAssetIDs,
-            result.assets,
-          );
+          await _reconcileAssetsAfterScan(beforeAssetIDs, result.assets);
         } catch (e) {
           appLogger.error('[MainPage] Reconcile failed unexpectedly: $e');
         }
@@ -1150,11 +1151,15 @@ class _MainPageState extends State<MainPage>
     final afterAssetNames = afterAssets.map((a) => a.name).toSet();
 
     final idDisappeared = _protectedAssetIDs
-        .where((id) => beforeAssetIDs.contains(id) && !afterAssetIDs.contains(id))
+        .where(
+          (id) => beforeAssetIDs.contains(id) && !afterAssetIDs.contains(id),
+        )
         .toList();
 
     if (idDisappeared.isEmpty) {
-      appLogger.info('[MainPage] Reconcile: all protected assets still present');
+      appLogger.info(
+        '[MainPage] Reconcile: all protected assets still present',
+      );
       return;
     }
 
@@ -1199,6 +1204,23 @@ class _MainPageState extends State<MainPage>
       } catch (e) {
         appLogger.error(
           '[MainPage] Reconcile: failed to stop proxy for $label: $e',
+        );
+      }
+
+      try {
+        final restoreResult = await PluginService().restoreBotDefaultState(
+          assetName,
+          assetID,
+        );
+        if (restoreResult['success'] != true) {
+          appLogger.warning(
+            '[MainPage] Reconcile: restore bot default state failed for $label: '
+            '${restoreResult['error']}',
+          );
+        }
+      } catch (e) {
+        appLogger.warning(
+          '[MainPage] Reconcile: explicit restore failed for $label: $e',
         );
       }
 
@@ -1667,16 +1689,16 @@ class _MainPageState extends State<MainPage>
       }
     } else if (result is Map && result['action'] == 'skill_scan') {
       if (mounted) {
-        _showSkillScanDialog();
+        _showSkillScanDialog(result['asset_name'] as String?);
       }
     }
   }
 
-  void _showSkillScanDialog() async {
+  void _showSkillScanDialog([String? assetName]) async {
     await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const SkillScanDialog(),
+      builder: (context) => SkillScanDialog(assetName: assetName),
     );
 
     if (mounted) {
@@ -1740,17 +1762,14 @@ class _MainPageState extends State<MainPage>
               child: Stack(
                 children: [
                   AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 520),
-                    reverseDuration: const Duration(milliseconds: 360),
-                    switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeInCubic,
+                    duration: const Duration(milliseconds: 680),
+                    reverseDuration: const Duration(milliseconds: 520),
+                    switchInCurve: Curves.easeInOutCubicEmphasized,
+                    switchOutCurve: Curves.easeInOutCubic,
                     layoutBuilder: (currentChild, previousChildren) {
                       return Stack(
                         alignment: Alignment.topCenter,
-                        children: [
-                          ...previousChildren,
-                          ?currentChild,
-                        ],
+                        children: [...previousChildren, ?currentChild],
                       );
                     },
                     transitionBuilder: _buildContentTransition,
@@ -2036,15 +2055,15 @@ class _MainPageState extends State<MainPage>
   Widget _buildContentTransition(Widget child, Animation<double> animation) {
     final fadeAnimation = CurvedAnimation(
       parent: animation,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
+      curve: const Interval(0.08, 1, curve: Curves.easeOutCubic),
+      reverseCurve: const Interval(0, 0.9, curve: Curves.easeInCubic),
     );
     final slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.03),
+      begin: const Offset(0, 0.018),
       end: Offset.zero,
     ).animate(fadeAnimation);
     final scaleAnimation = Tween<double>(
-      begin: 0.985,
+      begin: 0.992,
       end: 1,
     ).animate(fadeAnimation);
 
@@ -2269,8 +2288,7 @@ class _MainPageState extends State<MainPage>
       onRescan: _resetScan,
       onViewSkillScanResults: _showSkillScanResultsDialog,
       onShowProtectionConfig: _showProtectionConfigDialog,
-      onShowProtectionMonitor: (asset) =>
-          _showProtectionMonitorResolved(asset),
+      onShowProtectionMonitor: (asset) => _showProtectionMonitorResolved(asset),
       onShowMitigation: (risk) => _showMitigationDialog(context, risk),
     );
   }

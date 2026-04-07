@@ -382,43 +382,64 @@ class ScanResultView extends StatelessWidget {
   }
 
   String _getRiskTitle(RiskInfo risk, AppLocalizations l10n) {
+    late final String baseTitle;
     switch (risk.id) {
       case 'riskNonLoopbackBinding':
       case 'gateway_bind_unsafe':
-        return l10n.riskNonLoopbackBinding;
+        baseTitle = l10n.riskNonLoopbackBinding;
+        break;
       case 'riskNoAuth':
       case 'gateway_auth_disabled':
-        return l10n.riskNoAuth;
+        baseTitle = l10n.riskNoAuth;
+        break;
       case 'riskWeakPassword':
       case 'gateway_weak_password':
-        return l10n.riskWeakPassword;
+        baseTitle = l10n.riskWeakPassword;
+        break;
       case 'riskAllPluginsAllowed':
-        return l10n.riskAllPluginsAllowed;
+        baseTitle = l10n.riskAllPluginsAllowed;
+        break;
       case 'riskControlUiEnabled':
-        return l10n.riskControlUiEnabled;
+        baseTitle = l10n.riskControlUiEnabled;
+        break;
       case 'riskRunningAsRoot':
-        return l10n.riskRunningAsRoot;
+        baseTitle = l10n.riskRunningAsRoot;
+        break;
       case 'config_perm_unsafe':
-        return l10n.riskConfigPermUnsafe;
+        baseTitle = l10n.riskConfigPermUnsafe;
+        break;
       case 'config_dir_perm_unsafe':
-        return l10n.riskConfigDirPermUnsafe;
+        baseTitle = l10n.riskConfigDirPermUnsafe;
+        break;
       case 'sandbox_disabled_default':
-        return l10n.riskSandboxDisabledDefault;
+        baseTitle = l10n.riskSandboxDisabledDefault;
+        break;
       case 'sandbox_disabled_agent':
-        return l10n.riskSandboxDisabledAgent;
+        baseTitle = l10n.riskSandboxDisabledAgent;
+        break;
       case 'logging_redact_off':
-        return l10n.riskLoggingRedactOff;
+        baseTitle = l10n.riskLoggingRedactOff;
+        break;
       case 'log_dir_perm_unsafe':
-        return l10n.riskLogDirPermUnsafe;
+        baseTitle = l10n.riskLogDirPermUnsafe;
+        break;
       case 'plaintext_secrets':
-        return l10n.riskPlaintextSecrets;
+        baseTitle = l10n.riskPlaintextSecrets;
+        break;
       case 'skills_not_scanned':
-        return l10n.riskSkillsNotScanned;
+        baseTitle = l10n.riskSkillsNotScanned;
+        break;
       case 'openclaw_1click_rce_vulnerability':
-        return l10n.riskOneClickRce;
+        baseTitle = l10n.riskOneClickRce;
+        break;
       default:
-        return risk.title;
+        baseTitle = risk.title;
     }
+    final assetName = risk.sourcePlugin?.trim() ?? '';
+    if (assetName.isNotEmpty) {
+      return '$assetName $baseTitle';
+    }
+    return baseTitle;
   }
 
   String _getRiskDesc(RiskInfo risk, AppLocalizations l10n) {
@@ -795,12 +816,6 @@ class _AssetCardState extends State<_AssetCard> {
                           asset.serviceName,
                           Colors.white70,
                         ),
-                      if (asset.processPaths.isNotEmpty)
-                        _buildConfigRow(
-                          l10n.processPaths,
-                          asset.processPaths.join(', '),
-                          Colors.white70,
-                        ),
                       // Display structured config sections from the plugin
                       if (asset.displaySections.isNotEmpty) ...[
                         const SizedBox(height: 8),
@@ -827,14 +842,15 @@ class _AssetCardState extends State<_AssetCard> {
 
   /// 将资产内部名称映射为用户友好的展示名称
   String _getAssetDisplayName(String name) {
-    const displayNames = {
-      'dintalclaw': '政务龙虾',
-    };
+    const displayNames = {'dintalclaw': '政务龙虾'};
     return displayNames[name] ?? name;
   }
 
   /// 根据资产状态生成折叠态右上角类型徽章文案
   String _buildAssetTypeBadgeText(Asset asset, bool isZh) {
+    if (asset.type == 'Service') {
+      return isZh ? '服务' : 'Service';
+    }
     if (asset.name != 'dintalclaw') {
       return asset.type;
     }
@@ -955,6 +971,26 @@ class _AssetCardState extends State<_AssetCard> {
   /// 将插件返回的英文标题/标签翻译为中文
   String _localizeText(String text, bool isZh) {
     if (!isZh) return text;
+    switch (text) {
+      case 'Gateway':
+        return '网关';
+      case 'Runtime':
+        return '运行时';
+      case 'Logs':
+        return '日志';
+      case 'User Skills':
+        return '用户技能';
+      case 'Built-in Skills':
+        return '内置技能';
+      case 'State':
+        return '状态文件';
+      case 'Auth Gateway':
+        return '认证网关';
+      case 'Node Binary':
+        return '主程序';
+      case 'Main':
+        return '主进程';
+    }
     const zhMap = {
       // Section titles
       'Gateway Configuration': '网关配置',
@@ -1235,14 +1271,15 @@ class _AssetCardState extends State<_AssetCard> {
               : SystemMouseCursors.basic,
           child: GestureDetector(
             onTap: canProtect
-                ? () =>
-                      widget.onShowProtectionConfig(asset, isEditMode: false)
+                ? () => widget.onShowProtectionConfig(asset, isEditMode: false)
                 : null,
             child: Opacity(
               opacity: canProtect ? 1.0 : 0.4,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
                     colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
