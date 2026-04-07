@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 )
 
@@ -21,7 +22,7 @@ func KillProcess(pid int) error {
 	}
 
 	// Windows does not support SIGTERM; use taskkill for graceful stop first
-	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid))
+	cmd := cmdutil.Command("taskkill", "/PID", strconv.Itoa(pid))
 	if err := cmd.Run(); err != nil {
 		logging.Warning("taskkill graceful failed for PID %d: %v, forcing kill", pid, err)
 		return process.Kill()
@@ -38,7 +39,7 @@ func KillProcess(pid int) error {
 
 // IsProcessRunning checks if a process is still running on Windows
 func IsProcessRunning(pid int) bool {
-	cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH")
+	cmd := cmdutil.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH")
 	output, err := cmd.Output()
 	if err != nil {
 		return false
@@ -49,7 +50,7 @@ func IsProcessRunning(pid int) bool {
 // FindProcessesByName finds all processes matching a name/path pattern on Windows
 func FindProcessesByName(pattern string) ([]int, error) {
 	// Use tasklist and filter by image name or full command line via WMIC
-	cmd := exec.Command("wmic", "process", "where",
+	cmd := cmdutil.Command("wmic", "process", "where",
 		fmt.Sprintf("CommandLine like '%%%s%%'", pattern),
 		"get", "ProcessId", "/format:list")
 	output, err := cmd.Output()
@@ -77,7 +78,7 @@ func FindProcessesByName(pattern string) ([]int, error) {
 
 // findProcessesByTasklist is a fallback for finding processes
 func findProcessesByTasklist(pattern string) ([]int, error) {
-	cmd := exec.Command("tasklist", "/FO", "CSV", "/NH")
+	cmd := cmdutil.Command("tasklist", "/FO", "CSV", "/NH")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -111,7 +112,7 @@ func findProcessesByTasklist(pattern string) ([]int, error) {
 
 // GetProcessInfo returns information about a process on Windows
 func GetProcessInfo(pid int) (string, error) {
-	cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/V", "/FO", "LIST")
+	cmd := cmdutil.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/V", "/FO", "LIST")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -121,11 +122,11 @@ func GetProcessInfo(pid int) (string, error) {
 
 // gracefulTerminate sends a termination signal on Windows (uses taskkill)
 func gracefulTerminate(process *os.Process) error {
-	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(process.Pid))
+	cmd := cmdutil.Command("taskkill", "/PID", strconv.Itoa(process.Pid))
 	return cmd.Run()
 }
 
-// setSysProcAttr is a no-op on Windows (no process group concept like Unix)
+// setSysProcAttr keeps child processes hidden on Windows.
 func setSysProcAttr(cmd *exec.Cmd) {
-	// Windows does not support Setpgid
+	cmdutil.Prepare(cmd)
 }

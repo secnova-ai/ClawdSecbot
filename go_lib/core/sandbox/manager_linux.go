@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 )
 
@@ -71,7 +72,7 @@ func (m *SandboxManager) buildSandboxCommand() (*exec.Cmd, string, error) {
 	logPath := filepath.Join(logDir, fmt.Sprintf("botsec_%s_hook.log", sanitizeAssetName(m.config.AssetName)))
 
 	// Build: openclaw <gatewayArgs...> with LD_PRELOAD environment variables
-	cmd := exec.Command("openclaw", m.gatewayArgs...)
+	cmd := cmdutil.BackgroundCommand("openclaw", m.gatewayArgs...)
 	cmd.Env = append(os.Environ(), m.gatewayEnv...)
 
 	cmd.Env = append(cmd.Env,
