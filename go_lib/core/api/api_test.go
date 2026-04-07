@@ -360,6 +360,81 @@ func TestGetStatus_WrongMethod(t *testing.T) {
 	}
 }
 
+func TestAppShutdown_DefaultRestoreConfigFalse(t *testing.T) {
+	server := NewAPIServer()
+	server.token = "test-token"
+	shutdownCh := make(chan AppShutdownOptions, 1)
+	server.SetShutdownHandler(func(options AppShutdownOptions) error {
+		shutdownCh <- options
+		return nil
+	})
+
+	req := newAuthRequest("POST", "/api/v1/app/shutdown", "test-token", nil)
+	rec := httptest.NewRecorder()
+	server.setupRoutes().ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Code, http.StatusOK)
+
+	select {
+	case options := <-shutdownCh:
+		if options.RestoreConfig {
+			t.Fatal("restoreConfig should default to false")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected shutdown handler to be called")
+	}
+}
+
+func TestAppShutdown_ExplicitRestoreConfigTrue(t *testing.T) {
+	server := NewAPIServer()
+	server.token = "test-token"
+	shutdownCh := make(chan AppShutdownOptions, 1)
+	server.SetShutdownHandler(func(options AppShutdownOptions) error {
+		shutdownCh <- options
+		return nil
+	})
+
+	req := newAuthRequest(
+		"POST",
+		"/api/v1/app/shutdown",
+		"test-token",
+		bytes.NewBufferString(`{"restoreConfig":true}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.setupRoutes().ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Code, http.StatusOK)
+
+	select {
+	case options := <-shutdownCh:
+		if !options.RestoreConfig {
+			t.Fatal("restoreConfig should be true")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected shutdown handler to be called")
+	}
+}
+
+func TestAppShutdown_InvalidJSON(t *testing.T) {
+	server := NewAPIServer()
+	server.token = "test-token"
+
+	req := newAuthRequest(
+		"POST",
+		"/api/v1/app/shutdown",
+		"test-token",
+		bytes.NewBufferString(`{"restoreConfig":`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.setupRoutes().ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Code, http.StatusBadRequest)
+	apiResp := parseAPIResponse(t, rec.Body)
+	assertErrorCode(t, apiResp, CodeInvalidParam)
+}
+
 // ========== Export Control Tests ==========
 
 func TestExportStop_NotRunning(t *testing.T) {

@@ -31,6 +31,14 @@ type ExportService interface {
 	Stop() error
 }
 
+// AppShutdownOptions controls how the host app should exit.
+type AppShutdownOptions struct {
+	RestoreConfig bool `json:"restoreConfig"`
+}
+
+// AppShutdownHandler requests the host process to exit.
+type AppShutdownHandler func(AppShutdownOptions) error
+
 // DiscoveryInfo represents the API discovery file content
 type DiscoveryInfo struct {
 	PID       int    `json:"pid"`
@@ -46,6 +54,7 @@ type APIServer struct {
 	token         string
 	port          int
 	exportService ExportService
+	shutdownFn    AppShutdownHandler
 	mu            sync.Mutex
 	running       bool
 }
@@ -181,6 +190,25 @@ func (s *APIServer) SetExportService(svc ExportService) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.exportService = svc
+}
+
+// SetShutdownHandler sets the host application shutdown callback.
+func (s *APIServer) SetShutdownHandler(handler AppShutdownHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.shutdownFn = handler
+}
+
+func (s *APIServer) requestAppShutdown(options AppShutdownOptions) error {
+	s.mu.Lock()
+	handler := s.shutdownFn
+	s.mu.Unlock()
+
+	if handler == nil {
+		return fmt.Errorf("app shutdown handler is not registered")
+	}
+
+	return handler(options)
 }
 
 // AppendAuditLog appends an audit entry to export/audit.jsonl when export service is active.

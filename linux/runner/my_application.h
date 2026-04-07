@@ -17,5 +17,6 @@ G_DECLARE_FINAL_TYPE(MyApplication,
  * Returns: a new #MyApplication.
  */
 MyApplication* my_application_new();
+void my_application_present_main_window(MyApplication* application);
 
 #endif  // FLUTTER_MY_APPLICATION_H_

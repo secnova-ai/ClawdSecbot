@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "flutter_window.h"
+#include "single_instance_manager.h"
 #include "utils.h"
 
 namespace {
@@ -52,6 +53,23 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();
+  const bool is_multi_window =
+      !command_line_arguments.empty() &&
+      command_line_arguments.front() == "multi_window";
+
+  SingleInstanceManager single_instance;
+  if (!is_multi_window) {
+    if (!single_instance.Initialize()) {
+      MessageBoxW(nullptr, L"Failed to initialize single-instance manager.",
+                  L"Startup Error",
+                  MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST);
+      return EXIT_FAILURE;
+    }
+    if (!single_instance.IsPrimaryInstance()) {
+      single_instance.NotifyPrimaryInstance();
+      return EXIT_SUCCESS;
+    }
+  }
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
@@ -60,6 +78,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Size size(600, 780);
   if (!window.Create(L"bot_sec_manager", origin, size)) {
     return EXIT_FAILURE;
+  }
+  if (!is_multi_window) {
+    single_instance.AttachMainWindow(window.GetHandle());
   }
   window.SetQuitOnClose(true);
 
@@ -70,5 +91,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   ::CoUninitialize();
+  if (!is_multi_window) {
+    single_instance.Shutdown();
+  }
   return EXIT_SUCCESS;
 }
