@@ -2,10 +2,10 @@ package core
 
 import (
 	"bufio"
-	"os/exec"
 	"strconv"
 	"strings"
 
+	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 )
 
@@ -13,7 +13,7 @@ import (
 func (c *platformCollector) getOpenPorts() ([]int, error) {
 	logging.Debug("开始执行 ss 命令获取开放端口...")
 	// ss -tlnp: TCP listening, numeric, show process
-	cmd := exec.Command("ss", "-tlnp")
+	cmd := cmdutil.Command("ss", "-tlnp")
 	output, err := cmd.Output()
 	if err != nil {
 		logging.Error("执行 ss 命令失败: %v", err)
@@ -70,7 +70,7 @@ func extractPortFromAddr(addr string) int {
 func (c *platformCollector) getRunningProcesses() ([]SystemProcess, error) {
 	logging.Debug("开始执行 ps 命令获取运行进程...")
 	// ps -eo pid,comm,args (Linux 和 macOS 通用)
-	cmd := exec.Command("ps", "-eo", "pid,comm,args")
+	cmd := cmdutil.Command("ps", "-eo", "pid,comm,args")
 	output, err := cmd.Output()
 	if err != nil {
 		logging.Error("执行 ps 命令失败: %v", err)
@@ -113,7 +113,7 @@ func (c *platformCollector) getRunningProcesses() ([]SystemProcess, error) {
 func (c *platformCollector) getServices() ([]string, error) {
 	logging.Debug("开始执行 systemctl 命令获取用户级服务列表...")
 	// systemctl --user list-units --type=service --all --no-pager --no-legend
-	cmd := exec.Command("systemctl", "--user", "list-units", "--type=service", "--all", "--no-pager", "--no-legend")
+	cmd := cmdutil.Command("systemctl", "--user", "list-units", "--type=service", "--all", "--no-pager", "--no-legend")
 	output, err := cmd.Output()
 	if err != nil {
 		logging.Error("执行 systemctl 命令失败: %v", err)

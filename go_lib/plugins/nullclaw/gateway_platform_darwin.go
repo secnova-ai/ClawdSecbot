@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go_lib/core"
+	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 	"go_lib/core/sandbox"
 )
@@ -200,7 +201,7 @@ func runNullclawGatewayCommand(binaryPath string, args []string, homeDir string)
 	var lastErr error
 	var lastOutput string
 	for _, sh := range shells {
-		cmd := exec.Command(sh.bin, sh.args...)
+		cmd := cmdutil.Command(sh.bin, sh.args...)
 		if homeDir != "" {
 			cmd.Env = append(os.Environ(), "HOME="+homeDir)
 		}
@@ -347,7 +348,7 @@ func unloadExistingNullclawLaunchAgent(homeDir string) {
 		if strings.Contains(name, "nullclaw") && strings.HasSuffix(name, ".plist") {
 			plistPath := filepath.Join(launchAgentsDir, entry.Name())
 			logging.Info("[GatewayManager] Unloading existing LaunchAgent: %s", plistPath)
-			cmd := exec.Command("/bin/launchctl", "unload", plistPath)
+			cmd := cmdutil.Command("/bin/launchctl", "unload", plistPath)
 			cmd.Env = env
 			if out, err := cmd.CombinedOutput(); err != nil {
 				logging.Info("[GatewayManager] launchctl unload (ignored): %v, output: %s", err, strings.TrimSpace(string(out)))
@@ -365,11 +366,11 @@ func reloadLaunchAgent(plistPath string, homeDir string) error {
 	}
 	env = append(env, "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
 
-	unloadCmd := exec.Command("/bin/launchctl", "unload", plistPath)
+	unloadCmd := cmdutil.Command("/bin/launchctl", "unload", plistPath)
 	unloadCmd.Env = env
 	_ = unloadCmd.Run()
 
-	cmd := exec.Command("/bin/launchctl", "load", plistPath)
+	cmd := cmdutil.Command("/bin/launchctl", "load", plistPath)
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {

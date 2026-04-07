@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 
 	"go_lib/core"
+	"go_lib/core/cmdutil"
 )
 
 // checkPermissions validates file and directory permissions
@@ -309,7 +309,7 @@ func checkOneClickRCEVulnerability(risks *[]core.Risk) {
 // getOpenClawVersion tries to get the OpenClaw version
 func getOpenClawVersion() string {
 	// Try to execute: openclaw --version
-	cmd := exec.Command("openclaw", "--version")
+	cmd := cmdutil.Command("openclaw", "--version")
 	output, err := cmd.Output()
 	if err != nil {
 		// Command failed, return empty string

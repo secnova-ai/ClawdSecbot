@@ -85,10 +85,7 @@ class ApiService {
   Future<bool> _isProcessAlive(int pid) async {
     try {
       if (Platform.isWindows) {
-        final result = await Process.run('tasklist', [
-          '/FI',
-          'PID eq $pid',
-        ], runInShell: true);
+        final result = await Process.run('tasklist', ['/FI', 'PID eq $pid']);
         if (result.exitCode != 0) {
           return false;
         }
@@ -96,10 +93,7 @@ class ApiService {
         return output.contains(' $pid ') || output.contains('\n$pid ');
       }
 
-      final result = await Process.run('kill', [
-        '-0',
-        pid.toString(),
-      ], runInShell: true);
+      final result = await Process.run('kill', ['-0', pid.toString()]);
       return result.exitCode == 0;
     } catch (e) {
       appLogger.debug('[ApiService] Process check failed: $e');

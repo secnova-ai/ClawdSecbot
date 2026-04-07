@@ -2,17 +2,17 @@ package core
 
 import (
 	"bufio"
-	"os/exec"
 	"strconv"
 	"strings"
 
+	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 )
 
 // getOpenPorts uses netstat to get open TCP listening ports on Windows
 func (c *platformCollector) getOpenPorts() ([]int, error) {
 	logging.Debug("Running netstat to get open ports...")
-	cmd := exec.Command("netstat", "-ano", "-p", "TCP")
+	cmd := cmdutil.Command("netstat", "-ano", "-p", "TCP")
 	output, err := cmd.Output()
 	if err != nil {
 		logging.Error("netstat command failed: %v", err)
@@ -64,7 +64,7 @@ func (c *platformCollector) getOpenPorts() ([]int, error) {
 func (c *platformCollector) getRunningProcesses() ([]SystemProcess, error) {
 	logging.Debug("Running tasklist to get processes...")
 	// /FO CSV /NH: CSV format, no header
-	cmd := exec.Command("tasklist", "/FO", "CSV", "/NH")
+	cmd := cmdutil.Command("tasklist", "/FO", "CSV", "/NH")
 	output, err := cmd.Output()
 	if err != nil {
 		logging.Error("tasklist command failed: %v", err)
@@ -108,7 +108,7 @@ func (c *platformCollector) getRunningProcesses() ([]SystemProcess, error) {
 // getServices uses sc query to get Windows services
 func (c *platformCollector) getServices() ([]string, error) {
 	logging.Debug("Running sc query to get services...")
-	cmd := exec.Command("sc", "query", "type=", "service", "state=", "all")
+	cmd := cmdutil.Command("sc", "query", "type=", "service", "state=", "all")
 	output, err := cmd.Output()
 	if err != nil {
 		logging.Error("sc query command failed: %v", err)

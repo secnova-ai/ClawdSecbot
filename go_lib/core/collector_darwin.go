@@ -2,10 +2,10 @@ package core
 
 import (
 	"bufio"
-	"os/exec"
 	"strconv"
 	"strings"
 
+	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 )
 
@@ -13,7 +13,7 @@ import (
 func (c *platformCollector) getOpenPorts() ([]int, error) {
 	logging.Debug("开始执行 lsof 命令获取开放端口...")
 	// lsof -iTCP -sTCP:LISTEN -P -n
-	cmd := exec.Command("lsof", "-iTCP", "-sTCP:LISTEN", "-P", "-n")
+	cmd := cmdutil.Command("lsof", "-iTCP", "-sTCP:LISTEN", "-P", "-n")
 	output, err := cmd.Output()
 	if err != nil {
 		logging.Error("执行 lsof 命令失败: %v", err)
@@ -57,7 +57,7 @@ func (c *platformCollector) getOpenPorts() ([]int, error) {
 func (c *platformCollector) getRunningProcesses() ([]SystemProcess, error) {
 	logging.Debug("开始执行 ps 命令获取运行进程...")
 	// ps -eo pid,comm,args
-	cmd := exec.Command("ps", "-eo", "pid,comm,args")
+	cmd := cmdutil.Command("ps", "-eo", "pid,comm,args")
 	output, err := cmd.Output()
 	if err != nil {
 		logging.Error("执行 ps 命令失败: %v", err)
@@ -101,7 +101,7 @@ func (c *platformCollector) getRunningProcesses() ([]SystemProcess, error) {
 func (c *platformCollector) getServices() ([]string, error) {
 	logging.Debug("开始执行 launchctl 命令获取服务列表...")
 	// launchctl list
-	cmd := exec.Command("launchctl", "list")
+	cmd := cmdutil.Command("launchctl", "list")
 	output, err := cmd.Output()
 	if err != nil {
 		logging.Error("执行 launchctl 命令失败: %v", err)

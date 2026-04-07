@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 )
 
@@ -74,17 +75,17 @@ func (m *SandboxManager) buildSandboxCommand() (*exec.Cmd, string, error) {
 	if m.config.GatewayBinaryPath != "" {
 		bin = m.config.GatewayBinaryPath
 	}
-	cmd := exec.Command(bin, m.gatewayArgs...)
+	cmd := cmdutil.BackgroundCommand(bin, m.gatewayArgs...)
 	cmd.Env = append(os.Environ(), m.gatewayEnv...)
 	cmd.Env = append(cmd.Env,
 		fmt.Sprintf("SANDBOX_POLICY_FILE=%s", policyPath),
 		fmt.Sprintf("SANDBOX_LOG_FILE=%s", logPath),
 		fmt.Sprintf("SANDBOX_HOOK_DLL=%s", hookDLLPath),
 	)
-
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: createSuspended,
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
+	cmd.SysProcAttr.CreationFlags |= createSuspended
 
 	return cmd, policyPath, nil
 }

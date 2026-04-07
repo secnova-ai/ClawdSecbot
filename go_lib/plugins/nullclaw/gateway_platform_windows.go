@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"go_lib/core"
+	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 	"go_lib/core/sandbox"
 )
@@ -261,7 +261,7 @@ func runNullclawGatewayCommand(binaryPath string, args []string, homeDir string)
 	}
 
 	cmdArgs := append([]string{"service"}, args...)
-	cmd := exec.Command(binaryPath, cmdArgs...)
+	cmd := cmdutil.Command(binaryPath, cmdArgs...)
 	if homeDir != "" {
 		cmd.Env = append(os.Environ(), "USERPROFILE="+homeDir)
 	}
@@ -275,7 +275,7 @@ func runNullclawGatewayCommand(binaryPath string, args []string, homeDir string)
 	for _, a := range cmdArgs {
 		fullCmd += " " + a
 	}
-	cmdExe := exec.Command("cmd.exe", "/C", fullCmd)
+	cmdExe := cmdutil.Command("cmd.exe", "/C", fullCmd)
 	if homeDir != "" {
 		cmdExe.Env = append(os.Environ(), "USERPROFILE="+homeDir)
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go_lib/core"
+	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 	"go_lib/core/sandbox"
 )
@@ -214,7 +215,7 @@ func runOpenclawGatewayCommand(binaryPath string, args []string, homeDir string)
 	}
 
 	cmdArgs := append([]string{"gateway"}, args...)
-	cmd := exec.Command(binaryPath, cmdArgs...)
+	cmd := cmdutil.Command(binaryPath, cmdArgs...)
 	if homeDir != "" {
 		cmd.Env = append(os.Environ(), "HOME="+homeDir)
 	}
@@ -228,7 +229,7 @@ func runOpenclawGatewayCommand(binaryPath string, args []string, homeDir string)
 	for _, a := range cmdArgs {
 		fullCmd += " " + a
 	}
-	bashCmd := exec.Command("/bin/bash", "-l", "-c", fullCmd)
+	bashCmd := cmdutil.Command("/bin/bash", "-l", "-c", fullCmd)
 	if homeDir != "" {
 		bashCmd.Env = append(os.Environ(), "HOME="+homeDir)
 	}
@@ -288,7 +289,7 @@ func writeGatewayPolicyFile(policyDir string, assetName string, cfg sandbox.Sand
 
 // runSystemctl 执行 systemctl --user 命令
 func runSystemctl(action string, service string) error {
-	cmd := exec.Command("systemctl", "--user", action, service)
+	cmd := cmdutil.Command("systemctl", "--user", action, service)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		logging.Warning("[GatewayManager] systemctl --user %s %s failed: %v, output: %s",
@@ -474,7 +475,7 @@ func removeSandboxFromUnit(unitPath string) (bool, error) {
 
 // reloadSystemdUnit 重新加载 systemd 配置并重启 openclaw gateway 服务
 func reloadSystemdUnit() {
-	cmd := exec.Command("systemctl", "--user", "daemon-reload")
+	cmd := cmdutil.Command("systemctl", "--user", "daemon-reload")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		logging.Warning("[GatewayManager] systemctl daemon-reload failed: %v, output: %s", err, strings.TrimSpace(string(out)))
 	}

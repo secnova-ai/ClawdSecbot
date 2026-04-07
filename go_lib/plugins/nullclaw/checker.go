@@ -3,13 +3,13 @@ package nullclaw
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 
 	"go_lib/core"
+	"go_lib/core/cmdutil"
 )
 
 // checkPermissions validates file and directory permissions.
@@ -292,7 +292,7 @@ func checkOneClickRCEVulnerability(risks *[]core.Risk) {
 
 // getOpenClawVersion tries to get nullclaw version.
 func getOpenClawVersion() string {
-	cmd := exec.Command("nullclaw", "--version")
+	cmd := cmdutil.Command("nullclaw", "--version")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
