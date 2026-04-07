@@ -8,12 +8,16 @@
 
 #include "win32_window.h"
 
+constexpr UINT WM_SHOW_EXISTING_INSTANCE = WM_APP + 101;
+
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
  public:
   // Creates a new FlutterWindow hosting a Flutter view running |project|.
   explicit FlutterWindow(const flutter::DartProject& project);
   virtual ~FlutterWindow();
+
+  void ShowAndFocusMainWindow();
 
  protected:
   // Win32Window:

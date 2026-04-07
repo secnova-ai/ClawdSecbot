@@ -5,9 +5,11 @@ package main
 
 // DartCallback Dart 消息回调函数类型
 typedef void (*DartCallback)(const char* message);
+typedef void (*DartAppShutdownCallback)(const char* message);
 
 // 存储 Dart 回调指针
 static DartCallback dartCallback = NULL;
+static DartAppShutdownCallback dartAppShutdownCallback = NULL;
 
 // setDartCallback 设置 Dart 回调
 static inline void setDartCallback(DartCallback cb) {
@@ -19,6 +21,14 @@ static inline void clearDartCallback() {
     dartCallback = NULL;
 }
 
+static inline void setDartAppShutdownCallback(DartAppShutdownCallback cb) {
+    dartAppShutdownCallback = cb;
+}
+
+static inline void clearDartAppShutdownCallback() {
+    dartAppShutdownCallback = NULL;
+}
+
 // isDartCallbackSet 检查回调是否已设置
 static inline int isDartCallbackSet() {
     return dartCallback != NULL ? 1 : 0;
@@ -28,6 +38,12 @@ static inline int isDartCallbackSet() {
 static inline void invokeDartCallback(const char* msg) {
     if (dartCallback != NULL) {
         dartCallback(msg);
+    }
+}
+
+static inline void invokeDartAppShutdownCallback(const char* msg) {
+    if (dartAppShutdownCallback != NULL) {
+        dartAppShutdownCallback(msg);
     }
 }
 */
@@ -763,6 +779,11 @@ var (
 	apiServerLock sync.Mutex
 )
 
+var (
+	appShutdownCallbackMu sync.Mutex
+	appShutdownCallbackOn bool
+)
+
 func configureRealtimeExportHooks() {
 	proxy.SetAuditLogCallback(func(log proxy.AuditLog) {
 		appendAuditLogToExport(log)
@@ -1013,6 +1034,9 @@ func StartAPIServerFFI(configJSON *C.char) *C.char {
 
 	// 创建并启动 API Server
 	apiServer = api.NewAPIServer()
+	apiServer.SetShutdownHandler(func(options api.AppShutdownOptions) error {
+		return triggerAppShutdown(options)
+	})
 	if err := apiServer.Start(port); err != nil {
 		apiServer = nil
 		return jsonToCString(map[string]interface{}{
@@ -1057,6 +1081,43 @@ func StopAPIServerFFI() *C.char {
 }
 
 // ==================== 辅助函数 FFI ====================
+
+func triggerAppShutdown(options api.AppShutdownOptions) error {
+	appShutdownCallbackMu.Lock()
+	defer appShutdownCallbackMu.Unlock()
+
+	if !appShutdownCallbackOn {
+		return fmt.Errorf("app shutdown callback is not registered")
+	}
+
+	payload, err := json.Marshal(options)
+	if err != nil {
+		return fmt.Errorf("marshal shutdown payload: %w", err)
+	}
+
+	C.invokeDartAppShutdownCallback(C.CString(string(payload)))
+	return nil
+}
+
+//export RegisterAppShutdownCallback
+func RegisterAppShutdownCallback(callback C.DartAppShutdownCallback) *C.char {
+	appShutdownCallbackMu.Lock()
+	defer appShutdownCallbackMu.Unlock()
+
+	C.setDartAppShutdownCallback(callback)
+	appShutdownCallbackOn = true
+	return jsonToCString(map[string]interface{}{"success": true, "mode": "callback"})
+}
+
+//export UnregisterAppShutdownCallback
+func UnregisterAppShutdownCallback() *C.char {
+	appShutdownCallbackMu.Lock()
+	defer appShutdownCallbackMu.Unlock()
+
+	appShutdownCallbackOn = false
+	C.clearDartAppShutdownCallback()
+	return jsonToCString(map[string]interface{}{"success": true})
+}
 
 //export FreeString
 func FreeString(str *C.char) {
