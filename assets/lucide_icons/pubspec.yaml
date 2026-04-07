@@ -1,0 +1,13 @@
+name: lucide_icons
+description: Local vendored Lucide icon package for desktop packaging stability.
+version: 0.257.0
+homepage: https://lucide.dev
+repository: https://github.com/lucide-icons/lucide
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter

@@ -9,7 +9,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # followed by an optional build number separated by a +.
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.1+2
+version: 1.0.1+202604071454
 
 environment:
   sdk: ^3.10.7
@@ -34,7 +34,8 @@ dependencies:
   animated_text_kit: ^4.2.3
   flutter_animate: ^4.5.2
 
-  lucide_icons: ^0.257.0
+  lucide_icons:
+    path: assets/lucide_icons
   shimmer: ^3.0.0
   ffi: ^2.1.5
   flutter_localizations:
@@ -117,3 +118,6 @@ flutter:
       fonts:
         - asset: assets/fonts/RobotoMono-Regular.ttf
           weight: 400
+    - family: Lucide
+      fonts:
+        - asset: assets/lucide_icons/assets/lucide.ttf
