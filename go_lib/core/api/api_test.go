@@ -360,29 +360,17 @@ func TestGetStatus_WrongMethod(t *testing.T) {
 	}
 }
 
-func TestAppShutdown_DefaultRestoreConfigFalse(t *testing.T) {
+func TestAppShutdown_MissingRestoreConfig(t *testing.T) {
 	server := NewAPIServer()
 	server.token = "test-token"
-	shutdownCh := make(chan AppShutdownOptions, 1)
-	server.SetShutdownHandler(func(options AppShutdownOptions) error {
-		shutdownCh <- options
-		return nil
-	})
 
 	req := newAuthRequest("POST", "/api/v1/app/shutdown", "test-token", nil)
 	rec := httptest.NewRecorder()
 	server.setupRoutes().ServeHTTP(rec, req)
 
-	assertStatusCode(t, rec.Code, http.StatusOK)
-
-	select {
-	case options := <-shutdownCh:
-		if options.RestoreConfig {
-			t.Fatal("restoreConfig should default to false")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected shutdown handler to be called")
-	}
+	assertStatusCode(t, rec.Code, http.StatusBadRequest)
+	apiResp := parseAPIResponse(t, rec.Body)
+	assertErrorCode(t, apiResp, CodeInvalidParam)
 }
 
 func TestAppShutdown_ExplicitRestoreConfigTrue(t *testing.T) {
@@ -410,6 +398,37 @@ func TestAppShutdown_ExplicitRestoreConfigTrue(t *testing.T) {
 	case options := <-shutdownCh:
 		if !options.RestoreConfig {
 			t.Fatal("restoreConfig should be true")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected shutdown handler to be called")
+	}
+}
+
+func TestAppShutdown_ExplicitRestoreConfigFalse(t *testing.T) {
+	server := NewAPIServer()
+	server.token = "test-token"
+	shutdownCh := make(chan AppShutdownOptions, 1)
+	server.SetShutdownHandler(func(options AppShutdownOptions) error {
+		shutdownCh <- options
+		return nil
+	})
+
+	req := newAuthRequest(
+		"POST",
+		"/api/v1/app/shutdown",
+		"test-token",
+		bytes.NewBufferString(`{"restoreConfig":false}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.setupRoutes().ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Code, http.StatusOK)
+
+	select {
+	case options := <-shutdownCh:
+		if options.RestoreConfig {
+			t.Fatal("restoreConfig should be false")
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected shutdown handler to be called")

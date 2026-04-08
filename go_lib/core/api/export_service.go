@@ -238,9 +238,45 @@ func (s *ExportServiceImpl) writeStatusFile() {
 		return
 	}
 
-	if err := os.WriteFile(statusFile, data, 0644); err != nil {
+	if err := atomicWriteFile(statusFile, data, 0644); err != nil {
 		logging.Warning("Export: failed to write status file: %v", err)
 	}
+}
+
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(dir, ".status-*.tmp")
+	if err != nil {
+		return err
+	}
+
+	tmpPath := tmpFile.Name()
+	cleanupTmp := true
+	defer func() {
+		if cleanupTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Chmod(perm); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+
+	_ = os.Remove(path)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+
+	cleanupTmp = false
+	return nil
 }
 
 // buildStatus collects all status information.
