@@ -101,6 +101,36 @@ class ApiService {
     }
   }
 
+  Future<bool> _isEndpointReachable(
+    String url,
+    String token, {
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    if (url.trim().isEmpty || token.trim().isEmpty) {
+      return false;
+    }
+
+    HttpClient? client;
+    try {
+      client = HttpClient()..connectionTimeout = timeout;
+      final request = await client.getUrl(Uri.parse('$url/api/v1/status'));
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      final response = await request.close().timeout(timeout);
+      final body = await utf8.decoder.bind(response).join();
+      if (response.statusCode != HttpStatus.ok || body.trim().isEmpty) {
+        return false;
+      }
+
+      final decoded = jsonDecode(body);
+      return decoded is Map<String, dynamic>;
+    } catch (e) {
+      appLogger.debug('[ApiService] Endpoint reachability check failed: $e');
+      return false;
+    } finally {
+      client?.close(force: true);
+    }
+  }
+
   /// 检查 API Server 是否正在运行。
   Future<ApiServerStatus> checkStatus() async {
     try {
@@ -116,7 +146,11 @@ class ApiService {
       final content = await file.readAsString();
       final data = jsonDecode(content) as Map<String, dynamic>;
       final pid = data['pid'] as int?;
-      if (pid != null && await _isProcessAlive(pid)) {
+      final url = data['url'] as String? ?? '';
+      final token = data['token'] as String? ?? '';
+      if (pid != null &&
+          await _isProcessAlive(pid) &&
+          await _isEndpointReachable(url, token)) {
         appLogger.debug('[ApiService] API Server is running (PID: $pid)');
         return ApiServerStatus.fromDiscoveryFile(data);
       }

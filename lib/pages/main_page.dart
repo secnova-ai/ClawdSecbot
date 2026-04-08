@@ -1013,17 +1013,37 @@ class _MainPageState extends State<MainPage>
       context,
     ).showSnackBar(SnackBar(content: Text(l10n.authDeniedExit)));
     await Future.delayed(const Duration(seconds: 1));
+    try {
+      await ApiService().stopServer();
+    } catch (e) {
+      appLogger.warning(
+        '[MainPage] Failed to stop API Server during authorization exit: $e',
+      );
+    }
     await windowManager.close();
     exit(0);
   }
 
   Future<void> _requestAppExit() async {
-    await _requestAppExitWithOptions(interactive: true, restoreConfig: null);
+    final enabledConfigs = await _loadExitTargets();
+    var restoreConfig = false;
+    if (enabledConfigs.isNotEmpty) {
+      await showWindow();
+      final confirmed = await _showExitRestoreDialog(enabledConfigs.length);
+      if (confirmed != true) {
+        return;
+      }
+      restoreConfig = true;
+    }
+    await _requestAppExitWithOptions(
+      interactive: true,
+      restoreConfig: restoreConfig,
+    );
   }
 
   Future<void> _requestAppExitWithOptions({
     required bool interactive,
-    required bool? restoreConfig,
+    required bool restoreConfig,
   }) async {
     if (_isExitFlowInProgress) {
       return;
@@ -1032,17 +1052,10 @@ class _MainPageState extends State<MainPage>
 
     try {
       final enabledConfigs = await _loadExitTargets();
-      var shouldRestore = restoreConfig ?? false;
+      final shouldRestore = restoreConfig && enabledConfigs.isNotEmpty;
       if (enabledConfigs.isNotEmpty) {
         if (interactive && mounted) {
           await showWindow();
-        }
-        if (interactive) {
-          final confirmed = await _showExitRestoreDialog(enabledConfigs.length);
-          if (confirmed != true) {
-            return;
-          }
-          shouldRestore = true;
         }
         if (shouldRestore) {
           final failures = await _runExitCleanupWithProgress(
@@ -1333,6 +1346,12 @@ class _MainPageState extends State<MainPage>
   }
 
   Future<void> _finalizeAppExit() async {
+    try {
+      await ApiService().stopServer();
+    } catch (e) {
+      appLogger.warning('[MainPage] Failed to stop API Server during exit: $e');
+    }
+
     try {
       await PluginService().closePlugin();
     } catch (e) {

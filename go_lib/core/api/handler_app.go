@@ -23,9 +23,7 @@ func (s *APIServer) handleAppShutdown(w http.ResponseWriter, r *http.Request) {
 	}
 
 	options := AppShutdownOptions{}
-	if req.RestoreConfig != nil {
-		options.RestoreConfig = *req.RestoreConfig
-	}
+	options.RestoreConfig = *req.RestoreConfig
 
 	Success(w, map[string]interface{}{
 		"accepted":      true,
@@ -50,11 +48,15 @@ func parseAppShutdownRequest(r *http.Request) (appShutdownRequest, error) {
 	defer r.Body.Close()
 
 	if len(strings.TrimSpace(string(body))) == 0 {
-		return req, nil
+		return req, errors.New("missing required field: restoreConfig")
 	}
 
 	if err := json.Unmarshal(body, &req); err != nil {
 		return req, errors.New("invalid JSON: " + err.Error())
+	}
+
+	if req.RestoreConfig == nil {
+		return req, errors.New("missing required field: restoreConfig")
 	}
 
 	return req, nil
