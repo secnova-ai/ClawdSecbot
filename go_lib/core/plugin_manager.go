@@ -200,6 +200,32 @@ func (pm *PluginManager) ScanAllAssets() ([]Asset, error) {
 	return allAssets, nil
 }
 
+// ScanAssetsByPlugin scans assets for a single registered plugin and binds
+// discovered asset instances for later protection/risk routing.
+func (pm *PluginManager) ScanAssetsByPlugin(assetName string) ([]Asset, error) {
+	plugin := pm.GetPluginByAssetName(assetName)
+	if plugin == nil {
+		return nil, fmt.Errorf("plugin not found: %s", assetName)
+	}
+
+	pluginAssetName := plugin.GetAssetName()
+	logging.Info("Scanning assets with single plugin assetName=%s", pluginAssetName)
+	assets, err := plugin.ScanAssets()
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range assets {
+		if strings.TrimSpace(assets[i].SourcePlugin) == "" {
+			assets[i].SourcePlugin = pluginAssetName
+		}
+		pm.bindAssetInstance(plugin, assets[i])
+	}
+
+	logging.Info("Single plugin %s found %d assets", pluginAssetName, len(assets))
+	return assets, nil
+}
+
 // AssessAllRisks evaluates risks via all registered plugins.
 // Automatically injects SourcePlugin into each risk for downstream routing.
 func (pm *PluginManager) AssessAllRisks(scannedHashes map[string]bool) ([]Risk, error) {
@@ -225,6 +251,27 @@ func (pm *PluginManager) AssessAllRisks(scannedHashes map[string]bool) ([]Risk, 
 
 	logging.Info("Risk assessment completed, total risks: %d", len(allRisks))
 	return allRisks, nil
+}
+
+// AssessRisksByPlugin evaluates risks for a single registered plugin.
+func (pm *PluginManager) AssessRisksByPlugin(assetName string, scannedHashes map[string]bool) ([]Risk, error) {
+	plugin := pm.GetPluginByAssetName(assetName)
+	if plugin == nil {
+		return nil, fmt.Errorf("plugin not found: %s", assetName)
+	}
+
+	pluginAssetName := plugin.GetAssetName()
+	logging.Info("Assessing risks with single plugin: %s", pluginAssetName)
+	risks, err := plugin.AssessRisks(scannedHashes)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range risks {
+		risks[i].SourcePlugin = pluginAssetName
+	}
+	logging.Info("Single plugin %s found %d risks", pluginAssetName, len(risks))
+	return risks, nil
 }
 
 // MitigateRisk routes a mitigation request to the appropriate plugin.

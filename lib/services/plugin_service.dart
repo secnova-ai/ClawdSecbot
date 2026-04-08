@@ -17,10 +17,17 @@ import 'protection_database_service.dart';
 // 资产扫描FFI：无参数，返回 {"success":true,"data":[...],"count":N}
 typedef ScanAssetsFFIC = ffi.Pointer<Utf8> Function();
 typedef ScanAssetsFFIDart = ffi.Pointer<Utf8> Function();
+typedef ScanAssetsByPluginFFIC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
+typedef ScanAssetsByPluginFFIDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
 // 风险评估FFI：接收scannedHashes JSON，返回 {"success":true,"data":[...],"count":N}
 typedef AssessRisksFFIC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef AssessRisksFFIDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
+typedef AssessRisksByPluginFFIC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef AssessRisksByPluginFFIDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 
 typedef MitigateRiskC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef MitigateRiskDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
@@ -144,6 +151,88 @@ class _PluginLifecycleFFI {
     final result = resultPtr.toDartString();
     freeString(resultPtr);
     return result;
+  }
+}
+
+class _PluginScanFFI {
+  _PluginScanFFI._();
+
+  static Map<String, dynamic> getRegisteredPluginsInIsolate(String libPath) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final getPlugins = dylib.lookupFunction<GetPluginsC, GetPluginsDart>(
+      'GetPluginsFFI',
+    );
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final resultPtr = getPlugins();
+    final result = resultPtr.toDartString();
+    freeString(resultPtr);
+    return jsonDecode(result) as Map<String, dynamic>;
+  }
+
+  static Map<String, dynamic> getScannedSkillHashesInIsolate(String libPath) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final func = dylib
+        .lookupFunction<GetScannedSkillHashesC, GetScannedSkillHashesDart>(
+          'GetScannedSkillHashes',
+        );
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final resultPtr = func();
+    final result = resultPtr.toDartString();
+    freeString(resultPtr);
+    return jsonDecode(result) as Map<String, dynamic>;
+  }
+
+  static Map<String, dynamic> scanAssetsByPluginInIsolate(
+    String libPath,
+    String assetName,
+  ) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final func = dylib
+        .lookupFunction<ScanAssetsByPluginFFIC, ScanAssetsByPluginFFIDart>(
+          'ScanAssetsByPluginFFI',
+        );
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final assetNamePtr = assetName.toNativeUtf8();
+    final resultPtr = func(assetNamePtr);
+    malloc.free(assetNamePtr);
+
+    final result = resultPtr.toDartString();
+    freeString(resultPtr);
+    return jsonDecode(result) as Map<String, dynamic>;
+  }
+
+  static Map<String, dynamic> assessRisksByPluginInIsolate(
+    String libPath,
+    String assetName,
+    List<String> scannedHashes,
+  ) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final func = dylib
+        .lookupFunction<AssessRisksByPluginFFIC, AssessRisksByPluginFFIDart>(
+          'AssessRisksByPluginFFI',
+        );
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final assetNamePtr = assetName.toNativeUtf8();
+    final hashesPtr = jsonEncode(scannedHashes).toNativeUtf8();
+    final resultPtr = func(assetNamePtr, hashesPtr);
+    malloc.free(assetNamePtr);
+    malloc.free(hashesPtr);
+
+    final result = resultPtr.toDartString();
+    freeString(resultPtr);
+    return jsonDecode(result) as Map<String, dynamic>;
   }
 }
 
@@ -299,6 +388,121 @@ class PluginService {
     final sensitiveActions = await ProtectionDatabaseService()
         .getShepherdSensitiveActions(assetName, assetID);
     return {'sensitiveActions': sensitiveActions};
+  }
+
+  Future<List<Map<String, dynamic>>> getRegisteredPlugins() async {
+    final libPath = NativeLibraryService().libraryPath;
+    if (libPath == null) {
+      return const [];
+    }
+
+    Map<String, dynamic> response;
+    try {
+      response = await Isolate.run(
+        () => _PluginScanFFI.getRegisteredPluginsInIsolate(libPath),
+      );
+    } catch (e) {
+      appLogger.error('[Plugin] GetPluginsFFI failed in isolate: $e');
+      return const [];
+    }
+
+    if (response['success'] != true) {
+      return const [];
+    }
+    final data = response['data'];
+    if (data is! List) {
+      return const [];
+    }
+    return data.whereType<Map<String, dynamic>>().toList(growable: false);
+  }
+
+  Future<List<Asset>> scanAssetsByPlugin(String assetName) async {
+    final normalized = assetName.trim();
+    if (normalized.isEmpty) {
+      return const [];
+    }
+
+    final libPath = NativeLibraryService().libraryPath;
+    if (libPath == null) {
+      return const [];
+    }
+
+    try {
+      final response = await Isolate.run(
+        () => _PluginScanFFI.scanAssetsByPluginInIsolate(libPath, normalized),
+      );
+      if (response['success'] != true || response['data'] == null) {
+        return const [];
+      }
+      final data = response['data'] as List<dynamic>;
+      return data
+          .map((e) => Asset.fromJson(e as Map<String, dynamic>))
+          .toList(growable: false);
+    } catch (e) {
+      appLogger.error('[Plugin] ScanAssetsByPluginFFI failed: $e');
+      return const [];
+    }
+  }
+
+  Future<List<RiskInfo>> assessRisksByPlugin(
+    String assetName,
+    List<String> scannedHashes,
+  ) async {
+    final normalized = assetName.trim();
+    if (normalized.isEmpty) {
+      return const [];
+    }
+
+    final libPath = NativeLibraryService().libraryPath;
+    if (libPath == null) {
+      return const [];
+    }
+
+    try {
+      final response = await Isolate.run(
+        () => _PluginScanFFI.assessRisksByPluginInIsolate(
+          libPath,
+          normalized,
+          scannedHashes,
+        ),
+      );
+      if (response['success'] != true || response['data'] == null) {
+        return const [];
+      }
+      final data = response['data'] as List<dynamic>;
+      return data
+          .map((item) => _parseRisk(item as Map<String, dynamic>))
+          .toList(growable: false);
+    } catch (e) {
+      appLogger.error('[Plugin] AssessRisksByPluginFFI failed: $e');
+      return const [];
+    }
+  }
+
+  Future<List<String>> getScannedSkillHashesList() async {
+    final libPath = NativeLibraryService().libraryPath;
+    if (libPath == null) {
+      return const [];
+    }
+
+    Map<String, dynamic> response;
+    try {
+      response = await Isolate.run(
+        () => _PluginScanFFI.getScannedSkillHashesInIsolate(libPath),
+      );
+    } catch (e) {
+      appLogger.error('[Plugin] GetScannedSkillHashes failed in isolate: $e');
+      return const [];
+    }
+
+    if (response['success'] != true || response['data'] == null) {
+      return const [];
+    }
+    final data = response['data'];
+    if (data is! List) {
+      return const [];
+    }
+    return data.map((e) => e.toString()).toList(growable: false);
   }
 
   /// 通过FFI获取内置ReAct安全技能列表（name + description）

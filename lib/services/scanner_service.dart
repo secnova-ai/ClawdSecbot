@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../l10n/app_localizations.dart';
+import '../models/asset_model.dart';
 import '../models/risk_model.dart';
 import '../config/build_config.dart';
 import 'plugin_service.dart';
@@ -23,28 +24,50 @@ class BotScanner {
     _l10n = l10n;
   }
 
-  Future<ScanResult> scan() async {
-    _log('Starting security scan using plugins...');
-    await Future.delayed(const Duration(milliseconds: 300));
+  Future<ScanResult> scan({
+    void Function(String assetName, bool detected)? onPluginScanned,
+  }) async {
+    final pluginOrder = ['openclaw', 'dintalclaw', 'nullclaw', 'qclaw'];
+    final registeredPlugins = await _pluginService.getRegisteredPlugins();
+    final registeredNames = registeredPlugins
+        .map(
+          (item) => (item['asset_name'] as String? ?? '').trim().toLowerCase(),
+        )
+        .where((name) => name.isNotEmpty)
+        .toSet();
+    final activePlugins = pluginOrder
+        .where(registeredNames.contains)
+        .toList(growable: false);
 
-    // 1. Load Plugins and Scan (Identify + AssessRisks)
-    _log('Loading plugins and scanning...');
+    final scannedHashes = await _pluginService.getScannedSkillHashesList();
+    final allAssets = <Asset>[];
+    final allRisks = <RiskInfo>[];
 
-    ScanResult pluginResult = await _pluginService.scan();
-
-    _log('Found ${pluginResult.assets.length} assets.');
-    for (var asset in pluginResult.assets) {
-      _log('Identified asset: ${asset.name} (${asset.type})');
+    for (final assetName in activePlugins) {
+      final assets = await _pluginService.scanAssetsByPlugin(assetName);
+      allAssets.addAll(assets);
+      onPluginScanned?.call(assetName, assets.isNotEmpty);
+      final risks = await _pluginService.assessRisksByPlugin(
+        assetName,
+        scannedHashes,
+      );
+      allRisks.addAll(risks);
     }
 
-    if (pluginResult.configFound) {
-      _log('Configuration found.');
-    } else {
-      _log('No configuration file found.');
-    }
+    final configPath = allAssets
+        .map((asset) => asset.metadata['config_path'] ?? '')
+        .firstWhere(
+          (path) => path.toString().trim().isNotEmpty,
+          orElse: () => '',
+        );
 
-    _log('Risk assessment completed via plugins.');
-    _log('Found ${pluginResult.risks.length} potential issues.');
+    final pluginResult = ScanResult(
+      config: null,
+      risks: allRisks,
+      configFound: allAssets.isNotEmpty || configPath.toString().isNotEmpty,
+      configPath: configPath.toString().isEmpty ? null : configPath.toString(),
+      assets: allAssets,
+    );
 
     // 2. Add System Level Checks (e.g. Scanner running as root)
     List<RiskInfo> finalRisks = List.from(pluginResult.risks);

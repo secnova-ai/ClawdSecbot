@@ -250,3 +250,36 @@ func TestFindStatePathFallsBackToAppDataDir(t *testing.T) {
 		t.Fatalf("expected state path %q, got %q", statePath, got)
 	}
 }
+
+func TestQClawDefaultInstallPaths(t *testing.T) {
+	nodeBinary := qclawDefaultNodeBinaryPath()
+	openclawMjs := qclawDefaultOpenclawMjsPath()
+	builtinSkills := qclawDefaultBuiltinSkillsDir()
+
+	switch runtime.GOOS {
+	case "darwin":
+		if nodeBinary != "/Applications/QClaw.app/Contents/MacOS/QClaw" {
+			t.Fatalf("unexpected darwin node binary path: %q", nodeBinary)
+		}
+		if openclawMjs != "/Applications/QClaw.app/Contents/Resources/openclaw/node_modules/openclaw/openclaw.mjs" {
+			t.Fatalf("unexpected darwin openclaw.mjs path: %q", openclawMjs)
+		}
+		if builtinSkills != "/Applications/QClaw.app/Contents/Resources/openclaw/config/skills" {
+			t.Fatalf("unexpected darwin builtin skills path: %q", builtinSkills)
+		}
+	case "windows":
+		if !strings.HasSuffix(strings.ToLower(nodeBinary), strings.ToLower(`QClaw\QClaw.exe`)) {
+			t.Fatalf("unexpected windows node binary path: %q", nodeBinary)
+		}
+		if !strings.HasSuffix(strings.ToLower(openclawMjs), strings.ToLower(`QClaw\resources\openclaw\node_modules\openclaw\openclaw.mjs`)) {
+			t.Fatalf("unexpected windows openclaw.mjs path: %q", openclawMjs)
+		}
+		if !strings.HasSuffix(strings.ToLower(builtinSkills), strings.ToLower(`QClaw\resources\openclaw\config\skills`)) {
+			t.Fatalf("unexpected windows builtin skills path: %q", builtinSkills)
+		}
+	default:
+		if nodeBinary != "" || openclawMjs != "" || builtinSkills != "" {
+			t.Fatalf("expected empty defaults on %s, got %q %q %q", runtime.GOOS, nodeBinary, openclawMjs, builtinSkills)
+		}
+	}
+}

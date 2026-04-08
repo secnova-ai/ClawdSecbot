@@ -67,10 +67,16 @@ class _MainPageState extends State<MainPage>
         MainPageDataMixin {
   // ============ 扫描状态 ============
   ScanState _scanState = ScanState.idle;
-  final List<String> _logs = [];
   ScanResult? _result;
   final BotScanner _scanner = BotScanner();
-  StreamSubscription<String>? _logSubscription;
+  final List<_ScanProbe> _scanProbes = const [
+    _ScanProbe(key: 'openclaw', label: 'OpenClaw'),
+    _ScanProbe(key: 'dintalclaw', label: 'DinTalClaw'),
+    _ScanProbe(key: 'nullclaw', label: 'NullClaw'),
+    _ScanProbe(key: 'qclaw', label: 'QClaw'),
+  ];
+  final Map<String, _ScanProbeStatus> _scanProbeStatuses = {};
+  double _scanVisualProgress = 0;
 
   // ============ 防护状态 ============
   final Set<String> _protectedAssetIDs = {};
@@ -130,8 +136,9 @@ class _MainPageState extends State<MainPage>
   void resetUIStateAfterClear() {
     setState(() {
       _scanState = ScanState.idle;
-      _logs.clear();
       _result = null;
+      _scanProbeStatuses.clear();
+      _scanVisualProgress = 0;
       _protectedAssetIDs.clear();
       _protectedAssetNamesByID.clear();
     });
@@ -284,7 +291,6 @@ class _MainPageState extends State<MainPage>
     _appExitListener?.dispose();
     trayManager.removeListener(this);
     windowManager.removeListener(this);
-    _logSubscription?.cancel();
     _onboardingCompletionTimer?.cancel();
     _scheduledScanTimer?.cancel();
     disposeVersionMixin();
@@ -1074,27 +1080,20 @@ class _MainPageState extends State<MainPage>
 
     setState(() {
       _scanState = ScanState.scanning;
-      _logs.clear();
       _result = null;
     });
+    _initializeScanProbeStatuses();
 
     await windowManager.setSize(AppConstants.windowSize);
-
-    await _logSubscription?.cancel();
-    _logSubscription = _scanner.logStream.listen((log) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _logs.add(log);
-      });
-    });
 
     if (!mounted) return;
     _scanner.setLocalization(l10n);
 
     try {
-      final result = await _scanner.scan();
+      final result = await _scanner.scan(
+        onPluginScanned: _markScanProbeCompleted,
+      );
+      await Future.delayed(const Duration(milliseconds: 280));
 
       try {
         await ScanDatabaseService().saveScanResult(result);
@@ -1132,8 +1131,6 @@ class _MainPageState extends State<MainPage>
         });
       }
     } finally {
-      await _logSubscription?.cancel();
-      _logSubscription = null;
       await windowManager.setSize(AppConstants.windowSize);
     }
   }
@@ -1569,8 +1566,9 @@ class _MainPageState extends State<MainPage>
       if (mounted) {
         setState(() {
           _scanState = ScanState.idle;
-          _logs.clear();
           _result = null;
+          _scanProbeStatuses.clear();
+          _scanVisualProgress = 0;
         });
         await windowManager.setSize(AppConstants.windowSize);
       }
@@ -1735,6 +1733,71 @@ class _MainPageState extends State<MainPage>
         },
       ),
     );
+  }
+
+  void _initializeScanProbeStatuses() {
+    _scanVisualProgress = 0;
+    _scanProbeStatuses
+      ..clear()
+      ..addEntries(
+        _scanProbes.map(
+          (probe) => MapEntry(probe.key, _ScanProbeStatus.pending),
+        ),
+      );
+    if (_scanProbes.isNotEmpty) {
+      _scanProbeStatuses[_scanProbes.first.key] = _ScanProbeStatus.scanning;
+    }
+  }
+
+  void _markScanProbeCompleted(String assetName, bool detected) {
+    final normalized = assetName.trim().toLowerCase();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      for (final probe in _scanProbes) {
+        if (probe.key != normalized) {
+          continue;
+        }
+        _scanProbeStatuses[probe.key] = detected
+            ? _ScanProbeStatus.detected
+            : _ScanProbeStatus.notDetected;
+        break;
+      }
+
+      final completedCount = _scanProbeStatuses.values
+          .where(
+            (status) =>
+                status == _ScanProbeStatus.detected ||
+                status == _ScanProbeStatus.notDetected,
+          )
+          .length;
+      if (_scanProbes.isNotEmpty) {
+        _scanVisualProgress = completedCount / _scanProbes.length;
+      }
+
+      for (final probe in _scanProbes) {
+        if (_scanProbeStatuses[probe.key] == _ScanProbeStatus.pending) {
+          _scanProbeStatuses[probe.key] = _ScanProbeStatus.scanning;
+          break;
+        }
+      }
+    });
+  }
+
+  String _scanProbeLine(_ScanProbe probe, bool isZh) {
+    final status = _scanProbeStatuses[probe.key] ?? _ScanProbeStatus.pending;
+    final action = isZh ? '正在检测' : 'Checking';
+    switch (status) {
+      case _ScanProbeStatus.detected:
+        return '$action ${probe.label}  √';
+      case _ScanProbeStatus.notDetected:
+        return '$action ${probe.label}  ×';
+      case _ScanProbeStatus.scanning:
+        return '$action ${probe.label}  ...';
+      case _ScanProbeStatus.pending:
+        return '$action ${probe.label}';
+    }
   }
 
   // ============ UI 构建 ============
@@ -2195,6 +2258,8 @@ class _MainPageState extends State<MainPage>
 
   Widget _buildScanningState() {
     final l10n = AppLocalizations.of(context)!;
+    final isZh = l10n.localeName.startsWith('zh');
+    final progress = _scanVisualProgress.clamp(0.0, 1.0);
     return Padding(
       key: const ValueKey('scanning'),
       padding: const EdgeInsets.all(24),
@@ -2204,10 +2269,18 @@ class _MainPageState extends State<MainPage>
           Row(
             children: [
               Container(
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF6366F1).withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(8),
+                      gradient: LinearGradient(
+                        colors: [
+                          const Color(0xFF6366F1).withValues(alpha: 0.28),
+                          const Color(0xFF8B5CF6).withValues(alpha: 0.18),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: const Color(0xFF6366F1).withValues(alpha: 0.18),
+                      ),
                     ),
                     child: const Icon(
                       LucideIcons.loader2,
@@ -2216,7 +2289,12 @@ class _MainPageState extends State<MainPage>
                     ),
                   )
                   .animate(onPlay: (controller) => controller.repeat())
-                  .rotate(duration: 1000.ms),
+                  .rotate(duration: 900.ms)
+                  .then(duration: 900.ms)
+                  .scale(
+                    begin: const Offset(0.96, 0.96),
+                    end: const Offset(1.04, 1.04),
+                  ),
               const SizedBox(width: 12),
               Text(
                 l10n.scanning,
@@ -2228,50 +2306,97 @@ class _MainPageState extends State<MainPage>
               ),
             ],
           ),
-          const SizedBox(height: 24),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-              ),
-              child: ListView.builder(
-                itemCount: _logs.length,
-                itemBuilder: (context, index) {
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.22),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isZh ? '扫描进度' : 'Scan Progress',
+                  style: AppFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  isZh ? '正在检测中，请稍后。' : 'Scanning in progress, please wait.',
+                  style: AppFonts.inter(fontSize: 12, color: Colors.white54),
+                ),
+                const SizedBox(height: 10),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 8,
+                    backgroundColor: Colors.white.withValues(alpha: 0.08),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      Color(0xFF6366F1),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  isZh
+                      ? '已完成 ${(progress * 100).floor()}%'
+                      : '${(progress * 100).floor()}% complete',
+                  style: AppFonts.firaCode(fontSize: 11, color: Colors.white54),
+                ),
+                const SizedBox(height: 8),
+                ..._scanProbes.map((probe) {
+                  final status =
+                      _scanProbeStatuses[probe.key] ?? _ScanProbeStatus.pending;
                   return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '>',
-                              style: AppFonts.firaCode(
-                                fontSize: 12,
-                                color: const Color(0xFF6366F1),
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child:
+                        AnimatedContainer(
+                              duration: const Duration(milliseconds: 220),
+                              curve: Curves.easeOutCubic,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 12,
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _logs[index],
-                                style: AppFonts.firaCode(
-                                  fontSize: 12,
-                                  color: Colors.white70,
+                              decoration: BoxDecoration(
+                                color: _probeCardColor(status),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: _probeBorderColor(status),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      )
-                      .animate()
-                      .fadeIn(duration: 300.ms)
-                      .slideX(begin: -0.1, end: 0);
-                },
-              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _buildProbeStatusIcon(status),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      _scanProbeLine(probe, isZh),
+                                      style: AppFonts.firaCode(
+                                        fontSize: 12,
+                                        color: _probeStatusColor(status),
+                                        height: 1.45,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                            .animate()
+                            .fadeIn(duration: 280.ms)
+                            .slideY(begin: 0.08, end: 0),
+                  );
+                }),
+              ],
             ),
           ),
+          const SizedBox(height: 8),
         ],
       ),
     );
@@ -2292,4 +2417,83 @@ class _MainPageState extends State<MainPage>
       onShowMitigation: (risk) => _showMitigationDialog(context, risk),
     );
   }
+
+  Widget _buildProbeStatusIcon(_ScanProbeStatus status) {
+    switch (status) {
+      case _ScanProbeStatus.detected:
+        return const Icon(
+          LucideIcons.checkCircle2,
+          size: 15,
+          color: Color(0xFF22C55E),
+        );
+      case _ScanProbeStatus.notDetected:
+        return const Icon(
+          LucideIcons.xCircle,
+          size: 15,
+          color: Color(0xFFEF4444),
+        );
+      case _ScanProbeStatus.scanning:
+        return const Icon(
+              LucideIcons.loader2,
+              size: 15,
+              color: Color(0xFF6366F1),
+            )
+            .animate(onPlay: (controller) => controller.repeat())
+            .rotate(duration: 900.ms);
+      case _ScanProbeStatus.pending:
+        return Icon(
+          LucideIcons.circleDashed,
+          size: 15,
+          color: Colors.white.withValues(alpha: 0.35),
+        );
+    }
+  }
+
+  Color _probeStatusColor(_ScanProbeStatus status) {
+    switch (status) {
+      case _ScanProbeStatus.detected:
+        return const Color(0xFF86EFAC);
+      case _ScanProbeStatus.notDetected:
+        return const Color(0xFFFCA5A5);
+      case _ScanProbeStatus.scanning:
+        return const Color(0xFFC4B5FD);
+      case _ScanProbeStatus.pending:
+        return Colors.white60;
+    }
+  }
+
+  Color _probeCardColor(_ScanProbeStatus status) {
+    switch (status) {
+      case _ScanProbeStatus.detected:
+        return const Color(0xFF22C55E).withValues(alpha: 0.09);
+      case _ScanProbeStatus.notDetected:
+        return const Color(0xFFEF4444).withValues(alpha: 0.08);
+      case _ScanProbeStatus.scanning:
+        return const Color(0xFF6366F1).withValues(alpha: 0.12);
+      case _ScanProbeStatus.pending:
+        return Colors.white.withValues(alpha: 0.03);
+    }
+  }
+
+  Color _probeBorderColor(_ScanProbeStatus status) {
+    switch (status) {
+      case _ScanProbeStatus.detected:
+        return const Color(0xFF22C55E).withValues(alpha: 0.22);
+      case _ScanProbeStatus.notDetected:
+        return const Color(0xFFEF4444).withValues(alpha: 0.2);
+      case _ScanProbeStatus.scanning:
+        return const Color(0xFF6366F1).withValues(alpha: 0.28);
+      case _ScanProbeStatus.pending:
+        return Colors.white.withValues(alpha: 0.06);
+    }
+  }
 }
+
+class _ScanProbe {
+  final String key;
+  final String label;
+
+  const _ScanProbe({required this.key, required this.label});
+}
+
+enum _ScanProbeStatus { pending, scanning, detected, notDetected }

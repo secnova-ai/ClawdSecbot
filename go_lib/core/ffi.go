@@ -157,6 +157,24 @@ func ScanAllAssets() (map[string]interface{}, error) {
 	}, nil
 }
 
+// ScanAssetsByPlugin scans assets for a single plugin asset type.
+func ScanAssetsByPlugin(assetName string) (map[string]interface{}, error) {
+	logging.Info("Core: Scanning assets for plugin %s", assetName)
+
+	pm := GetPluginManager()
+	assets, err := pm.ScanAssetsByPlugin(assetName)
+	if err != nil {
+		logging.Error("Core: Scan assets by plugin failed: %v", err)
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"success": true,
+		"data":    assets,
+		"count":   len(assets),
+	}, nil
+}
+
 // AssessAllRisks 使用所有插件评估风险
 func AssessAllRisks(scannedHashes map[string]bool) (map[string]interface{}, error) {
 	logging.Info("Core: Assessing all risks")
@@ -169,6 +187,24 @@ func AssessAllRisks(scannedHashes map[string]bool) (map[string]interface{}, erro
 	}
 
 	logging.Info("Core: Risk assessment completed, found %d risks", len(risks))
+	return map[string]interface{}{
+		"success": true,
+		"data":    risks,
+		"count":   len(risks),
+	}, nil
+}
+
+// AssessRisksByPlugin evaluates risks for a single plugin asset type.
+func AssessRisksByPlugin(assetName string, scannedHashes map[string]bool) (map[string]interface{}, error) {
+	logging.Info("Core: Assessing risks for plugin %s", assetName)
+
+	pm := GetPluginManager()
+	risks, err := pm.AssessRisksByPlugin(assetName, scannedHashes)
+	if err != nil {
+		logging.Error("Core: Assess risks by plugin failed: %v", err)
+		return nil, err
+	}
+
 	return map[string]interface{}{
 		"success": true,
 		"data":    risks,
@@ -190,6 +226,22 @@ func AssessAllRisksFromString(scannedHashesJSON string) (map[string]interface{},
 	}
 
 	return AssessAllRisks(hashSet)
+}
+
+// AssessRisksByPluginFromString parses scanned skill hashes from JSON and
+// evaluates risks for a single plugin.
+func AssessRisksByPluginFromString(assetName, scannedHashesJSON string) (map[string]interface{}, error) {
+	var hashList []string
+	if err := json.Unmarshal([]byte(scannedHashesJSON), &hashList); err != nil {
+		hashList = nil
+	}
+
+	hashSet := make(map[string]bool)
+	for _, h := range hashList {
+		hashSet[h] = true
+	}
+
+	return AssessRisksByPlugin(assetName, hashSet)
 }
 
 // ========== 风险缓解路由函数 ==========
