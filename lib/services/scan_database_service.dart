@@ -50,6 +50,8 @@ class ScanDatabaseService {
   /// 从NativeLibraryService获取FreeString函数
   _FreeStringDart? get _freeString => NativeLibraryService().freeString;
 
+  String? _lastLoggedLatestScanSummary;
+
   // --- Scan Result methods ---
 
   Future<void> saveScanResult(ScanResult result) async {
@@ -156,9 +158,15 @@ class ScanDatabaseService {
           skillRisks.addAll(legacySkillRisks);
         }
 
-        appLogger.info(
-          '[ScanDB] Loaded latest scan via Go layer: ${assets.length} assets, ${baseRisks.length} base risks, ${skillRisks.length} skill risks',
-        );
+        final latestScanSummary =
+            '${assets.length}|${baseRisks.length}|${skillRisks.length}|'
+            '${configFound ? 1 : 0}|${configPath ?? ''}|${scannedAtRaw ?? ''}';
+        if (_lastLoggedLatestScanSummary != latestScanSummary) {
+          _lastLoggedLatestScanSummary = latestScanSummary;
+          appLogger.info(
+            '[ScanDB] Loaded latest scan via Go layer: ${assets.length} assets, ${baseRisks.length} base risks, ${skillRisks.length} skill risks',
+          );
+        }
         return ScanResult(
           config: configJSON != null
               ? jsonDecode(configJSON) as Map<String, dynamic>

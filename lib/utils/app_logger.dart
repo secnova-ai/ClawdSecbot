@@ -8,8 +8,8 @@ import 'package:path_provider/path_provider.dart';
 ///
 /// Features:
 /// - Writes logs to file in app sandbox directory
-/// - Automatic log rotation when file exceeds 50MB
-/// - Keeps up to 3 backup files (total ~200MB max)
+/// - Automatic log rotation when file exceeds 20MB
+/// - Keeps up to 2 backup files (total ~60MB max)
 /// - Thread-safe singleton pattern
 class AppLogger {
   static final AppLogger _instance = AppLogger._internal();
@@ -23,8 +23,8 @@ class AppLogger {
   String? _logFileName;
   bool _initialized = false;
 
-  static const int maxFileSize = 50 * 1024 * 1024; // 50MB per file
-  static const int maxBackupFiles = 3;
+  static const int maxFileSize = 20 * 1024 * 1024; // 20MB per file
+  static const int maxBackupFiles = 2;
   static const String flutterLogFilePrefix = 'flutter_';
 
   /// Get the logs directory path (for sharing with Go)
@@ -97,7 +97,7 @@ class AppLogger {
     await _logSink?.close();
     _logSink = null;
 
-    // Rotate backup files: .3 -> delete, .2 -> .3, .1 -> .2
+    // Rotate backup files: .2 -> delete, .1 -> .2
     for (int i = maxBackupFiles; i >= 1; i--) {
       final backupFile = File('${_logFile!.path}.$i');
       if (await backupFile.exists()) {
