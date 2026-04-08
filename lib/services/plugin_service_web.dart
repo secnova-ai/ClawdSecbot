@@ -77,6 +77,61 @@ class PluginService {
     return {'sensitiveActions': sensitiveActions};
   }
 
+  Future<List<Map<String, dynamic>>> getRegisteredPlugins() async {
+    final response = _callNoArg('GetPluginsFFI');
+    if (response['success'] != true || response['data'] is! List) {
+      return const [];
+    }
+    return (response['data'] as List<dynamic>)
+        .whereType<Map<String, dynamic>>()
+        .toList(growable: false);
+  }
+
+  Future<List<String>> getScannedSkillHashesList() async {
+    final response = _callNoArg('GetScannedSkillHashes');
+    if (response['success'] != true || response['data'] is! List) {
+      return const [];
+    }
+    return (response['data'] as List<dynamic>)
+        .map((item) => item.toString())
+        .toList(growable: false);
+  }
+
+  Future<List<Asset>> scanAssetsByPlugin(String assetName) async {
+    final normalized = assetName.trim();
+    if (normalized.isEmpty) {
+      return const [];
+    }
+    final response = _callOneArg('ScanAssetsByPluginFFI', normalized);
+    if (response['success'] != true || response['data'] is! List) {
+      return const [];
+    }
+    return (response['data'] as List<dynamic>)
+        .map((item) => Asset.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<List<RiskInfo>> assessRisksByPlugin(
+    String assetName,
+    List<String> scannedHashes,
+  ) async {
+    final normalized = assetName.trim();
+    if (normalized.isEmpty) {
+      return const [];
+    }
+    final response = _callTwoArgs(
+      'AssessRisksByPluginFFI',
+      normalized,
+      jsonEncode(scannedHashes),
+    );
+    if (response['success'] != true || response['data'] is! List) {
+      return const [];
+    }
+    return (response['data'] as List<dynamic>)
+        .map((item) => _parseRisk(item as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
   List<Map<String, dynamic>> listBundledReActSkills() {
     final result = _callNoArg('ListBundledReActSkillsFFI');
     if (result['success'] != true) {

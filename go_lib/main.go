@@ -210,11 +210,32 @@ func ScanAssetsFFI() *C.char {
 	return jsonToCString(result)
 }
 
+//export ScanAssetsByPluginFFI
+func ScanAssetsByPluginFFI(assetNameC *C.char) *C.char {
+	result, err := core.ScanAssetsByPlugin(C.GoString(assetNameC))
+	if err != nil {
+		return errorCString(err)
+	}
+	return jsonToCString(result)
+}
+
 // ==================== 风险评估 FFI ====================
 
 //export AssessRisksFFI
 func AssessRisksFFI(scannedHashesC *C.char) *C.char {
 	result, err := core.AssessAllRisksFromString(C.GoString(scannedHashesC))
+	if err != nil {
+		return errorCString(err)
+	}
+	return jsonToCString(result)
+}
+
+//export AssessRisksByPluginFFI
+func AssessRisksByPluginFFI(assetNameC, scannedHashesC *C.char) *C.char {
+	result, err := core.AssessRisksByPluginFromString(
+		C.GoString(assetNameC),
+		C.GoString(scannedHashesC),
+	)
 	if err != nil {
 		return errorCString(err)
 	}

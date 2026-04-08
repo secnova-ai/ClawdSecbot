@@ -104,6 +104,15 @@ func (s *assetScanner) enrichAsset(asset *core.Asset) {
 			}
 		}
 	}
+	if strings.TrimSpace(asset.Metadata["node_binary"]) == "" {
+		asset.Metadata["node_binary"] = qclawDefaultNodeBinaryPath()
+	}
+	if strings.TrimSpace(asset.Metadata["openclaw_mjs"]) == "" {
+		asset.Metadata["openclaw_mjs"] = qclawDefaultOpenclawMjsPath()
+	}
+	if strings.TrimSpace(asset.Metadata["builtin_skills_dir"]) == "" {
+		asset.Metadata["builtin_skills_dir"] = qclawDefaultBuiltinSkillsDir()
+	}
 
 	if homeDir, err := userCurrentHomeDir(); err == nil {
 		if logBaseDir := qclawLogsDir(homeDir); strings.TrimSpace(logBaseDir) != "" {

@@ -255,6 +255,70 @@ func qclawLogsDir(homeDir string) string {
 	return filepath.Join(appDataDir, "logs")
 }
 
+func qclawDefaultNodeBinaryPath() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(string(filepath.Separator), "Applications", "QClaw.app", "Contents", "MacOS", "QClaw")
+	case "windows":
+		programFiles := strings.TrimSpace(os.Getenv("ProgramFiles"))
+		if programFiles == "" {
+			programFiles = `C:\Program Files`
+		}
+		return filepath.Join(programFiles, "QClaw", "QClaw.exe")
+	default:
+		return ""
+	}
+}
+
+func qclawDefaultOpenclawMjsPath() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(
+			string(filepath.Separator),
+			"Applications",
+			"QClaw.app",
+			"Contents",
+			"Resources",
+			"openclaw",
+			"node_modules",
+			"openclaw",
+			"openclaw.mjs",
+		)
+	case "windows":
+		programFiles := strings.TrimSpace(os.Getenv("ProgramFiles"))
+		if programFiles == "" {
+			programFiles = `C:\Program Files`
+		}
+		return filepath.Join(
+			programFiles,
+			"QClaw",
+			"resources",
+			"openclaw",
+			"node_modules",
+			"openclaw",
+			"openclaw.mjs",
+		)
+	default:
+		return ""
+	}
+}
+
+func qclawBuiltinSkillsDirFromOpenclawMjs(openclawMjs string) string {
+	openclawMjs = strings.TrimSpace(openclawMjs)
+	if openclawMjs == "" {
+		return ""
+	}
+	runtimeRoot := filepath.Dir(filepath.Dir(filepath.Dir(openclawMjs)))
+	return filepath.Join(runtimeRoot, "config", "skills")
+}
+
+func qclawDefaultBuiltinSkillsDir() string {
+	if derived := qclawBuiltinSkillsDirFromOpenclawMjs(qclawDefaultOpenclawMjsPath()); strings.TrimSpace(derived) != "" {
+		return derived
+	}
+	return ""
+}
+
 func ensureInitialBackup(configPath, backupDir string) (string, error) {
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
 		return "", err

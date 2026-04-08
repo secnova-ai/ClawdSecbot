@@ -24,9 +24,11 @@ func getSkillsDirs() ([]string, error) {
 
 	if state, err := loadQClawRuntimeState(); err == nil && state != nil {
 		if openclawMjs := strings.TrimSpace(state.CLI.OpenclawMjs); openclawMjs != "" {
-			runtimeRoot := filepath.Dir(filepath.Dir(filepath.Dir(openclawMjs)))
-			dirs = append(dirs, filepath.Join(runtimeRoot, "config", "skills"))
+			dirs = append(dirs, qclawBuiltinSkillsDirFromOpenclawMjs(openclawMjs))
 		}
+	}
+	if builtinDir := qclawDefaultBuiltinSkillsDir(); builtinDir != "" {
+		dirs = append(dirs, builtinDir)
 	}
 
 	seen := make(map[string]struct{})

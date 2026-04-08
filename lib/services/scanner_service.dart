@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../config/build_config.dart';
 import '../l10n/app_localizations.dart';
+import '../models/asset_model.dart';
 import '../models/risk_model.dart';
 import 'plugin_service.dart';
 import 'scan_database_service.dart';
@@ -27,26 +28,15 @@ class BotScanner {
     _l10n = l10n;
   }
 
-  Future<ScanResult> scan() async {
+  Future<ScanResult> scan({
+    void Function(String assetName, bool detected)? onPluginScanned,
+  }) async {
     _log('Starting security scan using plugins...');
     await Future.delayed(const Duration(milliseconds: 300));
 
-    _log('Loading plugins and scanning...');
-    final pluginResult = await _pluginService.scan();
-
-    _log('Found ${pluginResult.assets.length} assets.');
-    for (final asset in pluginResult.assets) {
-      _log('Identified asset: ${asset.name} (${asset.type})');
-    }
-
-    if (pluginResult.configFound) {
-      _log('Configuration found.');
-    } else {
-      _log('No configuration file found.');
-    }
-
-    _log('Risk assessment completed via plugins.');
-    _log('Found ${pluginResult.risks.length} potential issues.');
+    final pluginResult = await _runPluginPipeline(
+      onPluginScanned: onPluginScanned,
+    );
 
     final baseRisks = List<RiskInfo>.from(pluginResult.riskInfo);
     _checkSystemRisks(baseRisks);
@@ -71,9 +61,9 @@ class BotScanner {
     _log('Refreshing security findings...');
     await Future.delayed(const Duration(milliseconds: 150));
 
-    // Re-scan assets to avoid reusing stale asset snapshots during
-    // "security discovery" refresh.
-    final pluginResult = await _pluginService.scan();
+    // Re-scan assets per plugin so we skip risk assessment for plugins
+    // whose assets are absent, avoiding stale/irrelevant risks in UI.
+    final pluginResult = await _runPluginPipeline();
     final baseRisks = List<RiskInfo>.from(pluginResult.riskInfo);
     _log('Found ${baseRisks.length} potential issues.');
 
@@ -88,6 +78,65 @@ class BotScanner {
       configPath: pluginResult.configPath ?? configPath,
       assets: pluginResult.assets,
       scannedAt: DateTime.now(),
+    );
+  }
+
+  /// 按插件逐个扫描资产并评估风险：仅当插件检测到资产时才评估其风险，
+  /// 避免无资产插件返回历史/默认风险污染结果。
+  Future<ScanResult> _runPluginPipeline({
+    void Function(String assetName, bool detected)? onPluginScanned,
+  }) async {
+    final pluginOrder = [
+      'openclaw',
+      'dintalclaw',
+      'nullclaw',
+      'qclaw',
+      'hermes',
+    ];
+    final registeredPlugins = await _pluginService.getRegisteredPlugins();
+    final registeredNames = registeredPlugins
+        .map(
+          (item) => (item['asset_name'] as String? ?? '').trim().toLowerCase(),
+        )
+        .where((name) => name.isNotEmpty)
+        .toSet();
+    final activePlugins = pluginOrder
+        .where(registeredNames.contains)
+        .toList(growable: false);
+
+    final scannedHashes = await _pluginService.getScannedSkillHashesList();
+    final allAssets = <Asset>[];
+    final allRisks = <RiskInfo>[];
+
+    for (final assetName in activePlugins) {
+      final assets = await _pluginService.scanAssetsByPlugin(assetName);
+      allAssets.addAll(assets);
+      _log('Plugin $assetName found ${assets.length} assets.');
+      onPluginScanned?.call(assetName, assets.isNotEmpty);
+      if (assets.isEmpty) {
+        _log('Plugin $assetName has no asset detected, skip risk assessment.');
+        continue;
+      }
+      final risks = await _pluginService.assessRisksByPlugin(
+        assetName,
+        scannedHashes,
+      );
+      allRisks.addAll(risks);
+    }
+
+    final configPath = allAssets
+        .map((asset) => asset.metadata['config_path'] ?? '')
+        .firstWhere(
+          (path) => path.toString().trim().isNotEmpty,
+          orElse: () => '',
+        );
+
+    return ScanResult(
+      config: null,
+      risks: allRisks,
+      configFound: allAssets.isNotEmpty || configPath.toString().isNotEmpty,
+      configPath: configPath.toString().isEmpty ? null : configPath.toString(),
+      assets: allAssets,
     );
   }
 
