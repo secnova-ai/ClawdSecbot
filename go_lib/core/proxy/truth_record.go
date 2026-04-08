@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+var (
+	completedTruthRecordCallback   func(TruthRecord)
+	completedTruthRecordCallbackMu sync.Mutex
+)
+
 // TruthRecord 阶段常量
 const (
 	RecordPhaseStarting  = "starting"
@@ -129,6 +134,7 @@ func (s *RecordStore) Upsert(requestID string, update func(r *TruthRecord)) *Tru
 
 	s.mu.Lock()
 	r := s.records[requestID]
+	wasComplete := false
 	if r == nil {
 		now := time.Now().Format(time.RFC3339Nano)
 		r = &TruthRecord{
@@ -139,6 +145,8 @@ func (s *RecordStore) Upsert(requestID string, update func(r *TruthRecord)) *Tru
 			Phase:              RecordPhaseStarting,
 		}
 		s.records[requestID] = r
+	} else {
+		wasComplete = isRecordComplete(r)
 	}
 
 	update(r)
@@ -146,6 +154,7 @@ func (s *RecordStore) Upsert(requestID string, update func(r *TruthRecord)) *Tru
 	normalizeTruthRecord(r)
 	snapshot := cloneTruthRecord(r)
 	s.pending = append(s.pending, snapshot)
+	becameComplete := !wasComplete && isRecordComplete(r)
 
 	if isRecordComplete(r) {
 		s.completed = append(s.completed, snapshot)
@@ -154,7 +163,24 @@ func (s *RecordStore) Upsert(requestID string, update func(r *TruthRecord)) *Tru
 		}
 	}
 	s.mu.Unlock()
+
+	if becameComplete {
+		completedTruthRecordCallbackMu.Lock()
+		cb := completedTruthRecordCallback
+		completedTruthRecordCallbackMu.Unlock()
+		if cb != nil {
+			cb(snapshot)
+		}
+	}
 	return &snapshot
+}
+
+// SetCompletedTruthRecordCallback sets a callback that is triggered once when a
+// TruthRecord first transitions into a completed/stopped state.
+func SetCompletedTruthRecordCallback(cb func(TruthRecord)) {
+	completedTruthRecordCallbackMu.Lock()
+	defer completedTruthRecordCallbackMu.Unlock()
+	completedTruthRecordCallback = cb
 }
 
 // Pending 返回并清空待推送的快照队列（用于 CallbackBridge 实时推送 + 轮询回退）。

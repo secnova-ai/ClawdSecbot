@@ -56,6 +56,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"sync"
+	"time"
 	"unsafe"
 
 	"go_lib/chatmodel-routing/adapter"
@@ -785,8 +786,8 @@ var (
 )
 
 func configureRealtimeExportHooks() {
-	proxy.SetAuditLogCallback(func(log proxy.AuditLog) {
-		appendAuditLogToExport(log)
+	proxy.SetCompletedTruthRecordCallback(func(record proxy.TruthRecord) {
+		appendTruthRecordAuditToExport(record)
 	})
 
 	shepherd.GetSecurityEventBuffer().SetExportCallback(func(event shepherd.SecurityEvent) {
@@ -794,7 +795,7 @@ func configureRealtimeExportHooks() {
 	})
 }
 
-func appendAuditLogToExport(log proxy.AuditLog) {
+func appendTruthRecordAuditToExport(record proxy.TruthRecord) {
 	apiServerLock.Lock()
 	server := apiServer
 	apiServerLock.Unlock()
@@ -802,8 +803,8 @@ func appendAuditLogToExport(log proxy.AuditLog) {
 		return
 	}
 
-	toolCalls := make([]api.ToolCall, 0, len(log.ToolCalls))
-	for _, tc := range log.ToolCalls {
+	toolCalls := make([]api.ToolCall, 0, len(record.ToolCalls))
+	for _, tc := range record.ToolCalls {
 		toolCalls = append(toolCalls, api.ToolCall{
 			Tool:       tc.Name,
 			Parameters: tc.Arguments,
@@ -811,19 +812,45 @@ func appendAuditLogToExport(log proxy.AuditLog) {
 		})
 	}
 
+	action := "ALLOW"
+	riskLevel := ""
+	riskReason := ""
+	if record.Decision != nil {
+		action = record.Decision.Action
+		riskLevel = record.Decision.RiskLevel
+		riskReason = record.Decision.Reason
+	}
+
+	requestContent := ""
+	for _, msg := range record.Messages {
+		if msg.Role == "user" {
+			requestContent = msg.Content
+			break
+		}
+	}
+
+	durationMs := 0
+	if record.StartedAt != "" && record.CompletedAt != "" {
+		if startedAt, err := time.Parse(time.RFC3339Nano, record.StartedAt); err == nil {
+			if completedAt, err := time.Parse(time.RFC3339Nano, record.CompletedAt); err == nil {
+				durationMs = int(completedAt.Sub(startedAt).Milliseconds())
+			}
+		}
+	}
+
 	entry := &api.AuditLogEntry{
-		BotID:         log.AssetID,
-		LogID:         log.ID,
-		LogTimestamp:  log.Timestamp,
-		RequestID:     log.RequestID,
-		Model:         log.Model,
-		Action:        log.Action,
-		RiskLevel:     log.RiskLevel,
-		RiskCauses:    log.RiskReason,
-		DurationMs:    int(log.Duration),
-		TokenCount:    log.TotalTokens,
-		UserRequest:   log.RequestContent,
-		ToolCallCount: len(log.ToolCalls),
+		BotID:         record.AssetID,
+		LogID:         record.RequestID,
+		LogTimestamp:  record.StartedAt,
+		RequestID:     record.RequestID,
+		Model:         record.Model,
+		Action:        action,
+		RiskLevel:     riskLevel,
+		RiskCauses:    riskReason,
+		DurationMs:    durationMs,
+		TokenCount:    record.PromptTokens + record.CompletionTokens,
+		UserRequest:   requestContent,
+		ToolCallCount: len(record.ToolCalls),
 		ToolCalls:     toolCalls,
 	}
 
