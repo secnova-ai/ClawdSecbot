@@ -1,6 +1,9 @@
 package openclaw
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRestoreInjectedOpenclawBotStateRemovesInjectedEntries(t *testing.T) {
 	rawConfig := map[string]interface{}{
@@ -125,5 +128,51 @@ func TestRestoreInjectedOpenclawBotStateNoOpWhenAlreadyDefault(t *testing.T) {
 	}
 	if len(removedProviders) != 0 || len(removedModels) != 0 || len(removedFallbacks) != 0 {
 		t.Fatalf("expected no injected entries to be removed, got providers=%v models=%v fallbacks=%v", removedProviders, removedModels, removedFallbacks)
+	}
+}
+
+// TestEnsureProviderForBotModel_DoesNotWriteRealAPIKey verifies that the real API key
+// from BotModelConfig is never written to the openclaw.json provider config.
+// Instead, a placeholder value (proxyInjectedAPIKey) is used, because the LLM proxy
+// injects the real key at forwarding time.
+func TestEnsureProviderForBotModel_DoesNotWriteRealAPIKey(t *testing.T) {
+	rawConfig := map[string]interface{}{
+		"agents": map[string]interface{}{},
+		"models": map[string]interface{}{},
+	}
+
+	botConfig := &BotModelConfig{
+		Provider:  "openai",
+		BaseURL:   "https://api.openai.com/v1",
+		APIKey:    "sk-real-secret-key-12345",
+		Model:     "gpt-4o",
+		SecretKey: "",
+	}
+
+	previousProvider, providerMap, err := ensureProviderForBotModel(rawConfig, botConfig, "openai", "gpt-4o")
+	if err != nil {
+		t.Fatalf("ensureProviderForBotModel returned error: %v", err)
+	}
+
+	// Verify the apiKey field is the placeholder, not the real key
+	apiKeyValue, ok := providerMap["apiKey"].(string)
+	if !ok {
+		t.Fatal("expected apiKey to be a string")
+	}
+	if apiKeyValue != proxyInjectedAPIKey {
+		t.Fatalf("expected apiKey to be %q, got %q", proxyInjectedAPIKey, apiKeyValue)
+	}
+	if strings.Contains(apiKeyValue, "sk-real-secret") {
+		t.Fatal("real API key was written to provider config, this is a security leak")
+	}
+
+	// Verify other fields are set correctly
+	if providerMap["api"] != "openai-completions" {
+		t.Fatalf("expected api to be openai-completions, got %v", providerMap["api"])
+	}
+
+	// previousProvider should be empty since no provider existed before
+	if len(previousProvider) != 0 {
+		t.Fatalf("expected empty previousProvider, got %v", previousProvider)
 	}
 }

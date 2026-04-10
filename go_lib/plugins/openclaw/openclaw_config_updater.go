@@ -15,6 +15,11 @@ import (
 
 const clawdsecbotModelPrefix = "clawdsecbot-"
 
+// proxyInjectedAPIKey is a placeholder written to bot config files.
+// The real API key is injected by the LLM proxy at forwarding time
+// and must never appear in bot config files.
+const proxyInjectedAPIKey = "botsec-proxy-key"
+
 // stripClawdsecbotPrefix removes clawdsecbot- prefix from a model ID.
 func stripClawdsecbotPrefix(modelID string) string {
 	trimmed := strings.TrimSpace(modelID)
@@ -231,17 +236,9 @@ func ensureProviderForBotModel(rawConfig map[string]interface{}, botConfig *BotM
 	// 始终构建全新的 provider 配置，确保覆盖已有状态
 	providerMap := buildDefaultProviderConfig(providerName, realModelID)
 
-	if botConfig != nil {
-		if apiKey := strings.TrimSpace(botConfig.APIKey); apiKey != "" {
-			providerMap["apiKey"] = apiKey
-		}
-	}
-
-	// openclaw.json 要求所有 provider 都必须有 apiKey
-	// 对于不需要认证的 provider（如 Ollama），使用占位值
-	if _, hasKey := providerMap["apiKey"]; !hasKey {
-		providerMap["apiKey"] = "no apiKey"
-	}
+	// Proxy injects the real API key when forwarding LLM requests.
+	// The value here is just a placeholder to satisfy OpenClaw config validation.
+	providerMap["apiKey"] = proxyInjectedAPIKey
 
 	providersMap[providerKey] = providerMap
 	modelsMap["providers"] = providersMap
