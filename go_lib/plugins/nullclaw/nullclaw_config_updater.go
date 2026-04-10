@@ -13,6 +13,11 @@ import (
 	"go_lib/core/logging"
 )
 
+// proxyInjectedAPIKey is a placeholder written to bot config files.
+// The real API key is injected by the LLM proxy at forwarding time
+// and must never appear in bot config files.
+const proxyInjectedAPIKey = "botsec-proxy-key"
+
 // ensureMapValue ensures the value under key is a map and returns it.
 func ensureMapValue(parent map[string]interface{}, key string) map[string]interface{} {
 	if parent == nil {
@@ -215,10 +220,10 @@ func ensureProviderForBotModel(rawConfig map[string]interface{}, botConfig *BotM
 		if baseURL := strings.TrimSpace(botConfig.BaseURL); baseURL != "" {
 			providerMap["base_url"] = baseURL
 		}
-		if apiKey := strings.TrimSpace(botConfig.APIKey); apiKey != "" {
-			providerMap["api_key"] = apiKey
-		}
 	}
+	// Proxy injects the real API key when forwarding LLM requests.
+	// Always set after potential previousProvider copy to ensure no real key leaks.
+	providerMap["api_key"] = proxyInjectedAPIKey
 
 	if _, ok := providerMap["base_url"]; !ok {
 		if defaultBaseURL := getDefaultBaseURL(providerName); defaultBaseURL != "" {
