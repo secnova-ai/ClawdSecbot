@@ -55,10 +55,10 @@ func TestEnsureProviderForBotModel_OverwritesPreviousProviderKey(t *testing.T) {
 		"models": map[string]interface{}{
 			"providers": map[string]interface{}{
 				"anthropic": map[string]interface{}{
-					"api":        "anthropic-messages",
-					"api_key":    "sk-ant-leaked-key-should-not-persist",
-					"base_url":   "https://api.anthropic.com",
-					"models":     []interface{}{"claude-3-opus"},
+					"api":      "anthropic-messages",
+					"api_key":  "sk-ant-leaked-key-should-not-persist",
+					"base_url": "https://api.anthropic.com",
+					"models":   []interface{}{"claude-3-opus"},
 				},
 			},
 		},
