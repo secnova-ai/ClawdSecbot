@@ -198,7 +198,7 @@ func (p *NullclawPlugin) GetProtectionStatus(assetID string) core.ProtectionStat
 	defer p.mu.RUnlock()
 
 	// Sync with live proxy state
-	proxy := GetProxyProtectionByAsset(nullclawAssetName, assetID)
+	proxy := GetProxyProtectionByAsset(assetID)
 	if proxy != nil {
 		running := proxy.IsRunning()
 		cached := p.protectionStatuses[assetID]
@@ -377,7 +377,7 @@ func (p *NullclawPlugin) OnProtectionStart(ctx *core.ProtectionContext) (map[str
 
 	// 从数据库读取 BotModel 配置
 	repo := repository.NewProtectionRepository(nil)
-	config, err := repo.GetProtectionConfig("Nullclaw", ctx.AssetID)
+	config, err := repo.GetProtectionConfig(ctx.AssetID)
 	if err != nil {
 		logging.Error("[Nullclaw] Failed to get protection config from DB: %v", err)
 		return nil, fmt.Errorf("failed to get protection config: %w", err)

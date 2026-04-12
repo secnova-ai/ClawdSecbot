@@ -285,6 +285,23 @@ func HasInitialBackupByPlugin(assetName string) string {
 	return plugin.(GatewaySandboxCapability).HasInitialBackup()
 }
 
+// HasInitialBackupByAssetID resolves the plugin from assetID and checks initial backup.
+func HasInitialBackupByAssetID(assetID string) string {
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return HasInitialBackupByPlugin("")
+	}
+	plugin := GetPluginManager().GetPluginByAssetID(assetID)
+	if plugin == nil {
+		return capabilityError(fmt.Errorf("no plugin found for asset_id: %s", assetID))
+	}
+	cap, ok := plugin.(GatewaySandboxCapability)
+	if !ok {
+		return capabilityError(fmt.Errorf("plugin %s does not support capability: gateway_sandbox", plugin.GetAssetName()))
+	}
+	return cap.HasInitialBackup()
+}
+
 func RestoreToInitialConfigByPlugin(assetName string) string {
 	plugin, err := resolvePluginByCapability(assetName, "gateway_sandbox", func(p BotPlugin) bool {
 		_, ok := p.(GatewaySandboxCapability)
@@ -294,6 +311,23 @@ func RestoreToInitialConfigByPlugin(assetName string) string {
 		return capabilityError(err)
 	}
 	return plugin.(GatewaySandboxCapability).RestoreToInitialConfig()
+}
+
+// RestoreToInitialConfigByAssetID resolves the plugin from assetID and restores initial config.
+func RestoreToInitialConfigByAssetID(assetID string) string {
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return RestoreToInitialConfigByPlugin("")
+	}
+	plugin := GetPluginManager().GetPluginByAssetID(assetID)
+	if plugin == nil {
+		return capabilityError(fmt.Errorf("no plugin found for asset_id: %s", assetID))
+	}
+	cap, ok := plugin.(GatewaySandboxCapability)
+	if !ok {
+		return capabilityError(fmt.Errorf("plugin %s does not support capability: gateway_sandbox", plugin.GetAssetName()))
+	}
+	return cap.RestoreToInitialConfig()
 }
 
 func NotifyAppExitByPlugin(assetName, assetID string) string {

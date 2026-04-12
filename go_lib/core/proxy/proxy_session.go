@@ -266,8 +266,8 @@ func stopAllProxies() error {
 	return firstErr
 }
 
-func getProxyForOperationLocked(assetName, assetID string) *ProxyProtection {
-	key := buildAssetKey(assetName, assetID)
+func getProxyForOperationLocked(assetID string) *ProxyProtection {
+	key := buildAssetKey(assetID)
 	if key == defaultProxyAssetKey {
 		return selectActiveProxyLocked()
 	}
@@ -403,7 +403,7 @@ func StartProtectionProxyInternal(protectionConfigJSON string) string {
 		})
 	}
 
-	assetKey := buildAssetKey(protectionConfig.AssetName, protectionConfig.AssetID)
+	assetKey := buildAssetKey(protectionConfig.AssetID)
 	meta := assetRuntimeMeta{
 		AssetName: protectionConfig.AssetName,
 		AssetID:   protectionConfig.AssetID,
@@ -507,9 +507,9 @@ func StopProtectionProxyInternal() string {
 	return toJSONString(map[string]interface{}{"success": true})
 }
 
-// StopProtectionProxyByAssetInternal 停止指定资产实例的代理防护。
-func StopProtectionProxyByAssetInternal(assetName, assetID string) string {
-	if err := stopProxyByAssetKey(buildAssetKey(assetName, assetID)); err != nil {
+// StopProtectionProxyByAssetInternal stops the proxy for the specified asset instance.
+func StopProtectionProxyByAssetInternal(assetID string) string {
+	if err := stopProxyByAssetKey(buildAssetKey(assetID)); err != nil {
 		return toJSONString(map[string]interface{}{"success": false, "error": err.Error()})
 	}
 	return toJSONString(map[string]interface{}{"success": true})
@@ -548,12 +548,12 @@ func GetProtectionProxyStatusInternal() string {
 	})
 }
 
-// GetProtectionProxyStatusByAssetInternal 获取指定资产实例的代理防护状态。
-func GetProtectionProxyStatusByAssetInternal(assetName, assetID string) string {
+// GetProtectionProxyStatusByAssetInternal returns the proxy status for the specified asset instance.
+func GetProtectionProxyStatusByAssetInternal(assetID string) string {
 	proxyInstanceMu.Lock()
 	defer proxyInstanceMu.Unlock()
 
-	pp := proxyByAssetKey[buildAssetKey(assetName, assetID)]
+	pp := proxyByAssetKey[buildAssetKey(assetID)]
 	if pp == nil {
 		return toJSONString(ProxyStatusResponse{Running: false})
 	}
@@ -567,13 +567,13 @@ func GetProtectionProxyStatusByAssetInternal(assetName, assetID string) string {
 	})
 }
 
-// UpdateProtectionConfigInternal 更新防护配置
+// UpdateProtectionConfigInternal updates runtime config.
 func UpdateProtectionConfigInternal(configJSON string) string {
-	return UpdateProtectionConfigByAssetInternal("", "", configJSON)
+	return UpdateProtectionConfigByAssetInternal("", configJSON)
 }
 
 // UpdateProtectionConfigByAssetInternal updates runtime config for a specific asset instance.
-func UpdateProtectionConfigByAssetInternal(assetName, assetID, configJSON string) string {
+func UpdateProtectionConfigByAssetInternal(assetID, configJSON string) string {
 	var cfg ProtectionRuntimeConfig
 	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
 		return toJSONString(map[string]interface{}{"success": false, "error": fmt.Sprintf("invalid runtime config: %v", err)})
@@ -582,7 +582,7 @@ func UpdateProtectionConfigByAssetInternal(assetName, assetID, configJSON string
 	proxyInstanceMu.Lock()
 	defer proxyInstanceMu.Unlock()
 
-	pp := getProxyForOperationLocked(assetName, assetID)
+	pp := getProxyForOperationLocked(assetID)
 	if pp == nil {
 		return toJSONString(map[string]interface{}{"success": false, "error": "proxy not running"})
 	}
@@ -591,13 +591,13 @@ func UpdateProtectionConfigByAssetInternal(assetName, assetID, configJSON string
 	return toJSONString(map[string]interface{}{"success": true})
 }
 
-// UpdateSecurityModelConfigInternal 更新安全模型配置
+// UpdateSecurityModelConfigInternal updates security model config.
 func UpdateSecurityModelConfigInternal(configJSON string) string {
-	return UpdateSecurityModelConfigByAssetInternal("", "", configJSON)
+	return UpdateSecurityModelConfigByAssetInternal("", configJSON)
 }
 
 // UpdateSecurityModelConfigByAssetInternal updates security model config for a specific asset instance.
-func UpdateSecurityModelConfigByAssetInternal(assetName, assetID, configJSON string) string {
+func UpdateSecurityModelConfigByAssetInternal(assetID, configJSON string) string {
 	var cfg repository.SecurityModelConfig
 	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
 		return toJSONString(map[string]interface{}{"success": false, "error": fmt.Sprintf("invalid security model config: %v", err)})
@@ -606,7 +606,7 @@ func UpdateSecurityModelConfigByAssetInternal(assetName, assetID, configJSON str
 	proxyInstanceMu.Lock()
 	defer proxyInstanceMu.Unlock()
 
-	pp := getProxyForOperationLocked(assetName, assetID)
+	pp := getProxyForOperationLocked(assetID)
 	if pp == nil {
 		return toJSONString(map[string]interface{}{"success": false, "error": "proxy not running"})
 	}
@@ -636,17 +636,17 @@ func UpdateBotForwardingProviderInternal(botConfigJSON string) string {
 	return toJSONString(map[string]interface{}{"success": true})
 }
 
-// SetProtectionProxyAuditOnlyInternal 设置仅审计模式
+// SetProtectionProxyAuditOnlyInternal sets audit-only mode.
 func SetProtectionProxyAuditOnlyInternal(auditOnly bool) string {
-	return SetProtectionProxyAuditOnlyByAssetInternal("", "", auditOnly)
+	return SetProtectionProxyAuditOnlyByAssetInternal("", auditOnly)
 }
 
 // SetProtectionProxyAuditOnlyByAssetInternal sets audit-only mode for a specific asset instance.
-func SetProtectionProxyAuditOnlyByAssetInternal(assetName, assetID string, auditOnly bool) string {
+func SetProtectionProxyAuditOnlyByAssetInternal(assetID string, auditOnly bool) string {
 	proxyInstanceMu.Lock()
 	defer proxyInstanceMu.Unlock()
 
-	pp := getProxyForOperationLocked(assetName, assetID)
+	pp := getProxyForOperationLocked(assetID)
 	if pp == nil {
 		return toJSONString(map[string]interface{}{"success": false, "error": "proxy not running"})
 	}
@@ -727,7 +727,7 @@ func WaitForProtectionLogsInternal(sessionID string, timeoutMs int) string {
 }
 
 // UpdateShepherdRulesByAssetInternal updates Shepherd rules for a specific asset instance.
-func UpdateShepherdRulesByAssetInternal(assetName, assetID, rulesJSON string) string {
+func UpdateShepherdRulesByAssetInternal(assetID, rulesJSON string) string {
 	var rules UserRules
 	if err := json.Unmarshal([]byte(rulesJSON), &rules); err != nil {
 		logging.Error("[ShepherdGate] Failed to parse rules JSON: %v", err)
@@ -735,23 +735,23 @@ func UpdateShepherdRulesByAssetInternal(assetName, assetID, rulesJSON string) st
 	}
 
 	proxyInstanceMu.Lock()
-	pp := proxyByAssetKey[buildAssetKey(assetName, assetID)]
+	pp := proxyByAssetKey[buildAssetKey(assetID)]
 	proxyInstanceMu.Unlock()
 	if pp == nil {
 		return "ok"
 	}
 
 	if err := pp.UpdateShepherdRules(rules.SensitiveActions); err != nil {
-		logging.Error("[ShepherdGate] Failed to update rules by asset (%s/%s): %v", assetName, assetID, err)
+		logging.Error("[ShepherdGate] Failed to update rules by asset (id=%s): %v", assetID, err)
 		return "error: update failed"
 	}
 	return "ok"
 }
 
 // GetShepherdRulesByAssetInternal returns current Shepherd user rules JSON for a specific asset instance.
-func GetShepherdRulesByAssetInternal(assetName, assetID string) string {
+func GetShepherdRulesByAssetInternal(assetID string) string {
 	proxyInstanceMu.Lock()
-	pp := proxyByAssetKey[buildAssetKey(assetName, assetID)]
+	pp := proxyByAssetKey[buildAssetKey(assetID)]
 	proxyInstanceMu.Unlock()
 	if pp == nil {
 		return `{"SensitiveActions":[]}`

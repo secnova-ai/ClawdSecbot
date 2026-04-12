@@ -1075,13 +1075,13 @@ func GetProxyProtection() *ProxyProtection {
 }
 
 // GetProxyProtectionByAsset returns the proxy instance bound to the specified asset instance.
-func GetProxyProtectionByAsset(assetName, assetID string) *ProxyProtection {
+func GetProxyProtectionByAsset(assetID string) *ProxyProtection {
 	proxyInstanceMu.Lock()
 	defer proxyInstanceMu.Unlock()
-	return proxyByAssetKey[buildAssetKey(assetName, assetID)]
+	return proxyByAssetKey[buildAssetKey(assetID)]
 }
 
-func buildAssetKey(assetName, assetID string) string {
+func buildAssetKey(assetID string) string {
 	id := strings.TrimSpace(assetID)
 	if id == "" {
 		return defaultProxyAssetKey

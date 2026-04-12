@@ -17,7 +17,7 @@ import (
 // DintalclawPlugin 政务龙虾安全插件
 // 实现core.BotPlugin接口，提供 DinTalClaw Bot 的资产发现、风险评估和防护控制
 type DintalclawPlugin struct {
-	mu sync.RWMutex
+	mu                 sync.RWMutex
 	protectionStatuses map[string]core.ProtectionStatus
 }
 
@@ -174,7 +174,7 @@ func (p *DintalclawPlugin) GetProtectionStatus(assetID string) core.ProtectionSt
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	proxy := GetProxyProtectionByAsset(dintalclawAssetName, assetID)
+	proxy := GetProxyProtectionByAsset(assetID)
 	if proxy != nil {
 		running := proxy.IsRunning()
 		cached := p.protectionStatuses[assetID]
@@ -359,7 +359,7 @@ func (p *DintalclawPlugin) OnProtectionStart(ctx *core.ProtectionContext) (map[s
 	logging.Info("[Dintalclaw] OnProtectionStart: assetID=%s, proxyPort=%d", ctx.AssetID, ctx.ProxyPort)
 
 	repo := repository.NewProtectionRepository(nil)
-	config, err := repo.GetProtectionConfig(dintalclawAssetName, ctx.AssetID)
+	config, err := repo.GetProtectionConfig(ctx.AssetID)
 	if err != nil {
 		logging.Error("[Dintalclaw] Failed to get protection config from DB: %v", err)
 		return nil, fmt.Errorf("failed to get protection config: %w", err)

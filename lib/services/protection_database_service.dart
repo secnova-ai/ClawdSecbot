@@ -10,11 +10,6 @@ import 'native_library_service.dart';
 typedef _OneArgC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef _OneArgDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
-typedef _TwoArgC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
-typedef _TwoArgDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
-
 typedef _NoArgC = ffi.Pointer<Utf8> Function();
 typedef _NoArgDart = ffi.Pointer<Utf8> Function();
 
@@ -121,7 +116,7 @@ class ProtectionDatabaseService {
     String assetName, [
     String assetID = '',
   ]) async {
-    final result = _callFFITwoArg('GetProtectionConfigFFI', assetName, assetID);
+    final result = _callFFIOneArg('GetProtectionConfigFFI', assetID);
     if (result['success'] != true) return null;
 
     final data = result['data'];
@@ -186,7 +181,7 @@ class ProtectionDatabaseService {
     String assetName, [
     String assetID = '',
   ]) async {
-    _callFFITwoArg('DeleteProtectionConfigFFI', assetName, assetID);
+    _callFFIOneArg('DeleteProtectionConfigFFI', assetID);
   }
 
   // --- Protection Statistics methods ---
@@ -240,11 +235,7 @@ class ProtectionDatabaseService {
     String assetName, [
     String assetID = '',
   ]) async {
-    final result = _callFFITwoArg(
-      'GetProtectionStatisticsFFI',
-      assetName,
-      assetID,
-    );
+    final result = _callFFIOneArg('GetProtectionStatisticsFFI', assetID);
     if (result['success'] != true) return null;
 
     final data = result['data'];
@@ -276,7 +267,7 @@ class ProtectionDatabaseService {
     String assetName, [
     String assetID = '',
   ]) async {
-    _callFFITwoArg('ClearProtectionStatisticsFFI', assetName, assetID);
+    _callFFIOneArg('ClearProtectionStatisticsFFI', assetID);
   }
 
   // --- Shepherd Rules methods ---
@@ -285,11 +276,7 @@ class ProtectionDatabaseService {
     String assetName,
     String assetID,
   ) async {
-    final result = _callFFITwoArg(
-      'GetShepherdSensitiveActionsFFI',
-      assetName,
-      assetID,
-    );
+    final result = _callFFIOneArg('GetShepherdSensitiveActionsFFI', assetID);
     if (result['success'] != true) return [];
 
     final data = result['data'];
@@ -352,33 +339,6 @@ class ProtectionDatabaseService {
       final result = resultPtr.toDartString();
       _freeString!(resultPtr);
       malloc.free(argPtr);
-      return jsonDecode(result) as Map<String, dynamic>;
-    } catch (e) {
-      appLogger.error('[ProtectionDB] $funcName failed: $e');
-      return {'success': false, 'error': '$funcName failed: $e'};
-    }
-  }
-
-  /// 调用接收两个字符串参数的FFI函数
-  Map<String, dynamic> _callFFITwoArg(
-    String funcName,
-    String arg1,
-    String arg2,
-  ) {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) {
-      return {'success': false, 'error': 'Native library not initialized'};
-    }
-
-    try {
-      final func = dylib.lookupFunction<_TwoArgC, _TwoArgDart>(funcName);
-      final arg1Ptr = arg1.toNativeUtf8();
-      final arg2Ptr = arg2.toNativeUtf8();
-      final resultPtr = func(arg1Ptr, arg2Ptr);
-      final result = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(arg1Ptr);
-      malloc.free(arg2Ptr);
       return jsonDecode(result) as Map<String, dynamic>;
     } catch (e) {
       appLogger.error('[ProtectionDB] $funcName failed: $e');

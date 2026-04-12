@@ -166,8 +166,8 @@ func TestPluginManager_GetProtectionStatus_ResolvedByAssetID(t *testing.T) {
 		t.Fatalf("ScanAllAssets failed: %v", err)
 	}
 
-	if _, err := pm.GetProtectionStatus("OtherBot", "openclaw:abc123"); err != nil {
-		t.Fatalf("expected resolve by assetID even when assetName mismatches, got error: %v", err)
+	if _, err := pm.GetProtectionStatus("openclaw:abc123"); err != nil {
+		t.Fatalf("expected resolve by assetID, got error: %v", err)
 	}
 }
 
