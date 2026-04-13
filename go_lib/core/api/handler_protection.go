@@ -169,6 +169,21 @@ func (s *APIServer) handleSetProtectionPolicy(w http.ResponseWriter, r *http.Req
 	}
 
 	repo := repository.NewProtectionRepository(nil)
+	if len(req.BotID) == 0 {
+		if err := saveDefaultProtectionPolicy(repo, &req); err != nil {
+			logging.Error("API: Failed to save default protection policy: %v", err)
+			Error(w, http.StatusInternalServerError, CodeInternalError, "failed to save default protection policy: "+err.Error())
+			return
+		}
+
+		Success(w, map[string]interface{}{
+			"message": "default protection policy updated",
+			"botId":   []string{},
+			"default": true,
+		})
+		return
+	}
+
 	botIDs, err := resolveRequestedBotIDs(repo, req.BotID)
 	if err != nil {
 		if errors.Is(err, errProtectionPolicyNotFound) {
@@ -178,14 +193,6 @@ func (s *APIServer) handleSetProtectionPolicy(w http.ResponseWriter, r *http.Req
 		}
 		logging.Error("API: Failed to resolve requested botIds: %v", err)
 		Error(w, http.StatusInternalServerError, CodeInternalError, "failed to query protection configs")
-		return
-	}
-
-	if len(botIDs) == 0 {
-		Success(w, map[string]interface{}{
-			"message": "protection policy updated",
-			"botId":   []string{},
-		})
 		return
 	}
 
@@ -234,19 +241,37 @@ func buildProtectionPolicyResponse(repo *repository.ProtectionRepository, botID 
 	if err != nil {
 		return nil, err
 	}
+	usesDefaultPolicy := false
 	if config == nil {
 		assetName, err := resolveAssetNameByBotID(repo, botID)
 		if err != nil {
 			return nil, err
 		}
-		config = &repository.ProtectionConfig{
-			AssetName: assetName,
-			AssetID:   botID,
+		defaultConfig, err := repo.GetDefaultProtectionConfig()
+		if err != nil {
+			return nil, err
+		}
+		if defaultConfig != nil {
+			config = cloneProtectionConfig(defaultConfig)
+			config.AssetName = assetName
+			config.AssetID = botID
+			usesDefaultPolicy = true
+		} else {
+			config = &repository.ProtectionConfig{
+				AssetName: assetName,
+				AssetID:   botID,
+			}
 		}
 	}
 
 	response := convertToExternalPolicy(config, botID)
-	userRules, found, err := repo.GetShepherdSensitiveActions(config.AssetName, botID)
+	userRulesAssetID := botID
+	userRulesAssetName := config.AssetName
+	if usesDefaultPolicy {
+		userRulesAssetID = repository.DefaultProtectionPolicyAssetID
+		userRulesAssetName = repository.DefaultProtectionPolicyAssetName
+	}
+	userRules, found, err := repo.GetShepherdSensitiveActions(userRulesAssetName, userRulesAssetID)
 	if err != nil {
 		logging.Warning("API: Failed to query instance user rules for botId=%s: %v", botID, err)
 		defaultRules, defaultErr := shepherd.GetDefaultUserRules()
@@ -272,6 +297,39 @@ func buildProtectionPolicyResponse(repo *repository.ProtectionRepository, botID 
 	return response, nil
 }
 
+func saveDefaultProtectionPolicy(repo *repository.ProtectionRepository, req *ProtectionPolicyRequest) error {
+	config, err := repo.GetDefaultProtectionConfig()
+	if err != nil {
+		return err
+	}
+	previousConfig := cloneProtectionConfig(config)
+	if config == nil {
+		config = &repository.ProtectionConfig{
+			AssetName: repository.DefaultProtectionPolicyAssetName,
+			AssetID:   repository.DefaultProtectionPolicyAssetID,
+		}
+	}
+
+	applyProtectionPolicyRequest(config, req)
+	if err := repo.SaveProtectionConfig(config); err != nil {
+		return err
+	}
+
+	if req.UserRules != nil {
+		if err := repo.SaveShepherdSensitiveActions(
+			repository.DefaultProtectionPolicyAssetName,
+			repository.DefaultProtectionPolicyAssetID,
+			req.UserRules,
+		); err != nil {
+			logging.Warning("API: Failed to save default user rules: %v", err)
+		}
+	}
+
+	applyProtectionPolicyRuntime(previousConfig, config, req.UserRules)
+	logging.Info("API: Default protection policy updated")
+	return nil
+}
+
 func updateProtectionPolicyForBotID(repo *repository.ProtectionRepository, botID string, req *ProtectionPolicyRequest) error {
 	existingConfig, assetName, err := findProtectionConfigByBotID(repo, botID)
 	if err != nil {
@@ -291,6 +349,28 @@ func updateProtectionPolicyForBotID(repo *repository.ProtectionRepository, botID
 	}
 	if existingConfig != nil {
 		config = existingConfig
+	}
+
+	applyProtectionPolicyRequest(config, req)
+
+	if err := repo.SaveProtectionConfig(config); err != nil {
+		return err
+	}
+
+	if req.UserRules != nil {
+		if err := repo.SaveShepherdSensitiveActions(config.AssetName, botID, req.UserRules); err != nil {
+			logging.Warning("API: Failed to update user rules: %v", err)
+		}
+	}
+
+	applyProtectionPolicyRuntime(previousConfig, config, req.UserRules)
+	logging.Info("API: Protection policy updated for botId=%s", botID)
+	return nil
+}
+
+func applyProtectionPolicyRequest(config *repository.ProtectionConfig, req *ProtectionPolicyRequest) {
+	if config == nil || req == nil {
+		return
 	}
 
 	switch req.Protection {
@@ -335,20 +415,6 @@ func updateProtectionPolicyForBotID(repo *repository.ProtectionRepository, botID
 			APIKey:   req.BotModel.Key,
 		}
 	}
-
-	if err := repo.SaveProtectionConfig(config); err != nil {
-		return err
-	}
-
-	if req.UserRules != nil {
-		if err := repo.SaveShepherdSensitiveActions(config.AssetName, botID, req.UserRules); err != nil {
-			logging.Warning("API: Failed to update user rules: %v", err)
-		}
-	}
-
-	applyProtectionPolicyRuntime(previousConfig, config, req.UserRules)
-	logging.Info("API: Protection policy updated for botId=%s", botID)
-	return nil
 }
 
 func resolveRequestedBotIDs(repo *repository.ProtectionRepository, requested []string) ([]string, error) {
@@ -594,6 +660,9 @@ func applyProtectionPolicyRuntime(previousConfig, config *repository.ProtectionC
 	if config == nil || config.AssetName == "" || config.AssetID == "" {
 		return
 	}
+	if repository.IsDefaultProtectionPolicyAssetID(config.AssetID) {
+		return
+	}
 
 	wasEnabled := previousConfig != nil && previousConfig.Enabled
 	oldSandboxEnabled := previousConfig != nil && previousConfig.SandboxEnabled
@@ -642,4 +711,69 @@ func applyProtectionPolicyRuntime(previousConfig, config *repository.ProtectionC
 			logging.Warning("API: Failed to sync gateway sandbox for botId=%s: %s", config.AssetID, syncResult)
 		}
 	}
+}
+
+func applyDefaultProtectionPolicyToAssets(repo *repository.ProtectionRepository, assets []core.Asset) error {
+	defaultConfig, err := repo.GetDefaultProtectionConfig()
+	if err != nil {
+		return err
+	}
+	if defaultConfig == nil {
+		return nil
+	}
+
+	defaultUserRules, foundDefaultUserRules, err := repo.GetShepherdSensitiveActions(
+		repository.DefaultProtectionPolicyAssetName,
+		repository.DefaultProtectionPolicyAssetID,
+	)
+	if err != nil {
+		logging.Warning("API: Failed to load default protection user rules: %v", err)
+		defaultUserRules = nil
+		foundDefaultUserRules = false
+	}
+
+	for _, asset := range assets {
+		assetID := strings.TrimSpace(asset.ID)
+		assetName := strings.TrimSpace(asset.Name)
+		if assetID == "" || assetName == "" {
+			continue
+		}
+
+		existingConfig, _, err := findProtectionConfigByBotID(repo, assetID)
+		if err != nil {
+			return err
+		}
+		if existingConfig != nil {
+			continue
+		}
+
+		config := cloneProtectionConfig(defaultConfig)
+		config.AssetName = assetName
+		config.AssetID = assetID
+		// When a default bot model is already configured, newly discovered assets
+		// should start protection automatically after scan completion.
+		if config.BotModelConfig != nil {
+			config.Enabled = true
+			if !defaultConfig.Enabled {
+				config.AuditOnly = false
+			}
+		}
+
+		if err := repo.SaveProtectionConfig(config); err != nil {
+			return err
+		}
+
+		var runtimeUserRules []string
+		if foundDefaultUserRules {
+			runtimeUserRules = append([]string(nil), defaultUserRules...)
+			if err := repo.SaveShepherdSensitiveActions(assetName, assetID, runtimeUserRules); err != nil {
+				logging.Warning("API: Failed to copy default user rules for botId=%s: %v", assetID, err)
+			}
+		}
+
+		applyProtectionPolicyRuntime(nil, config, runtimeUserRules)
+		logging.Info("API: Applied default protection policy to newly discovered asset %s/%s", assetName, assetID)
+	}
+
+	return nil
 }

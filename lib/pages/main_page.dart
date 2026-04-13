@@ -356,8 +356,15 @@ class _MainPageState extends State<MainPage>
 
   Future<void> _initApiServerStatus() async {
     try {
-      final shouldEnable = await AppSettingsDatabaseService()
-          .getApiServerEnabled(defaultValue: true);
+      final forcedApiServerEnabled = _forcedApiServerEnabledFromEnv();
+      final shouldEnable =
+          forcedApiServerEnabled ??
+          await AppSettingsDatabaseService().getApiServerEnabled(
+            defaultValue: BuildConfig.defaultApiServerEnabled,
+          );
+      if (forcedApiServerEnabled != null) {
+        await AppSettingsDatabaseService().setApiServerEnabled(shouldEnable);
+      }
       await _applyApiServerState(
         shouldEnable,
         persistSetting: false,
@@ -367,6 +374,22 @@ class _MainPageState extends State<MainPage>
     } catch (e) {
       appLogger.error('[MainPage] Failed to init API Server status', e);
     }
+  }
+
+  bool? _forcedApiServerEnabledFromEnv() {
+    final rawValue = Platform.environment['BOTSEC_FORCE_API_SERVER_ENABLED'];
+    if (rawValue == null) {
+      return null;
+    }
+
+    final normalized = rawValue.trim().toLowerCase();
+    if (normalized == 'true' || normalized == '1') {
+      return true;
+    }
+    if (normalized == 'false' || normalized == '0') {
+      return false;
+    }
+    return null;
   }
 
   // ============ 切换 API Server 状态 ============
@@ -562,7 +585,9 @@ class _MainPageState extends State<MainPage>
   Future<void> _restoreScheduledScanSettings() async {
     try {
       final seconds = await AppSettingsDatabaseService()
-          .getScheduledScanIntervalSeconds();
+          .getScheduledScanIntervalSeconds(
+            defaultValue: BuildConfig.defaultScheduledScanIntervalSeconds,
+          );
       if (mounted) {
         setState(() {
           _scheduledScanIntervalSeconds = seconds;

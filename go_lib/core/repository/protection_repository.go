@@ -75,6 +75,15 @@ type ProtectionRepository struct {
 	db *sql.DB
 }
 
+const (
+	DefaultProtectionPolicyAssetID   = "__default_protection_policy__"
+	DefaultProtectionPolicyAssetName = "__default_protection_policy__"
+)
+
+func IsDefaultProtectionPolicyAssetID(assetID string) bool {
+	return strings.TrimSpace(assetID) == DefaultProtectionPolicyAssetID
+}
+
 // NewProtectionRepository 创建保护数据仓库实例
 func NewProtectionRepository(db *sql.DB) *ProtectionRepository {
 	if db == nil {
@@ -221,6 +230,11 @@ func (r *ProtectionRepository) SaveProtectionConfig(config *ProtectionConfig) er
 
 // GetProtectionConfig returns the protection config for the specified asset instance.
 func (r *ProtectionRepository) GetProtectionConfig(assetID string) (*ProtectionConfig, error) {
+// GetDefaultProtectionConfig 获取默认防护策略配置。
+func (r *ProtectionRepository) GetDefaultProtectionConfig() (*ProtectionConfig, error) {
+	return r.GetProtectionConfig(DefaultProtectionPolicyAssetID)
+}
+
 	if r.db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
@@ -256,7 +270,7 @@ func (r *ProtectionRepository) GetEnabledProtectionConfigs() ([]*ProtectionConfi
 		gateway_binary_path, gateway_config_path, custom_security_prompt, 
 		single_session_token_limit, daily_token_limit, 
 		path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at
-		FROM protection_config WHERE enabled = 1`)
+		FROM protection_config WHERE enabled = 1 AND asset_id <> ?`, DefaultProtectionPolicyAssetID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query enabled protection configs: %w", err)
 	}
@@ -292,7 +306,7 @@ func (r *ProtectionRepository) GetAllProtectionConfigs() ([]*ProtectionConfig, e
 		gateway_binary_path, gateway_config_path, custom_security_prompt,
 		single_session_token_limit, daily_token_limit,
 		path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at
-		FROM protection_config`)
+		FROM protection_config WHERE asset_id <> ?`, DefaultProtectionPolicyAssetID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query protection configs: %w", err)
 	}

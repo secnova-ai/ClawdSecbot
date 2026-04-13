@@ -188,10 +188,11 @@ class AppSettingsDatabaseService {
   /// Get scheduled scan interval in seconds.
   ///
   /// Returns 0 when the setting is missing, invalid, or disabled.
-  Future<int> getScheduledScanIntervalSeconds() async {
+  Future<int> getScheduledScanIntervalSeconds({int defaultValue = 0}) async {
     final value = await getSetting(scheduledScanIntervalKey);
     if (value.isEmpty) {
-      return 0;
+      await setScheduledScanIntervalSeconds(defaultValue);
+      return defaultValue;
     }
 
     final seconds = int.tryParse(value);
@@ -199,7 +200,7 @@ class AppSettingsDatabaseService {
       appLogger.warning(
         '[AppSettingsDB] Invalid scheduled scan interval value: $value',
       );
-      return 0;
+      return defaultValue;
     }
 
     return seconds;

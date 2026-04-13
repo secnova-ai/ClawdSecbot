@@ -843,6 +843,207 @@ func TestSetProtectionPolicy_ScannedBotWithoutConfigCreatesConfig(t *testing.T) 
 	}
 }
 
+func TestSetProtectionPolicy_WithoutBotIDCreatesDefaultPolicy(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	_, ts, token := setupTestServer(t)
+	defer ts.Close()
+
+	body := bytes.NewBufferString(`{"protection":"enabled","userRules":["confirm-delete"],"botModel":{"provider":"openai","id":"gpt-4.1","url":"https://bot.example.com/v1","key":"bot-key"}}`)
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1/protection/policy", body)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	assertStatusCode(t, resp.StatusCode, http.StatusOK)
+
+	config, err := repository.NewProtectionRepository(nil).GetDefaultProtectionConfig()
+	if err != nil {
+		t.Fatalf("GetDefaultProtectionConfig failed: %v", err)
+	}
+	if config == nil {
+		t.Fatal("expected default protection policy to be created")
+	}
+	if !config.Enabled || config.AuditOnly {
+		t.Fatalf("expected enabled default policy, got %+v", config)
+	}
+	if config.BotModelConfig == nil || config.BotModelConfig.Model != "gpt-4.1" {
+		t.Fatalf("expected default bot model to be saved, got %+v", config.BotModelConfig)
+	}
+
+	rules, found, err := repository.NewProtectionRepository(nil).GetShepherdSensitiveActions(
+		repository.DefaultProtectionPolicyAssetName,
+		repository.DefaultProtectionPolicyAssetID,
+	)
+	if err != nil {
+		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+	}
+	if !found || len(rules) != 1 || rules[0] != "confirm-delete" {
+		t.Fatalf("expected default user rules to be saved, got found=%v rules=%v", found, rules)
+	}
+}
+
+func TestHandleScan_AppliesDefaultPolicyToNewAssets(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	repo := repository.NewProtectionRepository(nil)
+	if err := repo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName:      repository.DefaultProtectionPolicyAssetName,
+		AssetID:        repository.DefaultProtectionPolicyAssetID,
+		Enabled:        true,
+		AuditOnly:      true,
+		SandboxEnabled: true,
+		BotModelConfig: &repository.BotModelConfigData{
+			Provider: "openai",
+			BaseURL:  "https://bot.example.com/v1",
+			APIKey:   "bot-key",
+			Model:    "gpt-4.1",
+		},
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig failed: %v", err)
+	}
+	if err := repository.NewSecurityModelConfigRepository(nil).Save(&repository.SecurityModelConfig{
+		Provider: "openai",
+		Endpoint: "https://security.example.com/v1",
+		APIKey:   "sec-key",
+		Model:    "gpt-4.1-mini",
+	}); err != nil {
+		t.Fatalf("Save security model failed: %v", err)
+	}
+	if err := repo.SaveShepherdSensitiveActions(
+		repository.DefaultProtectionPolicyAssetName,
+		repository.DefaultProtectionPolicyAssetID,
+		[]string{"confirm-delete"},
+	); err != nil {
+		t.Fatalf("SaveShepherdSensitiveActions failed: %v", err)
+	}
+
+	registerScannedAPITestAsset(t, "PolicyScanAutoApply", "policy-scan-auto-apply")
+
+	var startPayload string
+	originalStart := startProtectionProxyForPolicy
+	startProtectionProxyForPolicy = func(configJSON string) string {
+		startPayload = configJSON
+		return `{"success":true}`
+	}
+	t.Cleanup(func() {
+		startProtectionProxyForPolicy = originalStart
+	})
+
+	_, ts, token := setupTestServer(t)
+	defer ts.Close()
+
+	req := newAuthRequest("POST", "/api/v1/scan", token, nil)
+	rec := httptest.NewRecorder()
+	ts.Config.Handler.ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Code, http.StatusOK)
+
+	config, err := repo.GetProtectionConfig("PolicyScanAutoApply", "policy-scan-auto-apply")
+	if err != nil {
+		t.Fatalf("GetProtectionConfig failed: %v", err)
+	}
+	if config == nil {
+		t.Fatal("expected scan to create asset-specific protection config")
+	}
+	if !config.Enabled || !config.AuditOnly || !config.SandboxEnabled {
+		t.Fatalf("expected config to inherit default policy, got %+v", config)
+	}
+	if config.BotModelConfig == nil || config.BotModelConfig.Model != "gpt-4.1" {
+		t.Fatalf("expected bot model to inherit default policy, got %+v", config.BotModelConfig)
+	}
+
+	rules, found, err := repo.GetShepherdSensitiveActions("PolicyScanAutoApply", "policy-scan-auto-apply")
+	if err != nil {
+		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+	}
+	if !found || len(rules) != 1 || rules[0] != "confirm-delete" {
+		t.Fatalf("expected inherited user rules, got found=%v rules=%v", found, rules)
+	}
+
+	if startPayload == "" {
+		t.Fatal("expected scan to start protection for the new asset")
+	}
+}
+
+func TestHandleScan_AutoEnablesProtectionForNewAssetsWhenDefaultBotModelExists(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	repo := repository.NewProtectionRepository(nil)
+	if err := repo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName:      repository.DefaultProtectionPolicyAssetName,
+		AssetID:        repository.DefaultProtectionPolicyAssetID,
+		Enabled:        false,
+		AuditOnly:      false,
+		SandboxEnabled: true,
+		BotModelConfig: &repository.BotModelConfigData{
+			Provider: "openai",
+			BaseURL:  "https://bot.example.com/v1",
+			APIKey:   "bot-key",
+			Model:    "gpt-4.1",
+		},
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig failed: %v", err)
+	}
+	if err := repository.NewSecurityModelConfigRepository(nil).Save(&repository.SecurityModelConfig{
+		Provider: "openai",
+		Endpoint: "https://security.example.com/v1",
+		APIKey:   "sec-key",
+		Model:    "gpt-4.1-mini",
+	}); err != nil {
+		t.Fatalf("Save security model failed: %v", err)
+	}
+
+	registerScannedAPITestAsset(t, "PolicyScanAutoEnable", "policy-scan-auto-enable")
+
+	var startPayload string
+	originalStart := startProtectionProxyForPolicy
+	startProtectionProxyForPolicy = func(configJSON string) string {
+		startPayload = configJSON
+		return `{"success":true}`
+	}
+	t.Cleanup(func() {
+		startProtectionProxyForPolicy = originalStart
+	})
+
+	_, ts, token := setupTestServer(t)
+	defer ts.Close()
+
+	req := newAuthRequest("POST", "/api/v1/scan", token, nil)
+	rec := httptest.NewRecorder()
+	ts.Config.Handler.ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Code, http.StatusOK)
+
+	config, err := repo.GetProtectionConfig("PolicyScanAutoEnable", "policy-scan-auto-enable")
+	if err != nil {
+		t.Fatalf("GetProtectionConfig failed: %v", err)
+	}
+	if config == nil {
+		t.Fatal("expected scan to create asset-specific protection config")
+	}
+	if !config.Enabled {
+		t.Fatalf("expected new asset protection to auto-enable when default bot model exists, got %+v", config)
+	}
+	if config.AuditOnly {
+		t.Fatalf("expected auto-enabled protection to run in active mode, got %+v", config)
+	}
+	if config.BotModelConfig == nil || config.BotModelConfig.Model != "gpt-4.1" {
+		t.Fatalf("expected bot model to inherit default config, got %+v", config.BotModelConfig)
+	}
+	if startPayload == "" {
+		t.Fatal("expected scan to start protection for the new asset")
+	}
+}
+
 func TestSetSecurityModel_SavesConfig(t *testing.T) {
 	setupPolicyRuntimeTestDB(t)
 
@@ -1361,6 +1562,11 @@ func TestBotInfo_JSONStructure(t *testing.T) {
 	if parsed["protection"] != "enabled" {
 		t.Errorf("Expected protection='enabled', got %v", parsed["protection"])
 	}
+	for _, field := range []string{"pid", "image", "conf", "bind", "botModel", "metrics"} {
+		if _, exists := parsed[field]; !exists {
+			t.Errorf("Expected field %q in BotInfo JSON", field)
+		}
+	}
 	botModel, ok := parsed["botModel"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("Expected botModel to be an object")
@@ -1751,8 +1957,13 @@ func TestError_ResponseFormat(t *testing.T) {
 
 func TestScanResponse_JSONStructure(t *testing.T) {
 	resp := ScanResponse{
-		Message:  "scan completed",
-		ScanTime: time.Now().Format(time.RFC3339),
+		Message:       "scan completed",
+		ScanTime:      time.Now().Format(time.RFC3339),
+		BotInfo:       []BotInfo{},
+		RiskInfo:      []RiskInfo{},
+		SkillResult:   []SkillResultInfo{},
+		SecurityModel: &SecurityModelInfo{},
+		Timestamp:     time.Now().UnixMilli(),
 	}
 
 	data, err := json.Marshal(resp)
@@ -1765,11 +1976,125 @@ func TestScanResponse_JSONStructure(t *testing.T) {
 		t.Fatalf("Failed to unmarshal: %v", err)
 	}
 
-	expectedFields := []string{"message", "scanTime"}
+	expectedFields := []string{"message", "scanTime", "botInfo", "riskInfo", "skillResult", "securityModel", "timestamp"}
 	for _, field := range expectedFields {
 		if _, exists := parsed[field]; !exists {
 			t.Errorf("Expected field %q in ScanResponse JSON", field)
 		}
+	}
+}
+
+func TestEnsureStatusDataShape_DefaultsEmptyCollections(t *testing.T) {
+	status := ensureStatusDataShape(&StatusData{
+		BotInfo: []BotInfo{{
+			Name: "bot-a",
+			ID:   "bot-a",
+		}},
+		RiskInfo: []RiskInfo{{
+			Name:  "risk-a",
+			Level: "low",
+		}},
+		SkillResult:   nil,
+		SecurityModel: nil,
+	})
+
+	if status.SkillResult == nil {
+		t.Fatal("skillResult should be an empty array, not nil")
+	}
+	if status.SecurityModel == nil {
+		t.Fatal("securityModel should default to an empty object")
+	}
+	if status.BotInfo[0].BotModel == nil {
+		t.Fatal("botInfo.botModel should default to an empty object")
+	}
+	if status.BotInfo[0].Metrics == nil {
+		t.Fatal("botInfo.metrics should default to an empty object")
+	}
+	if status.RiskInfo[0].Mitigation == nil {
+		t.Fatal("riskInfo.mitigation should default to an empty array")
+	}
+}
+
+func TestCollectBotInfoFromAssets_DefaultsProtectionDisabledAndFillsFields(t *testing.T) {
+	svc := &ExportServiceImpl{}
+	infos := svc.collectBotInfoFromAssets([]core.Asset{
+		{
+			ID:           "bot-openclaw-1",
+			Name:         "OpenClaw Bot",
+			SourcePlugin: "openclaw",
+			ProcessPaths: []string{"/usr/local/bin/openclaw-gateway"},
+			DisplaySections: []core.DisplaySection{
+				{
+					Title: "Gateway Configuration",
+					Items: []core.DisplayItem{
+						{Label: "Bind", Value: "127.0.0.1"},
+						{Label: "Port", Value: "18789"},
+					},
+				},
+			},
+			Metadata: map[string]string{
+				"config_path":  "/tmp/openclaw.json",
+				"gateway_bind": "127.0.0.1",
+				"gateway_port": "18789",
+			},
+		},
+	})
+
+	if len(infos) != 1 {
+		t.Fatalf("collectBotInfoFromAssets() count = %d, want 1", len(infos))
+	}
+
+	info := infos[0]
+	if info.PID != "N/A" {
+		t.Fatalf("PID = %q, want %q", info.PID, "N/A")
+	}
+	if info.Image != "/usr/local/bin/openclaw-gateway" {
+		t.Fatalf("Image = %q, want %q", info.Image, "/usr/local/bin/openclaw-gateway")
+	}
+	if info.Bind != "127.0.0.1:18789" {
+		t.Fatalf("Bind = %q, want %q", info.Bind, "127.0.0.1:18789")
+	}
+	if info.Protection != "disabled" {
+		t.Fatalf("Protection = %q, want %q", info.Protection, "disabled")
+	}
+}
+
+func TestCollectBotInfoFromAssets_UsesDisplaySectionsAsFallback(t *testing.T) {
+	svc := &ExportServiceImpl{}
+	infos := svc.collectBotInfoFromAssets([]core.Asset{
+		{
+			ID:           "bot-dintalclaw-1",
+			Name:         "DintalClaw",
+			SourcePlugin: "dintalclaw",
+			DisplaySections: []core.DisplaySection{
+				{
+					Title: "Process Info",
+					Items: []core.DisplayItem{
+						{Label: "Image Path", Value: "/opt/dintalclaw/python"},
+						{Label: "PID", Value: "4321"},
+						{Label: "Listener Address", Value: "127.0.0.1:8080, 0.0.0.0:8081"},
+					},
+				},
+			},
+		},
+	})
+
+	if len(infos) != 1 {
+		t.Fatalf("collectBotInfoFromAssets() count = %d, want 1", len(infos))
+	}
+
+	info := infos[0]
+	if info.PID != "4321" {
+		t.Fatalf("PID = %q, want %q", info.PID, "4321")
+	}
+	if info.Image != "/opt/dintalclaw/python" {
+		t.Fatalf("Image = %q, want %q", info.Image, "/opt/dintalclaw/python")
+	}
+	if info.Bind != "127.0.0.1:8080" {
+		t.Fatalf("Bind = %q, want %q", info.Bind, "127.0.0.1:8080")
+	}
+	if info.Protection != "disabled" {
+		t.Fatalf("Protection = %q, want %q", info.Protection, "disabled")
 	}
 }
 

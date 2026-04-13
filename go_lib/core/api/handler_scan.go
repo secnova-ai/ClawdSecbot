@@ -12,8 +12,13 @@ import (
 
 // ScanResponse represents the response for a scan request.
 type ScanResponse struct {
-	Message  string `json:"message"`
-	ScanTime string `json:"scanTime"`
+	Message       string             `json:"message"`
+	ScanTime      string             `json:"scanTime"`
+	BotInfo       []BotInfo          `json:"botInfo"`
+	RiskInfo      []RiskInfo         `json:"riskInfo"`
+	SkillResult   []SkillResultInfo  `json:"skillResult"`
+	SecurityModel *SecurityModelInfo `json:"securityModel"`
+	Timestamp     int64              `json:"timestamp"`
 }
 
 // handleScan handles POST /api/v1/scan
@@ -75,7 +80,16 @@ func (s *APIServer) handleScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 5: If export is running, write status.json immediately.
+	// Step 5: Materialize the default protection policy onto newly discovered
+	// assets so later protection/runtime flows operate on concrete bot IDs.
+	protectionRepo := repository.NewProtectionRepository(nil)
+	if err := applyDefaultProtectionPolicyToAssets(protectionRepo, assets); err != nil {
+		logging.Error("API: Failed to apply default protection policy after scan: %v", err)
+		Error(w, http.StatusInternalServerError, CodeInternalError, "apply default protection policy failed: "+err.Error())
+		return
+	}
+
+	// Step 6: If export is running, write status.json immediately.
 	s.mu.Lock()
 	exportService := s.exportService
 	s.mu.Unlock()
@@ -89,8 +103,14 @@ func (s *APIServer) handleScan(w http.ResponseWriter, r *http.Request) {
 
 	logging.Info("API: Security scan completed in %v, assets=%d, risks=%d", scanDuration, len(assets), len(risks))
 
+	status := (&ExportServiceImpl{}).buildStatus()
 	Success(w, ScanResponse{
-		Message:  "scan completed",
-		ScanTime: scanTime,
+		Message:       "scan completed",
+		ScanTime:      scanTime,
+		BotInfo:       status.BotInfo,
+		RiskInfo:      status.RiskInfo,
+		SkillResult:   status.SkillResult,
+		SecurityModel: status.SecurityModel,
+		Timestamp:     status.Timestamp,
 	})
 }

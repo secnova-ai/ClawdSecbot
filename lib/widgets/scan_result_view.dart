@@ -946,13 +946,13 @@ class _AssetCardState extends State<_AssetCard> {
         for (int i = 0; i < sections.length; i++) ...[
           if (i > 0) const SizedBox(height: 12),
           _buildConfigSectionHeader(
-            _localizeText(sections[i].title, isZh),
-            _mapSectionIcon(sections[i].icon),
+            _localizePluginText(sections[i].title, isZh),
+            _mapPluginSectionIcon(sections[i].icon),
           ),
           const SizedBox(height: 8),
           for (final item in sections[i].items)
             _buildConfigDetailRow(
-              _localizeText(item.label, isZh),
+              _localizePluginText(item.label, isZh),
               _localizeDisplayValue(item.value, isZh),
               _statusColor(item.status),
             ),
@@ -1048,6 +1048,55 @@ class _AssetCardState extends State<_AssetCard> {
       default:
         return LucideIcons.info;
     }
+  }
+
+  String _localizePluginText(String text, bool isZh) {
+    final localized = _localizeText(text, isZh);
+    if (!isZh || localized != text) return localized;
+    const zhMap = {
+      'Gateway Configuration': '网关配置',
+      'Sandbox': '沙箱',
+      'Logging': '日志',
+      'Config': '配置',
+      'Runtime': '运行时',
+      'Asset Status': '资产状态',
+      'Basic Info': '基本信息',
+      'Process Info': '进程信息',
+      'Bind': '绑定地址',
+      'Port': '端口',
+      'Auth': '认证',
+      'Mode': '模式',
+      'Redact': '脱敏',
+      'Path': '路径',
+      'Runtime Listeners': '运行时监听',
+      'Listener': '监听地址',
+      'Listener Address': '监听地址',
+      'Installation': '安装信息',
+      'Root': '安装根目录',
+      'Status': '状态',
+      'Version': '版本号',
+      'Install Path': '安装路径',
+      'Config File': '配置文件',
+      'Log Path': '日志路径',
+      'Process Name': '进程名称',
+      'PID': '进程 ID',
+      'Image Path': '可执行路径',
+      'Audit': '审计',
+      'Host': '主机',
+      'Pairing Required': '配对认证',
+      'Allow Public Bind': '允许公网绑定',
+      'Backend': '后端',
+      'Workspace Only': '仅工作区',
+      'Enabled': '启用状态',
+    };
+    return zhMap[text] ?? text;
+  }
+
+  IconData _mapPluginSectionIcon(String iconName) {
+    if (iconName == 'monitor') {
+      return LucideIcons.monitor;
+    }
+    return _mapSectionIcon(iconName);
   }
 
   Color _statusColor(String status) {

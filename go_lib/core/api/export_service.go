@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -299,7 +300,7 @@ func (s *ExportServiceImpl) buildStatus() *StatusData {
 	// Get security model config
 	status.SecurityModel = s.collectSecurityModel()
 
-	return status
+	return ensureStatusDataShape(status)
 }
 
 // collectBotInfo collects bot information from assets and protection configs.
@@ -319,32 +320,19 @@ func (s *ExportServiceImpl) getLatestAssets() []core.Asset {
 
 // collectBotInfo collects bot information from assets and protection configs.
 func (s *ExportServiceImpl) collectBotInfoFromAssets(assets []core.Asset) []BotInfo {
-	var botInfos []BotInfo
+	botInfos := make([]BotInfo, 0, len(assets))
 
 	for _, asset := range assets {
 		info := BotInfo{
-			Name: asset.Name,
-			ID:   asset.ID,
-		}
-
-		// Get config path from metadata
-		if configPath, ok := asset.Metadata["config_path"]; ok {
-			info.Conf = configPath
-		}
-
-		// Get bind address from metadata
-		if bind, ok := asset.Metadata["bind"]; ok {
-			info.Bind = bind
-		}
-
-		// Get image/process name
-		if len(asset.ProcessPaths) > 0 {
-			info.Image = filepath.Base(asset.ProcessPaths[0])
-		}
-
-		// Get PID from metadata
-		if pid, ok := asset.Metadata["pid"]; ok {
-			info.PID = pid
+			Name:       asset.Name,
+			ID:         asset.ID,
+			PID:        resolveBotPID(asset),
+			Image:      resolveBotImage(asset),
+			Conf:       strings.TrimSpace(asset.Metadata["config_path"]),
+			Bind:       resolveBotBind(asset),
+			Protection: "disabled",
+			BotModel:   &BotModelInfo{},
+			Metrics:    &MetricsInfo{},
 		}
 
 		// Get protection config and statistics
@@ -398,7 +386,7 @@ func (s *ExportServiceImpl) collectBotInfoFromAssets(assets []core.Asset) []BotI
 
 // collectRiskInfo collects risk information from latest scan.
 func (s *ExportServiceImpl) collectRiskInfo(assets []core.Asset) []RiskInfo {
-	var riskInfos []RiskInfo
+	riskInfos := make([]RiskInfo, 0)
 
 	scanResult := service.GetLatestScanResult()
 	if scanResult["success"] != true {
@@ -446,7 +434,7 @@ func (s *ExportServiceImpl) collectRiskInfo(assets []core.Asset) []RiskInfo {
 
 // collectSkillResults collects skill scan results.
 func (s *ExportServiceImpl) collectSkillResults(assets []core.Asset) []SkillResultInfo {
-	var skillResults []SkillResultInfo
+	skillResults := make([]SkillResultInfo, 0)
 
 	result := service.GetRiskySkills()
 	if result["success"] != true {
@@ -496,7 +484,7 @@ func (s *ExportServiceImpl) collectSkillResults(assets []core.Asset) []SkillResu
 func (s *ExportServiceImpl) collectSecurityModel() *SecurityModelInfo {
 	result := service.GetSecurityModelConfig()
 	if result["success"] != true {
-		return nil
+		return &SecurityModelInfo{}
 	}
 
 	config, ok := result["data"].(*repository.SecurityModelConfig)
@@ -787,13 +775,13 @@ type StatusData struct {
 type BotInfo struct {
 	Name       string        `json:"name"`
 	ID         string        `json:"id"`
-	PID        string        `json:"pid,omitempty"`
-	Image      string        `json:"image,omitempty"`
-	Conf       string        `json:"conf,omitempty"`
-	Bind       string        `json:"bind,omitempty"`
-	Protection string        `json:"protection,omitempty"`
-	BotModel   *BotModelInfo `json:"botModel,omitempty"`
-	Metrics    *MetricsInfo  `json:"metrics,omitempty"`
+	PID        string        `json:"pid"`
+	Image      string        `json:"image"`
+	Conf       string        `json:"conf"`
+	Bind       string        `json:"bind"`
+	Protection string        `json:"protection"`
+	BotModel   *BotModelInfo `json:"botModel"`
+	Metrics    *MetricsInfo  `json:"metrics"`
 }
 
 // BotModelInfo represents bot model configuration.
@@ -901,4 +889,169 @@ type exportError struct {
 
 func (e *exportError) Error() string {
 	return e.msg
+}
+
+func ensureStatusDataShape(status *StatusData) *StatusData {
+	if status == nil {
+		return &StatusData{
+			BotInfo:       []BotInfo{},
+			RiskInfo:      []RiskInfo{},
+			SkillResult:   []SkillResultInfo{},
+			SecurityModel: &SecurityModelInfo{},
+		}
+	}
+
+	if status.BotInfo == nil {
+		status.BotInfo = []BotInfo{}
+	}
+	if status.RiskInfo == nil {
+		status.RiskInfo = []RiskInfo{}
+	}
+	if status.SkillResult == nil {
+		status.SkillResult = []SkillResultInfo{}
+	}
+	if status.SecurityModel == nil {
+		status.SecurityModel = &SecurityModelInfo{}
+	}
+
+	for i := range status.BotInfo {
+		if status.BotInfo[i].BotModel == nil {
+			status.BotInfo[i].BotModel = &BotModelInfo{}
+		}
+		if status.BotInfo[i].Metrics == nil {
+			status.BotInfo[i].Metrics = &MetricsInfo{}
+		}
+	}
+
+	for i := range status.RiskInfo {
+		if status.RiskInfo[i].Mitigation == nil {
+			status.RiskInfo[i].Mitigation = []MitigationInfo{}
+		}
+	}
+
+	for i := range status.SkillResult {
+		if status.SkillResult[i].Issue == nil {
+			status.SkillResult[i].Issue = []SkillIssue{}
+		}
+	}
+
+	return status
+}
+
+func resolveBotPID(asset core.Asset) string {
+	for _, key := range []string{"pid", "managed_pid"} {
+		if value := strings.TrimSpace(asset.Metadata[key]); value != "" {
+			if first := firstCSVValue(value); first != "" {
+				return first
+			}
+		}
+	}
+
+	if value, ok := findDisplayItemValue(asset, "PID"); ok {
+		first := firstCSVValue(value)
+		if first != "" {
+			if _, err := strconv.Atoi(first); err == nil {
+				return first
+			}
+		}
+	}
+
+	return "N/A"
+}
+
+func resolveBotImage(asset core.Asset) string {
+	if len(asset.ProcessPaths) > 0 {
+		if value := strings.TrimSpace(asset.ProcessPaths[0]); value != "" {
+			return value
+		}
+	}
+
+	if value, ok := findDisplayItemValue(asset, "Image Path"); ok {
+		if first := firstCSVValue(value); first != "" {
+			return first
+		}
+	}
+
+	if value, ok := findDisplayItemValue(asset, "Process Name"); ok {
+		if first := firstCSVValue(value); first != "" {
+			return first
+		}
+	}
+
+	return "N/A"
+}
+
+func resolveBotBind(asset core.Asset) string {
+	if bind, ok := findDisplayItemValue(asset, "Bind"); ok {
+		if port, ok := findDisplayItemValue(asset, "Port"); ok {
+			return joinHostPort(bind, port)
+		}
+		if first := firstCSVValue(bind); first != "" {
+			return first
+		}
+	}
+
+	if host, ok := findDisplayItemValue(asset, "Host"); ok {
+		if port, ok := findDisplayItemValue(asset, "Port"); ok {
+			return joinHostPort(host, port)
+		}
+		if first := firstCSVValue(host); first != "" {
+			return first
+		}
+	}
+
+	if value, ok := findDisplayItemValue(asset, "Listener Address"); ok {
+		if first := firstCSVValue(value); first != "" {
+			return first
+		}
+	}
+
+	return "N/A"
+}
+
+func findDisplayItemValue(asset core.Asset, label string) (string, bool) {
+	target := strings.TrimSpace(strings.ToLower(label))
+	if target == "" {
+		return "", false
+	}
+
+	for _, section := range asset.DisplaySections {
+		for _, item := range section.Items {
+			if strings.TrimSpace(strings.ToLower(item.Label)) != target {
+				continue
+			}
+			value := strings.TrimSpace(item.Value)
+			if value == "" || strings.EqualFold(value, "N/A") {
+				return "", false
+			}
+			return value, true
+		}
+	}
+
+	return "", false
+}
+
+func firstCSVValue(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" || strings.EqualFold(value, "N/A") {
+		return ""
+	}
+
+	if idx := strings.Index(value, ","); idx >= 0 {
+		value = value[:idx]
+	}
+
+	return strings.TrimSpace(value)
+}
+
+func joinHostPort(host, port string) string {
+	host = firstCSVValue(host)
+	port = firstCSVValue(port)
+	if host == "" {
+		return "N/A"
+	}
+	if port == "" || strings.Contains(host, ":") {
+		return host
+	}
+	return host + ":" + port
 }

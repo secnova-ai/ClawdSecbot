@@ -2,6 +2,7 @@ package core
 
 import (
 	"bufio"
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -62,6 +63,12 @@ func (c *platformCollector) getOpenPorts() ([]int, error) {
 
 // getRunningProcesses uses tasklist to get running processes on Windows
 func (c *platformCollector) getRunningProcesses() ([]SystemProcess, error) {
+	if procs, err := c.getRunningProcessesFromCIM(); err == nil && len(procs) > 0 {
+		return procs, nil
+	} else if err != nil {
+		logging.Warning("Get-CimInstance process collection failed, falling back to tasklist: %v", err)
+	}
+
 	logging.Debug("Running tasklist to get processes...")
 	// /FO CSV /NH: CSV format, no header
 	cmd := cmdutil.Command("tasklist", "/FO", "CSV", "/NH")
@@ -103,6 +110,78 @@ func (c *platformCollector) getRunningProcesses() ([]SystemProcess, error) {
 	}
 	logging.Debug("Found %d processes", len(procs))
 	return procs, nil
+}
+
+func (c *platformCollector) getRunningProcessesFromCIM() ([]SystemProcess, error) {
+	logging.Debug("Running Get-CimInstance to get processes...")
+	cmd := cmdutil.Command(
+		"powershell",
+		"-NoProfile",
+		"-Command",
+		"Get-CimInstance Win32_Process | Select-Object ProcessId,Name,ExecutablePath,CommandLine | ConvertTo-Json -Compress",
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	procs, err := parseWindowsProcessJSON(output)
+	if err != nil {
+		return nil, err
+	}
+	logging.Debug("Found %d processes via CIM", len(procs))
+	return procs, nil
+}
+
+type windowsProcessRecord struct {
+	ProcessID      int32  `json:"ProcessId"`
+	Name           string `json:"Name"`
+	ExecutablePath string `json:"ExecutablePath"`
+	CommandLine    string `json:"CommandLine"`
+}
+
+func parseWindowsProcessJSON(raw []byte) ([]SystemProcess, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return []SystemProcess{}, nil
+	}
+
+	var many []windowsProcessRecord
+	if err := json.Unmarshal([]byte(trimmed), &many); err == nil {
+		return windowsProcessRecordsToSystemProcesses(many), nil
+	}
+
+	var single windowsProcessRecord
+	if err := json.Unmarshal([]byte(trimmed), &single); err != nil {
+		return nil, err
+	}
+	return windowsProcessRecordsToSystemProcesses([]windowsProcessRecord{single}), nil
+}
+
+func windowsProcessRecordsToSystemProcesses(records []windowsProcessRecord) []SystemProcess {
+	procs := make([]SystemProcess, 0, len(records))
+	for _, record := range records {
+		name := strings.TrimSpace(record.Name)
+		path := strings.TrimSpace(record.ExecutablePath)
+		cmdline := strings.TrimSpace(record.CommandLine)
+		if path == "" {
+			path = name
+		}
+		if cmdline == "" {
+			cmdline = path
+		}
+		if name == "" && path == "" && cmdline == "" {
+			continue
+		}
+
+		procs = append(procs, SystemProcess{
+			Pid:  record.ProcessID,
+			Name: name,
+			Cmd:  cmdline,
+			Path: path,
+		})
+	}
+	return procs
 }
 
 // getServices uses sc query to get Windows services

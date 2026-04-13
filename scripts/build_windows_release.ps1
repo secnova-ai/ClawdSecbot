@@ -828,7 +828,14 @@ try {
     }
 
     Write-Step "Building Flutter Windows release"
-    $buildArgs = @("build", "windows", "--release", "--no-tree-shake-icons")
+    $buildArgs = @(
+        "build",
+        "windows",
+        "--release",
+        "--no-tree-shake-icons",
+        "--dart-define=BUILD_VARIANT=personal",
+        "--dart-define=BUILD_TYPE=$Type"
+    )
 
     $oldStorage = $env:FLUTTER_STORAGE_BASE_URL
     $oldPub = $env:PUB_HOSTED_URL

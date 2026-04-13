@@ -213,3 +213,28 @@ func TestNullclawAssetScanner_CollectorError(t *testing.T) {
 		t.Errorf("Expected 0 assets on collector failure, got %d", len(assets))
 	}
 }
+
+func TestBuildRuntimeSection_ShowsPIDAndImagePath(t *testing.T) {
+	section := buildRuntimeSection(&core.Asset{
+		ProcessPaths: []string{"/usr/local/bin/nullclaw"},
+		Metadata: map[string]string{
+			"pid": "901",
+		},
+	})
+
+	if section == nil {
+		t.Fatal("Expected runtime section to be created")
+	}
+	if section.Title != "Runtime" {
+		t.Fatalf("Expected Runtime title, got %q", section.Title)
+	}
+	if len(section.Items) != 2 {
+		t.Fatalf("Expected 2 runtime items, got %d", len(section.Items))
+	}
+	if section.Items[0].Label != "PID" || section.Items[0].Value != "901" {
+		t.Fatalf("Unexpected PID item: %+v", section.Items[0])
+	}
+	if section.Items[1].Label != "Image Path" || section.Items[1].Value != "/usr/local/bin/nullclaw" {
+		t.Fatalf("Unexpected image item: %+v", section.Items[1])
+	}
+}
