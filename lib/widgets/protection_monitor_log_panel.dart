@@ -981,6 +981,7 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
     final hasContent = contentText.isNotEmpty;
     final tokenStr = group.totalTokens > 0
         ? '${group.promptTokens} / ${group.completionTokens} / ${group.totalTokens}'
+              '${(group.conversationTokens > 0 || group.dailyTokens > 0) ? ' | 会话 ${group.conversationTokens} / 今日 ${group.dailyTokens}' : ''}'
         : '';
 
     // === 对话摘要：展示 user/assistant/tool 的有效文本 ===

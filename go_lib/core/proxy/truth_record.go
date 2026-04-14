@@ -69,13 +69,15 @@ type TruthRecord struct {
 	Decision *SecurityDecision `json:"decision,omitempty"`
 
 	// Token 指标 — TotalTokens 由前端计算
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
+	PromptTokens       int `json:"prompt_tokens"`
+	CompletionTokens   int `json:"completion_tokens"`
+	ConversationTokens int `json:"conversation_tokens,omitempty"`
+	DailyTokens        int `json:"daily_tokens,omitempty"`
 }
 
 // SecurityDecision 安全决策子结构，将原 RequestView 和 AuditLog 中 9 个散落字段收敛为一体。
 type SecurityDecision struct {
-	Action     string `json:"action"`              // ALLOW | WARN | BLOCK | HARD_BLOCK
+	Action     string `json:"action"`               // ALLOW | WARN | BLOCK | HARD_BLOCK
 	RiskLevel  string `json:"risk_level,omitempty"` // SAFE | SUSPICIOUS | DANGEROUS | CRITICAL
 	Reason     string `json:"reason,omitempty"`
 	Confidence int    `json:"confidence,omitempty"` // 0-100
@@ -648,26 +650,28 @@ func truthRecordsToAuditCompat(records []TruthRecord) []map[string]interface{} {
 		}
 
 		entry := map[string]interface{}{
-			"id":                r.RequestID,
-			"timestamp":         r.StartedAt,
-			"request_id":        r.RequestID,
-			"asset_name":        r.AssetName,
-			"asset_id":          r.AssetID,
-			"model":             r.Model,
-			"request_content":   requestContent,
-			"tool_calls":        toolCalls,
-			"output_content":    r.OutputContent,
-			"has_risk":          hasRisk,
-			"risk_level":        riskLevel,
-			"risk_reason":       riskReason,
-			"confidence":        confidence,
-			"action":            action,
-			"prompt_tokens":     r.PromptTokens,
-			"completion_tokens": r.CompletionTokens,
-			"total_tokens":      r.PromptTokens + r.CompletionTokens,
-			"duration_ms":       durationMs,
-			"messages":          messagesJSON,
-			"message_count":     r.MessageCount,
+			"id":                  r.RequestID,
+			"timestamp":           r.StartedAt,
+			"request_id":          r.RequestID,
+			"asset_name":          r.AssetName,
+			"asset_id":            r.AssetID,
+			"model":               r.Model,
+			"request_content":     requestContent,
+			"tool_calls":          toolCalls,
+			"output_content":      r.OutputContent,
+			"has_risk":            hasRisk,
+			"risk_level":          riskLevel,
+			"risk_reason":         riskReason,
+			"confidence":          confidence,
+			"action":              action,
+			"prompt_tokens":       r.PromptTokens,
+			"completion_tokens":   r.CompletionTokens,
+			"conversation_tokens": r.ConversationTokens,
+			"daily_tokens":        r.DailyTokens,
+			"total_tokens":        r.PromptTokens + r.CompletionTokens,
+			"duration_ms":         durationMs,
+			"messages":            messagesJSON,
+			"message_count":       r.MessageCount,
 		}
 		out = append(out, entry)
 	}
