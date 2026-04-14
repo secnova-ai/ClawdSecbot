@@ -56,6 +56,73 @@ class ProtectionConfigDialog extends StatefulWidget {
 
 class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     with SingleTickerProviderStateMixin {
+  static const Map<String, String> _zhSensitiveActionLabels = {
+    'delete': '删除',
+    'remove': '移除',
+    'drop': '删除（数据库）',
+    'truncate': '清空（数据库）',
+    'update': '更新',
+    'write': '写入',
+    'edit': '编辑',
+    'modify': '修改',
+    'execute': '执行',
+    'exec': '执行',
+    'run': '运行',
+    'install': '安装',
+    'uninstall': '卸载',
+    'chmod': '修改权限',
+    'chown': '修改属主',
+    'sudo': '提权执行',
+    'kill': '终止进程',
+    'shutdown': '关机',
+    'reboot': '重启',
+    'format': '格式化',
+    'rm': '删除文件',
+    'mv': '移动文件',
+    'cp': '复制文件',
+    'curl': '网络请求',
+    'wget': '网络下载',
+    'ssh': '远程连接',
+    'scp': '远程传输',
+    'powershell': 'PowerShell 执行',
+    'bash': 'Bash 执行',
+    'cmd': '命令行执行',
+  };
+
+  static const Map<String, String> _zhBundledSkillNameLabels = {
+    'data_exfiltration_guard': '数据外泄防护',
+    'file_access_guard': '文件访问防护',
+    'email_delete_guard': '邮件高风险操作防护',
+    'email_read_guard': '邮件高风险操作防护',
+    'email_operation_guard': '邮件高风险操作防护',
+    'browser_web_access_guard': '网页访问风险防护',
+    'prompt_injection_guard': '提示注入防护',
+    'script_execution_guard': '脚本执行防护',
+    'general_tool_risk_guard': '通用工具风险防护',
+    'supply_chain_guard': '供应链风险防护',
+    'persistence_backdoor_guard': '持久化后门防护',
+    'lateral_movement_guard': '横向移动风险防护',
+    'resource_exhaustion_guard': '资源耗尽风险防护',
+    'skill_installation_guard': '技能安装风险防护',
+  };
+
+  static const Map<String, String> _zhBundledSkillDescLabels = {
+    'data_exfiltration_guard': '检测并拦截可疑的数据导出、上传、批量外发行为。',
+    'file_access_guard': '约束高风险文件路径访问，防止越权读取和敏感文件操作。',
+    'email_delete_guard': '识别邮件删除、批量修改等高风险邮件行为并触发保护。',
+    'email_read_guard': '识别邮件读取与检索中的敏感访问场景并触发保护。',
+    'email_operation_guard': '统一评估邮件相关操作（读/写/删/导出）的安全风险。',
+    'browser_web_access_guard': '分析网页访问与外部内容注入风险，防止诱导后续危险操作。',
+    'prompt_injection_guard': '检测提示注入与越权指令，阻断恶意上下文污染。',
+    'script_execution_guard': '审查脚本与命令执行行为，拦截高危执行链路。',
+    'general_tool_risk_guard': '兜底评估未被专用规则覆盖的工具调用风险。',
+    'supply_chain_guard': '识别不可信依赖、来源异常和供应链投毒风险。',
+    'persistence_backdoor_guard': '检测建立持久化机制与后门驻留的可疑行为。',
+    'lateral_movement_guard': '识别跨主机/跨账户扩散与横向移动行为。',
+    'resource_exhaustion_guard': '识别可能导致 CPU、内存、磁盘或网络耗尽的行为。',
+    'skill_installation_guard': '审查技能安装和加载行为，阻止潜在恶意能力注入。',
+  };
+
   late TabController _tabController;
   late ProtectionConfig _config;
   bool _isLoading = true;
@@ -1034,6 +1101,13 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                     spacing: 8,
                     runSpacing: 8,
                     children: _sensitiveActions.asMap().entries.map((entry) {
+                      final localized = _localizeSensitiveActionForDisplay(
+                        entry.value,
+                        l10n,
+                      );
+                      final displayText = localized == entry.value
+                          ? entry.value
+                          : localized;
                       return Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 10,
@@ -1053,7 +1127,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                           children: [
                             Flexible(
                               child: Text(
-                                entry.value,
+                                displayText,
                                 style: AppFonts.firaCode(
                                   fontSize: 11,
                                   color: Colors.white,
@@ -1159,8 +1233,23 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           else
             Column(
               children: _bundledSkills.map((skill) {
-                final name = skill['name'] ?? '';
-                final desc = skill['description'] ?? '';
+                final rawName = skill['name']?.toString() ?? '';
+                final rawDesc = skill['description']?.toString() ?? '';
+                final localizedName = _localizeBundledSkillNameForDisplay(
+                  rawName,
+                  l10n,
+                );
+                final localizedDesc = _localizeBundledSkillDescForDisplay(
+                  rawName,
+                  rawDesc,
+                  l10n,
+                );
+                final name = localizedName == rawName
+                    ? rawName
+                    : localizedName;
+                final desc = localizedDesc == rawDesc
+                    ? rawDesc
+                    : localizedDesc;
                 return Container(
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.all(12),
@@ -1206,7 +1295,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                                   fontSize: 11,
                                   color: Colors.white54,
                                 ),
-                                maxLines: 2,
+                                maxLines: 3,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ],
@@ -1221,6 +1310,85 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
         ],
       ),
     );
+  }
+
+  String _localizeSensitiveActionForDisplay(
+    String rawAction,
+    AppLocalizations l10n,
+  ) {
+    if (!l10n.localeName.startsWith('zh')) {
+      return rawAction;
+    }
+    final normalized = rawAction.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return rawAction;
+    }
+
+    // Match bundled default user rules by sentence template.
+    if (normalized.startsWith(
+      'writing to or modifying critical system files or files outside the project workspace',
+    )) {
+      return '写入或修改关键系统文件，或修改项目工作区之外的文件属于敏感操作（说明：在项目内创建/编辑文件不属于敏感操作）';
+    }
+    if (normalized.startsWith(
+      'sending emails, messages, or notifications to external recipients',
+    )) {
+      return '向外部接收方发送邮件、消息或通知属于敏感操作（说明：仅“读取”邮件/消息不属于敏感操作）';
+    }
+    if (normalized.startsWith(
+      'executing potentially dangerous shell commands',
+    )) {
+      return '执行潜在危险的 Shell 命令属于敏感操作（如 rm -rf /、chmod、systemctl）；常规开发命令（如 mkdir、touch、构建工具）及只读命令不属于敏感操作';
+    }
+    if (normalized.startsWith(
+      'changing global system settings or configuration',
+    )) {
+      return '修改全局系统设置或配置属于敏感操作';
+    }
+    if (normalized.startsWith(
+      'reading/writing memory.md, memory/yyyy-mm-dd.md, agents.md, tools.md is considered safe',
+    )) {
+      return '读取/写入 MEMORY.md、memory/YYYY-MM-DD.md、AGENTS.md、TOOLS.md 视为安全操作，无需二次确认';
+    }
+    if (normalized.startsWith(
+          'any payment or money transfer operations need to be confirmed',
+        ) ||
+        normalized.startsWith(
+          'any payment or money transfer operations must be confirmed',
+        )) {
+      return '任何支付或转账操作都需要用户确认';
+    }
+
+    return _zhSensitiveActionLabels[normalized] ?? rawAction;
+  }
+
+  String _localizeBundledSkillNameForDisplay(
+    String rawName,
+    AppLocalizations l10n,
+  ) {
+    if (!l10n.localeName.startsWith('zh')) {
+      return rawName;
+    }
+    final normalized = rawName.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return rawName;
+    }
+    return _zhBundledSkillNameLabels[normalized] ?? rawName;
+  }
+
+  String _localizeBundledSkillDescForDisplay(
+    String rawName,
+    String rawDesc,
+    AppLocalizations l10n,
+  ) {
+    if (!l10n.localeName.startsWith('zh')) {
+      return rawDesc;
+    }
+    final normalized = rawName.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return rawDesc;
+    }
+    return _zhBundledSkillDescLabels[normalized] ?? rawDesc;
   }
 
   Widget _buildAuditOnlySwitch(AppLocalizations l10n) {
