@@ -435,6 +435,264 @@ func TestAppShutdown_ExplicitRestoreConfigFalse(t *testing.T) {
 	}
 }
 
+func TestAppShutdown_DisablesAllAssetProtectionInStatusFile(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	repo := repository.NewProtectionRepository(nil)
+	if err := repo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName: "openclaw",
+		AssetID:   "shutdown-bot-1",
+		Enabled:   true,
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig bot1 failed: %v", err)
+	}
+	if err := repo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName: "nullclaw",
+		AssetID:   "shutdown-bot-2",
+		Enabled:   true,
+		AuditOnly: true,
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig bot2 failed: %v", err)
+	}
+
+	scanRepo := repository.NewScanRepository(nil)
+	if err := scanRepo.SaveScanResult(&repository.ScanRecord{
+		ConfigFound: true,
+		Assets: []core.Asset{
+			{ID: "shutdown-bot-1", Name: "OpenClaw", SourcePlugin: "openclaw"},
+			{ID: "shutdown-bot-2", Name: "NullClaw", SourcePlugin: "nullclaw"},
+		},
+		Risks: []core.Risk{},
+	}); err != nil {
+		t.Fatalf("SaveScanResult failed: %v", err)
+	}
+
+	originalStop := stopProtectionProxyForPolicy
+	stopProtectionProxyForPolicy = func(assetName, assetID string) string {
+		return `{"success":true}`
+	}
+	t.Cleanup(func() {
+		stopProtectionProxyForPolicy = originalStop
+	})
+
+	statusFile := filepath.Join(t.TempDir(), "status.json")
+	server := NewAPIServer()
+	server.token = "test-token"
+	server.exportService = &ExportServiceImpl{
+		running:    true,
+		statusFile: statusFile,
+	}
+	shutdownCh := make(chan AppShutdownOptions, 1)
+	server.SetShutdownHandler(func(options AppShutdownOptions) error {
+		shutdownCh <- options
+		return nil
+	})
+
+	req := newAuthRequest(
+		"POST",
+		"/api/v1/app/shutdown",
+		"test-token",
+		bytes.NewBufferString(`{"restoreConfig":false}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.setupRoutes().ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Code, http.StatusOK)
+
+	updatedConfigs, err := repo.GetAllProtectionConfigs()
+	if err != nil {
+		t.Fatalf("GetAllProtectionConfigs failed: %v", err)
+	}
+	if len(updatedConfigs) != 2 {
+		t.Fatalf("expected 2 configs, got %d", len(updatedConfigs))
+	}
+	for _, config := range updatedConfigs {
+		if config == nil {
+			t.Fatal("config should not be nil")
+		}
+		if config.Enabled {
+			t.Fatalf("expected config %s to be disabled after shutdown", config.AssetID)
+		}
+	}
+
+	raw, err := os.ReadFile(statusFile)
+	if err != nil {
+		t.Fatalf("expected status file to be written: %v", err)
+	}
+
+	var status struct {
+		BotInfo []struct {
+			ID         string `json:"id"`
+			Protection string `json:"protection"`
+		} `json:"botInfo"`
+	}
+	if err := json.Unmarshal(raw, &status); err != nil {
+		t.Fatalf("failed to parse status file: %v", err)
+	}
+	if len(status.BotInfo) != 2 {
+		t.Fatalf("expected 2 botInfo entries, got %d", len(status.BotInfo))
+	}
+	for _, bot := range status.BotInfo {
+		if bot.Protection != "disabled" {
+			t.Fatalf("expected bot %s protection=disabled, got %q", bot.ID, bot.Protection)
+		}
+	}
+
+	select {
+	case options := <-shutdownCh:
+		if options.RestoreConfig {
+			t.Fatal("restoreConfig should be false")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected shutdown handler to be called")
+	}
+}
+
+func TestAppShutdown_RewritesExistingStatusFileWhenExportStopped(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	repo := repository.NewProtectionRepository(nil)
+	if err := repo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName: "openclaw",
+		AssetID:   "shutdown-existing-status-bot",
+		Enabled:   true,
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig failed: %v", err)
+	}
+
+	originalStop := stopProtectionProxyForPolicy
+	stopProtectionProxyForPolicy = func(assetName, assetID string) string {
+		return `{"success":true}`
+	}
+	t.Cleanup(func() {
+		stopProtectionProxyForPolicy = originalStop
+	})
+
+	originalAssetRefresher := statusRewriteAssetRefresher
+	statusRewriteAssetRefresher = func() []core.Asset {
+		return []core.Asset{
+			{
+				ID:           "shutdown-existing-status-bot",
+				Name:         "OpenClaw",
+				SourcePlugin: "openclaw",
+				Metadata: map[string]string{
+					"pid": "24680",
+				},
+			},
+			{
+				ID:           "other-bot",
+				Name:         "Other",
+				SourcePlugin: "nullclaw",
+				Metadata: map[string]string{
+					"pid": "13579",
+				},
+			},
+		}
+	}
+	t.Cleanup(func() {
+		statusRewriteAssetRefresher = originalAssetRefresher
+	})
+
+	workspace := t.TempDir()
+	homeDir := t.TempDir()
+	pm := core.GetPathManager()
+	if err := pm.ResetForTest(workspace, homeDir); err != nil {
+		t.Fatalf("ResetForTest failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = pm.ResetForTest("", "")
+	})
+
+	exportDir := filepath.Join(workspace, "export")
+	if err := os.MkdirAll(exportDir, 0755); err != nil {
+		t.Fatalf("MkdirAll export dir failed: %v", err)
+	}
+	statusFile := filepath.Join(exportDir, "status.json")
+	originalStatus := map[string]interface{}{
+		"timestamp": float64(123),
+		"botInfo": []map[string]interface{}{
+			{
+				"id":         "shutdown-existing-status-bot",
+				"pid":        "12345",
+				"protection": "enabled",
+			},
+			{
+				"id":         "other-bot",
+				"pid":        "67890",
+				"protection": "bypass",
+			},
+		},
+	}
+	statusRaw, err := json.MarshalIndent(originalStatus, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent status failed: %v", err)
+	}
+	if err := os.WriteFile(statusFile, statusRaw, 0644); err != nil {
+		t.Fatalf("WriteFile status failed: %v", err)
+	}
+
+	server := NewAPIServer()
+	server.token = "test-token"
+	shutdownCh := make(chan AppShutdownOptions, 1)
+	server.SetShutdownHandler(func(options AppShutdownOptions) error {
+		shutdownCh <- options
+		return nil
+	})
+
+	req := newAuthRequest(
+		"POST",
+		"/api/v1/app/shutdown",
+		"test-token",
+		bytes.NewBufferString(`{"restoreConfig":false}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.setupRoutes().ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Code, http.StatusOK)
+
+	updatedRaw, err := os.ReadFile(statusFile)
+	if err != nil {
+		t.Fatalf("ReadFile status failed: %v", err)
+	}
+
+	var updatedStatus struct {
+		BotInfo []struct {
+			ID         string `json:"id"`
+			PID        string `json:"pid"`
+			Protection string `json:"protection"`
+		} `json:"botInfo"`
+	}
+	if err := json.Unmarshal(updatedRaw, &updatedStatus); err != nil {
+		t.Fatalf("Unmarshal status failed: %v", err)
+	}
+	if len(updatedStatus.BotInfo) != 2 {
+		t.Fatalf("expected 2 botInfo entries, got %d", len(updatedStatus.BotInfo))
+	}
+	for _, bot := range updatedStatus.BotInfo {
+		if bot.Protection != "disabled" {
+			t.Fatalf("expected bot %s protection=disabled, got %q", bot.ID, bot.Protection)
+		}
+		switch bot.ID {
+		case "shutdown-existing-status-bot":
+			if bot.PID != "24680" {
+				t.Fatalf("expected bot %s pid=24680, got %q", bot.ID, bot.PID)
+			}
+		case "other-bot":
+			if bot.PID != "13579" {
+				t.Fatalf("expected bot %s pid=13579, got %q", bot.ID, bot.PID)
+			}
+		}
+	}
+
+	select {
+	case <-shutdownCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected shutdown handler to be called")
+	}
+}
+
 func TestAppShutdown_InvalidJSON(t *testing.T) {
 	server := NewAPIServer()
 	server.token = "test-token"
@@ -2095,6 +2353,88 @@ func TestCollectBotInfoFromAssets_UsesDisplaySectionsAsFallback(t *testing.T) {
 	}
 	if info.Protection != "disabled" {
 		t.Fatalf("Protection = %q, want %q", info.Protection, "disabled")
+	}
+}
+
+func TestCollectBotInfoFromAssets_UsesRuntimeProtectionStatus(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	repo := repository.NewProtectionRepository(nil)
+	if err := repo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName: "openclaw",
+		AssetID:   "bot-openclaw-2",
+		Enabled:   true,
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig failed: %v", err)
+	}
+
+	originalProxyRunningByAsset := exportProxyRunningByAsset
+	exportProxyRunningByAsset = func(assetName, assetID string) bool {
+		return false
+	}
+	t.Cleanup(func() {
+		exportProxyRunningByAsset = originalProxyRunningByAsset
+	})
+
+	svc := &ExportServiceImpl{}
+	infos := svc.collectBotInfoFromAssets([]core.Asset{{
+		ID:           "bot-openclaw-2",
+		Name:         "OpenClaw Bot",
+		SourcePlugin: "openclaw",
+	}})
+
+	if len(infos) != 1 {
+		t.Fatalf("collectBotInfoFromAssets() count = %d, want 1", len(infos))
+	}
+	if infos[0].Protection != "disabled" {
+		t.Fatalf("Protection = %q, want %q when proxy is stopped", infos[0].Protection, "disabled")
+	}
+
+	exportProxyRunningByAsset = func(assetName, assetID string) bool {
+		return true
+	}
+	if err := repo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName: "openclaw",
+		AssetID:   "bot-openclaw-2",
+		Enabled:   true,
+		AuditOnly: true,
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig failed: %v", err)
+	}
+
+	infos = svc.collectBotInfoFromAssets([]core.Asset{{
+		ID:           "bot-openclaw-2",
+		Name:         "OpenClaw Bot",
+		SourcePlugin: "openclaw",
+	}})
+	if infos[0].Protection != "bypass" {
+		t.Fatalf("Protection = %q, want %q when proxy is running in audit mode", infos[0].Protection, "bypass")
+	}
+}
+
+func TestExportService_StopWritesFinalStatusFile(t *testing.T) {
+	statusFile := filepath.Join(t.TempDir(), "status.json")
+	svc := &ExportServiceImpl{
+		running:    true,
+		statusFile: statusFile,
+		stopChan:   make(chan struct{}),
+	}
+
+	if err := svc.Stop(); err != nil {
+		t.Fatalf("Stop() failed: %v", err)
+	}
+
+	raw, err := os.ReadFile(statusFile)
+	if err != nil {
+		t.Fatalf("expected status file to be written on stop: %v", err)
+	}
+
+	var status map[string]interface{}
+	if err := json.Unmarshal(raw, &status); err != nil {
+		t.Fatalf("failed to parse status file: %v", err)
+	}
+	if _, ok := status["timestamp"]; !ok {
+		t.Fatalf("expected timestamp in final status file, got %#v", status)
 	}
 }
 

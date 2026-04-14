@@ -804,7 +804,8 @@ class _AssetCardState extends State<_AssetCard> {
                           asset.serviceName,
                           Colors.white70,
                         ),
-                      if (asset.processPaths.isNotEmpty)
+                      if (asset.processPaths.isNotEmpty &&
+                          !_hasRuntimeImagePathSection(asset))
                         _buildConfigRow(
                           l10n.processPaths,
                           asset.processPaths.join(', '),
@@ -915,6 +916,18 @@ class _AssetCardState extends State<_AssetCard> {
       return asset.ports.map((p) => '$bind:$p').join(', ');
     }
     return asset.ports.map((p) => ':$p').join(', ');
+  }
+
+  bool _hasRuntimeImagePathSection(Asset asset) {
+    for (final section in asset.displaySections) {
+      if (section.title != 'Runtime') continue;
+      for (final item in section.items) {
+        if (item.label == 'Image Path' && item.value.trim().isNotEmpty) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   Widget _buildProtectionBadge(AppLocalizations l10n) {
