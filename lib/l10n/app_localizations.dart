@@ -632,6 +632,60 @@ abstract class AppLocalizations {
   /// **'取消'**
   String get cancel;
 
+  /// No description provided for @mitigationDialogTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'风险处置'**
+  String get mitigationDialogTitle;
+
+  /// No description provided for @mitigationExecute.
+  ///
+  /// In zh, this message translates to:
+  /// **'执行修复'**
+  String get mitigationExecute;
+
+  /// No description provided for @mitigationConfirmAutoFix.
+  ///
+  /// In zh, this message translates to:
+  /// **'确定要执行自动修复吗？'**
+  String get mitigationConfirmAutoFix;
+
+  /// No description provided for @mitigationFieldRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'此项必填'**
+  String get mitigationFieldRequired;
+
+  /// No description provided for @mitigationFieldMinLength.
+  ///
+  /// In zh, this message translates to:
+  /// **'最小长度为 {length}'**
+  String mitigationFieldMinLength(int length);
+
+  /// No description provided for @mitigationFieldInvalidFormat.
+  ///
+  /// In zh, this message translates to:
+  /// **'格式不正确'**
+  String get mitigationFieldInvalidFormat;
+
+  /// No description provided for @mitigationFieldInvalidRegex.
+  ///
+  /// In zh, this message translates to:
+  /// **'无效的校验规则'**
+  String get mitigationFieldInvalidRegex;
+
+  /// No description provided for @mitigationUnsupportedFieldType.
+  ///
+  /// In zh, this message translates to:
+  /// **'不支持的字段类型'**
+  String get mitigationUnsupportedFieldType;
+
+  /// No description provided for @mitigationCommandCopied.
+  ///
+  /// In zh, this message translates to:
+  /// **'命令已复制到剪贴板'**
+  String get mitigationCommandCopied;
+
   /// No description provided for @aiModelConfig.
   ///
   /// In zh, this message translates to:

@@ -304,6 +304,35 @@ class AppLocalizationsZh extends AppLocalizations {
   String get cancel => '取消';
 
   @override
+  String get mitigationDialogTitle => '风险处置';
+
+  @override
+  String get mitigationExecute => '执行修复';
+
+  @override
+  String get mitigationConfirmAutoFix => '确定要执行自动修复吗？';
+
+  @override
+  String get mitigationFieldRequired => '此项必填';
+
+  @override
+  String mitigationFieldMinLength(int length) {
+    return '最小长度为 $length';
+  }
+
+  @override
+  String get mitigationFieldInvalidFormat => '格式不正确';
+
+  @override
+  String get mitigationFieldInvalidRegex => '无效的校验规则';
+
+  @override
+  String get mitigationUnsupportedFieldType => '不支持的字段类型';
+
+  @override
+  String get mitigationCommandCopied => '命令已复制到剪贴板';
+
+  @override
   String get aiModelConfig => 'AI模型配置';
 
   @override

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -423,14 +424,7 @@ func (s *ExportServiceImpl) collectRiskInfo(assets []core.Asset) []RiskInfo {
 
 		// Convert mitigation to export format
 		if risk.Mitigation != nil {
-			for _, sg := range risk.Mitigation.Suggestions {
-				for _, item := range sg.Items {
-					info.Mitigation = append(info.Mitigation, MitigationInfo{
-						Desc:    item.Action + ": " + item.Detail,
-						Command: item.Command,
-					})
-				}
-			}
+			info.Mitigation = buildMitigationInfos(risk.Mitigation)
 		}
 		if info.Mitigation == nil {
 			info.Mitigation = []MitigationInfo{}
@@ -440,6 +434,97 @@ func (s *ExportServiceImpl) collectRiskInfo(assets []core.Asset) []RiskInfo {
 	}
 
 	return riskInfos
+}
+
+func buildMitigationInfos(mitigation *core.Mitigation) []MitigationInfo {
+	if mitigation == nil {
+		return []MitigationInfo{}
+	}
+
+	infos := make([]MitigationInfo, 0)
+	appendInfo := func(desc, command string) {
+		desc = strings.TrimSpace(desc)
+		command = strings.TrimSpace(command)
+		if desc == "" {
+			return
+		}
+		infos = append(infos, MitigationInfo{
+			Desc:    desc,
+			Command: command,
+		})
+	}
+
+	switch strings.ToLower(strings.TrimSpace(mitigation.Type)) {
+	case "suggestion":
+		for _, sg := range mitigation.Suggestions {
+			for _, item := range sg.Items {
+				switch {
+				case strings.TrimSpace(item.Action) != "" && strings.TrimSpace(item.Detail) != "":
+					appendInfo(item.Action+": "+item.Detail, item.Command)
+				case strings.TrimSpace(item.Action) != "":
+					appendInfo(item.Action, item.Command)
+				default:
+					appendInfo(item.Detail, item.Command)
+				}
+			}
+		}
+	case "form":
+		for _, item := range mitigation.FormSchema {
+			label := strings.TrimSpace(item.Label)
+			if label == "" {
+				label = strings.TrimSpace(item.Key)
+			}
+			if label == "" {
+				continue
+			}
+
+			desc := label
+			if item.Required {
+				desc += " [required]"
+			}
+			if item.DefaultValue != nil {
+				desc += fmt.Sprintf(" (default: %v)", item.DefaultValue)
+			}
+			appendInfo(desc, "")
+		}
+	case "auto":
+		appendInfo(composeMitigationText(mitigation.Title, mitigation.Description), "")
+	default:
+		for _, sg := range mitigation.Suggestions {
+			for _, item := range sg.Items {
+				switch {
+				case strings.TrimSpace(item.Action) != "" && strings.TrimSpace(item.Detail) != "":
+					appendInfo(item.Action+": "+item.Detail, item.Command)
+				case strings.TrimSpace(item.Action) != "":
+					appendInfo(item.Action, item.Command)
+				default:
+					appendInfo(item.Detail, item.Command)
+				}
+			}
+		}
+	}
+
+	if len(infos) == 0 {
+		appendInfo(composeMitigationText(mitigation.Title, mitigation.Description), "")
+	}
+	if len(infos) == 0 {
+		return []MitigationInfo{}
+	}
+	return infos
+}
+
+func composeMitigationText(title, description string) string {
+	title = strings.TrimSpace(title)
+	description = strings.TrimSpace(description)
+
+	switch {
+	case title != "" && description != "":
+		return title + ": " + description
+	case title != "":
+		return title
+	default:
+		return description
+	}
 }
 
 // collectSkillResults collects skill scan results.
