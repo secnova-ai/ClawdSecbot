@@ -348,6 +348,24 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
         return zh ? '\u52a9\u624b\u56de\u590d' : 'Assistant Response';
       case 'toolResult':
         return zh ? '\u5de5\u5177\u7ed3\u679c' : 'Tool Result';
+      case 'conversationUsage':
+        return zh ? '\u4f1a\u8bdd' : 'Conversation';
+      case 'dailyUsage':
+        return zh ? '\u4eca\u65e5' : 'Today';
+      case 'quotaExceeded':
+        return zh ? '\u914d\u989d\u8d85\u9650' : 'Quota Exceeded';
+      case 'statusBlocked':
+        return zh ? '\u5df2\u62e6\u622a' : 'Blocked';
+      case 'statusCompleted':
+        return zh ? '\u5df2\u5b8c\u6210' : 'Completed';
+      case 'statusStopped':
+        return zh ? '\u5df2\u505c\u6b62' : 'Stopped';
+      case 'statusToolCalling':
+        return zh ? '\u5de5\u5177\u8c03\u7528\u4e2d' : 'Tool Calling';
+      case 'statusStarting':
+        return zh ? '\u5f00\u59cb\u4e2d' : 'Starting';
+      case 'statusActive':
+        return zh ? '\u6d3b\u8dc3' : 'Active';
       case 'requestUseTool':
         return zh ? '\u8bf7\u6c42\u4f7f\u7528\u5de5\u5177' : 'Requesting tools';
       case 'securityWarning':
@@ -436,32 +454,42 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: AppFonts.inter(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: color,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 14, color: color),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    label,
+                    style: AppFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
+                    softWrap: true,
+                  ),
+                ),
+              ],
             ),
-          ),
-          if (value != null && value.isNotEmpty) ...[
-            const SizedBox(width: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 220),
-              child: Text(
-                value,
-                style: AppFonts.inter(fontSize: 11, color: Colors.white70),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            if (value != null && value.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Padding(
+                padding: const EdgeInsets.only(left: 22),
+                child: SelectableText(
+                  value,
+                  style: AppFonts.inter(fontSize: 11, color: Colors.white70),
+                ),
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1075,7 +1103,10 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
 
     // 兜底：若摘要中无 assistant 消息但 primaryContent 有值，补入摘要
     if (hasContent &&
-        group.primaryContentType.trim().toLowerCase() == 'assistant_response' &&
+        (group.primaryContentType.trim().toLowerCase() ==
+                'assistant_response' ||
+            group.primaryContentType.trim().toLowerCase() ==
+                'security_warning') &&
         !summaryItems.any(
           (item) =>
               item.role.toLowerCase() == 'assistant' &&
@@ -1189,7 +1220,10 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        _buildInlineStatusChip(statusText, statusColor),
+                        _buildInlineStatusChip(
+                          _localizedStatusLabel(l10n, statusText),
+                          statusColor,
+                        ),
                       ],
                     ),
                   ],
@@ -1352,7 +1386,7 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
                   color: group.decisionBlocked
                       ? const Color(0xFFEF4444)
                       : const Color(0xFFF59E0B),
-                  label: group.decisionStatus,
+                  label: _localizedDecisionLabel(l10n, group.decisionStatus),
                   value: group.decisionReason,
                 ),
               if (currentToolCalls.isNotEmpty)
@@ -1371,7 +1405,7 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
                   icon: LucideIcons.gauge,
                   color: const Color(0xFF10B981),
                   label: _cardText(l10n, 'tokens'),
-                  value: tokenStr,
+                  value: _localizedTokenUsageText(l10n, group),
                 ),
             ],
           ),
@@ -1416,6 +1450,52 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
       phase.isEmpty ? 'ACTIVE' : phase.toUpperCase(),
       const Color(0xFF94A3B8),
     );
+  }
+
+  String _localizedDecisionLabel(AppLocalizations l10n, String status) {
+    switch (status.trim().toUpperCase()) {
+      case 'BLOCK':
+      case 'HARD_BLOCK':
+        return _cardText(l10n, 'statusBlocked');
+      case 'QUOTA_EXCEEDED':
+        return _cardText(l10n, 'quotaExceeded');
+      default:
+        return status.trim().toUpperCase();
+    }
+  }
+
+  String _localizedStatusLabel(AppLocalizations l10n, String status) {
+    switch (status.trim().toUpperCase()) {
+      case 'BLOCKED':
+        return _cardText(l10n, 'statusBlocked');
+      case 'COMPLETED':
+        return _cardText(l10n, 'statusCompleted');
+      case 'STOPPED':
+        return _cardText(l10n, 'statusStopped');
+      case 'TOOL_CALLING':
+        return _cardText(l10n, 'statusToolCalling');
+      case 'STARTING':
+        return _cardText(l10n, 'statusStarting');
+      case 'ACTIVE':
+        return _cardText(l10n, 'statusActive');
+      default:
+        return status;
+    }
+  }
+
+  String _localizedTokenUsageText(
+    AppLocalizations l10n,
+    TruthRecordModel group,
+  ) {
+    if (group.totalTokens <= 0) {
+      return '';
+    }
+    final base =
+        '${group.promptTokens} / ${group.completionTokens} / ${group.totalTokens}';
+    if (group.conversationTokens <= 0 && group.dailyTokens <= 0) {
+      return base;
+    }
+    return '$base | ${_cardText(l10n, 'conversationUsage')} ${group.conversationTokens} / ${_cardText(l10n, 'dailyUsage')} ${group.dailyTokens}';
   }
 
   Widget _buildInlineStatusChip(String value, Color color) {
