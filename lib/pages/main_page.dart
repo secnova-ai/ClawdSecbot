@@ -1371,6 +1371,8 @@ class _MainPageState extends State<MainPage>
   }
 
   Future<void> _finalizeAppExit() async {
+    await _stopProtectionForExit();
+
     try {
       await ApiService().stopServer();
     } catch (e) {
@@ -1402,6 +1404,56 @@ class _MainPageState extends State<MainPage>
     }
 
     exit(0);
+  }
+
+  Future<void> _stopProtectionForExit() async {
+    final targets = await _loadExitTargets();
+    if (targets.isEmpty) {
+      return;
+    }
+
+    final pluginService = PluginService();
+    for (final target in targets) {
+      final assetName = target.assetName.trim();
+      final assetID = target.assetID.trim();
+      if (assetName.isEmpty) {
+        continue;
+      }
+
+      try {
+        final exitResult = await pluginService.notifyPluginAppExit(
+          assetName,
+          assetID,
+        );
+        if (exitResult['success'] != true) {
+          appLogger.warning(
+            '[MainPage] Plugin exit callback failed during finalize for $assetName/$assetID: ${exitResult['error']}',
+          );
+        }
+      } catch (e) {
+        appLogger.warning(
+          '[MainPage] Plugin exit callback threw during finalize for $assetName/$assetID: $e',
+        );
+      }
+
+      try {
+        final protectionService = ProtectionService.forAsset(
+          assetName,
+          assetID,
+        );
+        protectionService.setAssetName(assetName, assetID);
+        final stopResult = await protectionService.stopProtectionProxy();
+        if (stopResult['success'] != true) {
+          appLogger.warning(
+            '[MainPage] Stop protection proxy failed during finalize for $assetName/$assetID: ${stopResult['error']}',
+          );
+        }
+      } catch (e) {
+        appLogger.warning(
+          '[MainPage] Stop protection proxy threw during finalize for $assetName/$assetID: $e',
+        );
+      }
+    }
   }
 
   Future<void> _hideOnboarding() async {

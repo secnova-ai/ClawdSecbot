@@ -20,6 +20,34 @@ import (
 
 const recentConversationMessageWindow = 3
 
+func appendRequestMessagesToTruthRecord(r *TruthRecord, req *openai.ChatCompletionNewParams) {
+	if r == nil || req == nil || len(r.Messages) > 0 {
+		return
+	}
+	for i, msg := range req.Messages {
+		r.Messages = append(r.Messages, RecordMessage{
+			Index:   i,
+			Role:    getMessageRole(msg),
+			Content: truncateToBytes(extractMessageContent(msg), maxRecordMessageBytes),
+		})
+	}
+}
+
+func appendAssistantMessageToTruthRecord(r *TruthRecord, content string) {
+	if r == nil {
+		return
+	}
+	assistantIndex := len(r.Messages)
+	if assistantIndex < r.MessageCount {
+		assistantIndex = r.MessageCount
+	}
+	r.Messages = append(r.Messages, RecordMessage{
+		Index:   assistantIndex,
+		Role:    "assistant",
+		Content: truncateToBytes(content, maxRecordMessageBytes),
+	})
+}
+
 func detectConversationContinuation(currentAll []NormalizedMessage, prevRecent []NormalizedMessage, currentCount, prevCount int) bool {
 	if len(currentAll) == 0 || len(prevRecent) == 0 {
 		return false
@@ -144,8 +172,12 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 				r.MessageCount = len(req.Messages)
 				r.Phase = RecordPhaseStopped
 				r.CompletedAt = time.Now().Format(time.RFC3339Nano)
+				r.FinishReason = "quota_exceeded"
 				r.ConversationTokens = conversationUsage
 				r.DailyTokens = pp.currentDailyTokenUsage()
+				r.OutputContent = truncateToBytes(mockMsg, maxRecordOutputBytes)
+				appendRequestMessagesToTruthRecord(r, req)
+				appendAssistantMessageToTruthRecord(r, mockMsg)
 				r.Decision = &SecurityDecision{
 					Action:     "BLOCK",
 					RiskLevel:  "QUOTA",
@@ -160,9 +192,6 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			pp.emitMonitorResponseReturned("QUOTA_EXCEEDED", mockMsg, mockMsg)
 			return &chatmodelrouting.FilterRequestResult{MockContent: mockMsg}, false
 		}
-		// Skip the legacy runtime-session check below; single_session now means
-		// current conversation quota and is handled by the recent-message heuristic above.
-		sessionLimit = 0
 	}
 
 	// ==================== 单会话 Token 配额检查 ====================
@@ -198,8 +227,12 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 				r.MessageCount = len(req.Messages)
 				r.Phase = RecordPhaseStopped
 				r.CompletedAt = time.Now().Format(time.RFC3339Nano)
+				r.FinishReason = "quota_exceeded"
 				r.ConversationTokens = conversationUsage
 				r.DailyTokens = pp.currentDailyTokenUsage()
+				r.OutputContent = truncateToBytes(mockMsg, maxRecordOutputBytes)
+				appendRequestMessagesToTruthRecord(r, req)
+				appendAssistantMessageToTruthRecord(r, mockMsg)
 				r.Decision = &SecurityDecision{
 					Action:     "BLOCK",
 					RiskLevel:  "QUOTA",
@@ -250,6 +283,10 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 				r.MessageCount = len(req.Messages)
 				r.Phase = RecordPhaseStopped
 				r.CompletedAt = time.Now().Format(time.RFC3339Nano)
+				r.FinishReason = "quota_exceeded"
+				r.OutputContent = truncateToBytes(mockMsg, maxRecordOutputBytes)
+				appendRequestMessagesToTruthRecord(r, req)
+				appendAssistantMessageToTruthRecord(r, mockMsg)
 				r.Decision = &SecurityDecision{
 					Action:     "BLOCK",
 					RiskLevel:  "QUOTA",

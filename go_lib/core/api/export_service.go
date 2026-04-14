@@ -11,6 +11,7 @@ import (
 
 	"go_lib/core"
 	"go_lib/core/logging"
+	"go_lib/core/proxy"
 	"go_lib/core/repository"
 	"go_lib/core/service"
 )
@@ -22,6 +23,11 @@ const (
 	eventsFileName       = "events.jsonl"
 	statusRefreshSeconds = 30
 )
+
+var exportProxyRunningByAsset = func(assetName, assetID string) bool {
+	pp := proxy.GetProxyProtectionByAsset(assetName, assetID)
+	return pp != nil && pp.IsRunning()
+}
 
 // ExportServiceImpl implements the ExportService interface for data export.
 type ExportServiceImpl struct {
@@ -89,16 +95,20 @@ func (s *ExportServiceImpl) Start() error {
 // Stop gracefully stops the export service.
 func (s *ExportServiceImpl) Stop() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if !s.running {
+		s.mu.Unlock()
 		return nil
 	}
 
 	close(s.stopChan)
-	s.wg.Wait()
+	s.mu.Unlock()
 
+	s.wg.Wait()
+	s.writeStatusFile()
+
+	s.mu.Lock()
 	s.running = false
+	s.mu.Unlock()
 	logging.Info("Export service stopped")
 	return nil
 }
@@ -339,7 +349,7 @@ func (s *ExportServiceImpl) collectBotInfoFromAssets(assets []core.Asset) []BotI
 		protRepo := repository.NewProtectionRepository(nil)
 		config, err := protRepo.GetProtectionConfig(asset.SourcePlugin, asset.ID)
 		if err == nil && config != nil {
-			if config.Enabled {
+			if config.Enabled && exportProxyRunningByAsset(asset.SourcePlugin, asset.ID) {
 				if config.AuditOnly {
 					info.Protection = "bypass"
 				} else {
