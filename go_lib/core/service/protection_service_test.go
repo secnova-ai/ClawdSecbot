@@ -338,7 +338,7 @@ func TestGetShepherdSensitiveActions_IsolatedByAssetID(t *testing.T) {
 	SaveShepherdSensitiveActions(`{"asset_name": "openclaw", "asset_id": "bot-1", "actions": ["file_write"]}`)
 	SaveShepherdSensitiveActions(`{"asset_name": "openclaw", "asset_id": "bot-2", "actions": ["shell_exec"]}`)
 
-	result1 := GetShepherdSensitiveActions("openclaw", "bot-1")
+	result1 := GetShepherdSensitiveActions("bot-1")
 	if result1["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result1)
 	}
@@ -347,7 +347,7 @@ func TestGetShepherdSensitiveActions_IsolatedByAssetID(t *testing.T) {
 		t.Fatalf("unexpected bot-1 rules: %v", actions1)
 	}
 
-	result2 := GetShepherdSensitiveActions("openclaw", "bot-2")
+	result2 := GetShepherdSensitiveActions("bot-2")
 	if result2["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result2)
 	}
