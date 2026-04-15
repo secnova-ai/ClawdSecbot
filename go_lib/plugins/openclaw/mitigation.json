@@ -3,10 +3,12 @@
     "risk_id": "logging_redact_off",
     "mitigation": {
       "type": "form",
+      "title": "Enable sensitive log redaction",
+      "description": "This risk can be fixed automatically by updating OpenClaw log redaction settings. After remediation, sensitive tool and runtime data in logs will be masked.",
       "form_schema": [
         {
           "key": "redact_sensitive",
-          "label": "启用自动脱敏 (tools)",
+          "label": "Enable automatic redaction for tool logs",
           "type": "boolean",
           "default_value": true
         }
@@ -17,21 +19,23 @@
     "risk_id": "gateway_auth_disabled",
     "mitigation": {
       "type": "form",
+      "title": "Enable gateway authentication",
+      "description": "This risk can be fixed automatically by configuring an authentication mode and credentials. Enabling gateway authentication blocks unauthorized access.",
       "form_schema": [
         {
           "key": "auth_mode",
-          "label": "认证模式",
+          "label": "Authentication mode",
           "type": "select",
           "options": ["token", "password"],
           "default_value": "token"
         },
         {
           "key": "token_value",
-          "label": "Token (>=32位)",
+          "label": "Token value at least 32 characters",
           "type": "text",
           "required": true,
           "min_length": 32,
-          "default_value": "${GEN_RANDOM_TOKEN}" 
+          "default_value": "${GEN_RANDOM_TOKEN}"
         }
       ]
     }
@@ -40,16 +44,18 @@
     "risk_id": "gateway_auth_password_mode",
     "mitigation": {
       "type": "form",
+      "title": "Migrate from password authentication",
+      "description": "This risk can be fixed automatically by switching to token mode or rotating credentials. Token mode is recommended because it reduces weak password exposure.",
       "form_schema": [
         {
           "key": "switch_to_token",
-          "label": "切换到 Token 模式 (推荐)",
+          "label": "Switch to token mode",
           "type": "boolean",
           "default_value": true
         },
         {
           "key": "token_value",
-          "label": "新 Token",
+          "label": "New token",
           "type": "text",
           "min_length": 32
         }
@@ -60,10 +66,12 @@
     "risk_id": "config_perm_unsafe",
     "mitigation": {
       "type": "form",
+      "title": "Fix config file permissions",
+      "description": "This risk can be fixed automatically by tightening config file permissions. The remediation limits who can read sensitive configuration values.",
       "form_schema": [
         {
           "key": "fix_permission",
-          "label": "Fix permission (Windows: ACL / Unix: chmod 600)",
+          "label": "Fix file permissions using ACL or chmod 600",
           "type": "boolean",
           "default_value": true
         }
@@ -74,10 +82,12 @@
     "risk_id": "config_dir_perm_unsafe",
     "mitigation": {
       "type": "form",
+      "title": "Fix config directory permissions",
+      "description": "This risk can be fixed automatically by tightening config directory permissions. The remediation restricts access to sensitive files stored in the directory.",
       "form_schema": [
         {
           "key": "fix_permission",
-          "label": "Fix permission (Windows: ACL / Unix: chmod 700)",
+          "label": "Fix directory permissions using ACL or chmod 700",
           "type": "boolean",
           "default_value": true
         }
@@ -88,10 +98,12 @@
     "risk_id": "gateway_bind_unsafe",
     "mitigation": {
       "type": "form",
+      "title": "Restrict gateway bind address",
+      "description": "This risk can be fixed automatically by rebinding the gateway to a loopback address. The remediation reduces external network exposure.",
       "form_schema": [
         {
           "key": "bind_address",
-          "label": "绑定地址",
+          "label": "Bind address",
           "type": "select",
           "options": ["127.0.0.1", "loopback", "::1"],
           "default_value": "127.0.0.1"
@@ -103,17 +115,19 @@
     "risk_id": "gateway_weak_password",
     "mitigation": {
       "type": "form",
+      "title": "Replace weak password protection",
+      "description": "This risk can be fixed automatically by switching to token authentication or setting a stronger password. Token mode is the safer default.",
       "form_schema": [
         {
           "key": "action",
-          "label": "选择处置方式",
+          "label": "Remediation action",
           "type": "select",
           "options": ["switch_to_token", "use_stronger_password"],
           "default_value": "switch_to_token"
         },
         {
           "key": "token_value",
-          "label": "Token (>=32位)",
+          "label": "Token value at least 32 characters",
           "type": "text",
           "min_length": 32,
           "default_value": "${GEN_RANDOM_TOKEN}"
@@ -125,16 +139,18 @@
     "risk_id": "gateway_weak_token",
     "mitigation": {
       "type": "form",
+      "title": "Rotate weak token",
+      "description": "This risk can be fixed automatically by generating a stronger token and replacing the old one. The remediation lowers credential guessing risk.",
       "form_schema": [
         {
           "key": "regenerate_token",
-          "label": "重新生成强 Token",
+          "label": "Generate a new strong token",
           "type": "boolean",
           "default_value": true
         },
         {
           "key": "token_value",
-          "label": "新 Token (>=32位)",
+          "label": "New token at least 32 characters",
           "type": "text",
           "min_length": 32,
           "default_value": "${GEN_RANDOM_TOKEN}"
@@ -146,10 +162,12 @@
     "risk_id": "sandbox_disabled_default",
     "mitigation": {
       "type": "form",
+      "title": "Enable default sandbox mode",
+      "description": "This risk can be fixed automatically by enabling a supported sandbox mode. Sandbox isolation reduces the impact of risky actions on the host system.",
       "form_schema": [
         {
           "key": "sandbox_mode",
-          "label": "沙箱模式",
+          "label": "Sandbox mode",
           "type": "select",
           "options": ["docker", "gvisor"],
           "default_value": "docker"
@@ -161,10 +179,12 @@
     "risk_id": "sandbox_disabled_agent",
     "mitigation": {
       "type": "form",
+      "title": "Enable agent sandboxing",
+      "description": "This risk can be fixed automatically by enabling sandboxing for the agent execution environment. Use an available isolation backend to reduce filesystem and command risks.",
       "form_schema": [
         {
           "key": "sandbox_mode",
-          "label": "沙箱模式",
+          "label": "Sandbox mode",
           "type": "select",
           "options": ["docker", "gvisor"],
           "default_value": "docker"
@@ -176,10 +196,12 @@
     "risk_id": "log_dir_perm_unsafe",
     "mitigation": {
       "type": "form",
+      "title": "Fix log directory permissions",
+      "description": "This risk can be fixed automatically by tightening log directory permissions. The remediation reduces unauthorized read and tamper access to log files.",
       "form_schema": [
         {
           "key": "fix_permission",
-          "label": "Fix permission (Windows: ACL / Unix: chmod 700)",
+          "label": "Fix directory permissions using ACL or chmod 700",
           "type": "boolean",
           "default_value": true
         }
@@ -190,17 +212,19 @@
     "risk_id": "plaintext_secrets",
     "mitigation": {
       "type": "form",
+      "title": "Remove plaintext secrets",
+      "description": "This risk can be fixed automatically by moving secrets to environment variables or by selecting a manual review path. Removing plaintext secrets reduces credential leakage risk.",
       "form_schema": [
         {
           "key": "action",
-          "label": "处理方式",
+          "label": "Secret handling mode",
           "type": "select",
           "options": ["use_env_var", "manual_review"],
           "default_value": "use_env_var"
         },
         {
           "key": "env_var_name",
-          "label": "环境变量名称",
+          "label": "Environment variable name",
           "type": "text",
           "default_value": "MOLTBOT_SECRET"
         }
@@ -211,10 +235,12 @@
     "risk_id": "skills_not_scanned",
     "mitigation": {
       "type": "form",
+      "title": "Scan unreviewed skills",
+      "description": "This risk can be fixed automatically by running the skill security scan. The remediation fills in missing risk results for installed skills.",
       "form_schema": [
         {
           "key": "scan_skills",
-          "label": "扫描未检测的 Skills",
+          "label": "Run skill security scan",
           "type": "boolean",
           "default_value": true
         }
@@ -225,10 +251,12 @@
     "risk_id": "skill_agent_risk",
     "mitigation": {
       "type": "form",
+      "title": "Remediate risky skill",
+      "description": "This risk can be fixed automatically by applying a skill remediation action. If the skill is not trusted, delete it or disable it.",
       "form_schema": [
         {
           "key": "delete_skill",
-          "label": "删除此 Skill",
+          "label": "Delete this skill",
           "type": "boolean",
           "default_value": false
         }
@@ -239,65 +267,65 @@
     "risk_id": "openclaw_1click_rce_vulnerability",
     "mitigation": {
       "type": "suggestion",
-      "title": "1-click RCE漏洞修复建议",
-      "description": "此漏洞为严重的远程代码执行漏洞（CVSS 10.0），需要升级OpenClaw版本或手动应用修复补丁。",
+      "title": "Manually remediate OpenClaw one click RCE",
+      "description": "This risk requires manual remediation and should only present operational guidance. Prioritize upgrade, entry point hardening, and runtime controls.",
       "suggestions": [
         {
           "priority": "P0",
-          "category": "立即措施",
+          "category": "Immediate actions",
           "items": [
             {
-              "action": "升级OpenClaw版本",
-              "detail": "执行命令检查当前版本：openclaw --version\n建议升级到包含修复的最新版本（>= 2026.1.24-1）",
+              "action": "Check the current version and upgrade",
+              "detail": "Run the version command and upgrade to a fixed OpenClaw release as soon as possible.",
               "command": "openclaw --version"
             },
             {
-              "action": "禁用gatewayUrl参数覆盖",
-              "detail": "修改 ui/src/ui/app-settings.ts 文件，删除或禁用 applySettingsFromUrl 函数中的 gatewayUrl 参数读取逻辑，或添加域名白名单验证"
+              "action": "Remove gatewayUrl override entry points",
+              "detail": "Review UI and startup flows and remove URL parameter paths that can override gatewayUrl."
             },
             {
-              "action": "添加WebSocket Origin验证",
-              "detail": "在 src/gateway/auth.ts 的 authorizeGatewayConnect 函数中添加 Origin 白名单验证，拒绝来自非授权域名的连接"
+              "action": "Add WebSocket origin validation",
+              "detail": "Enforce an allowlist for Origin during gateway connection authorization."
             },
             {
-              "action": "修改Token存储方式",
-              "detail": "将 localStorage 改为 sessionStorage 存储token，降低跨站泄露风险（ui/src/ui/storage.ts）"
+              "action": "Harden token storage",
+              "detail": "Avoid long lived plaintext browser storage for sensitive tokens and move to safer storage controls."
             }
           ]
         },
         {
           "priority": "P1",
-          "category": "短期措施",
+          "category": "Short term hardening",
           "items": [
             {
-              "action": "引入安全响应头",
-              "detail": "在服务器配置中添加：\nContent-Security-Policy: default-src 'self'; connect-src 'self' wss://yourdomain.com\nX-Frame-Options: DENY\nStrict-Transport-Security: max-age=31536000"
+              "action": "Add security response headers",
+              "detail": "Apply CSP, frame protections, and transport security headers to the management UI and gateway endpoints."
             },
             {
-              "action": "实施Gateway URL白名单",
-              "detail": "在配置文件中定义允许的Gateway URL列表，拒绝连接到非白名单地址"
+              "action": "Allowlist gateway destinations",
+              "detail": "Restrict the system so it can only connect to approved gateway URLs."
             },
             {
-              "action": "添加URL修改警告",
-              "detail": "在 UI 层检测 gatewayUrl 变化时弹出安全警告，要求用户确认"
+              "action": "Alert on sensitive config changes",
+              "detail": "Generate a visible warning when gatewayUrl or related high risk settings change."
             }
           ]
         },
         {
           "priority": "P2",
-          "category": "长期措施",
+          "category": "Long term governance",
           "items": [
             {
-              "action": "定期安全审计",
-              "detail": "建立定期安全扫描机制（每周自动化扫描、每月代码审查、每季度渗透测试）"
+              "action": "Establish recurring security review",
+              "detail": "Add version review, code review, and targeted security verification to the release process."
             },
             {
-              "action": "安全监控",
-              "detail": "监控异常的Gateway URL连接、异常Origin连接、异常token使用等行为"
+              "action": "Strengthen runtime monitoring",
+              "detail": "Monitor unusual gateway connections, unusual origins, and suspicious credential usage patterns."
             },
             {
-              "action": "安全培训",
-              "detail": "对开发人员进行安全编码培训，建立漏洞报告流程"
+              "action": "Train teams on secure gateway design",
+              "detail": "Document and train around URL trust boundaries, credential management, and gateway authorization design."
             }
           ]
         }

@@ -267,11 +267,18 @@ class _ProtectionMonitorEventPanelState
   }
 
   String _formatEventTime(DateTime time) {
+    return _formatLocalDateTime(time);
+  }
+
+  String _formatLocalDateTime(DateTime time) {
     final local = time.toLocal();
+    final y = local.year.toString();
+    final m = local.month.toString().padLeft(2, '0');
+    final d = local.day.toString().padLeft(2, '0');
     final hh = local.hour.toString().padLeft(2, '0');
     final mm = local.minute.toString().padLeft(2, '0');
     final ss = local.second.toString().padLeft(2, '0');
-    return '$hh:$mm:$ss';
+    return '$y-$m-$d $hh:$mm:$ss';
   }
 
   void _showEventDetail(SecurityEvent event, AppLocalizations l10n) {
@@ -392,10 +399,11 @@ class _SecurityEventDetailDialogState
                         ),
                         if (event.actionDesc.isNotEmpty)
                           _buildDetailRow(
-                              l10n.eventActionDesc, event.actionDesc),
+                            l10n.eventActionDesc,
+                            event.actionDesc,
+                          ),
                         if (event.riskType.isNotEmpty)
-                          _buildDetailRow(
-                              l10n.eventRiskType, event.riskType),
+                          _buildDetailRow(l10n.eventRiskType, event.riskType),
                         _buildDetailRow(
                           l10n.eventSource,
                           event.isFromReactAgent
@@ -462,12 +470,13 @@ class _SecurityEventDetailDialogState
   }
 
   String _formatFullTime(DateTime time) {
-    final y = time.year.toString();
-    final m = time.month.toString().padLeft(2, '0');
-    final d = time.day.toString().padLeft(2, '0');
-    final hh = time.hour.toString().padLeft(2, '0');
-    final mm = time.minute.toString().padLeft(2, '0');
-    final ss = time.second.toString().padLeft(2, '0');
+    final local = time.toLocal();
+    final y = local.year.toString();
+    final m = local.month.toString().padLeft(2, '0');
+    final d = local.day.toString().padLeft(2, '0');
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mm = local.minute.toString().padLeft(2, '0');
+    final ss = local.second.toString().padLeft(2, '0');
     return '$y-$m-$d $hh:$mm:$ss';
   }
 

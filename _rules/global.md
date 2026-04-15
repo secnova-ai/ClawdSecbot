@@ -67,6 +67,15 @@
 - 输出格式：`<lowercase_name>:<12hex>`（示例：`openclaw:1a2b3c4d5e6f`）。
 - 语义要求：同一资产在字段不变时 `asset_id` 必须稳定；任一指纹字段变化必须触发 `asset_id` 变化。
 
+### 6.2 `mitigation` 生成规范
+
+- 所有插件的 `mitigation.json` 必须为每条 `mitigation` 提供 `title` 和 `description`，禁止仅提供结构字段而缺少可读说明。
+- `mitigation.type` 仅允许两类：
+  - `form`：使用 `form_schema`，表示可执行修复；前端应提供修复按钮并收集表单参数后调用插件缓解能力。
+  - `suggestion`：使用 `suggestions`，表示需人工修复；前端应展示操作建议，不提供自动修复执行。
+- `form` 类型禁止使用 `suggestions` 作为主承载结构；`suggestion` 类型禁止使用 `form_schema` 作为主承载结构。
+- `title` 用于概括修复目标；`description` 用于说明风险背景、修复目的、影响范围或执行前提，内容必须可直接用于 UI 和导出展示。
+
 ## 7. 监控与审计 — TruthRecord SSOT 架构
 
 ### 7.1 核心原则

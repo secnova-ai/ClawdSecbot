@@ -287,7 +287,9 @@ build_release_bundle() {
     flutter pub get
 
     log_info "Building flutter linux release bundle"
-    flutter build linux --release --no-tree-shake-icons
+    flutter build linux --release --no-tree-shake-icons \
+        --dart-define=BUILD_VARIANT=personal \
+        --dart-define=BUILD_TYPE="$PACKAGE_TYPE"
     ok "Linux release bundle built"
 }
 

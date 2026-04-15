@@ -3,9 +3,10 @@ package dintalclaw
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"os/user"
 	"strings"
+
+	"go_lib/core/cmdutil"
 )
 
 type aclCheckResult struct {
@@ -15,7 +16,7 @@ type aclCheckResult struct {
 }
 
 var runCommandCombinedOutput = func(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).CombinedOutput()
+	return cmdutil.Command(name, args...).CombinedOutput()
 }
 
 var getCurrentUserName = func() (string, error) {

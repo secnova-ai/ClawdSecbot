@@ -138,6 +138,11 @@ class _SkillScanResultsDialogState extends State<SkillScanResultsDialog> {
     final riskLevel = record['risk_level'] as String? ?? '';
     final scannedAt = record['scanned_at'] as String? ?? '';
     final issues = record['issues'] as List<String>? ?? [];
+    final issueDetails =
+        (record['issue_details'] as List?)
+            ?.map((item) => Map<String, String>.from(item as Map))
+            .toList() ??
+        const <Map<String, String>>[];
     final isExpanded = _expandedIndices.contains(index);
 
     Color statusColor;
@@ -243,25 +248,46 @@ class _SkillScanResultsDialogState extends State<SkillScanResultsDialog> {
               ),
             ),
             if (isExpanded)
-              ...issues.map(
-                (issue) => Padding(
+              ...issues.asMap().entries.map(
+                (entry) => Padding(
                   padding: const EdgeInsets.only(left: 18, top: 4),
-                  child: Row(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        '- ',
-                        style: TextStyle(color: Colors.white54, fontSize: 11),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '- ',
+                            style: TextStyle(
+                              color: Colors.white54,
+                              fontSize: 11,
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              entry.value,
+                              style: AppFonts.inter(
+                                fontSize: 11,
+                                color: Colors.white54,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      Expanded(
-                        child: Text(
-                          issue,
-                          style: AppFonts.inter(
-                            fontSize: 11,
-                            color: Colors.white54,
+                      if (entry.key < issueDetails.length &&
+                          (issueDetails[entry.key]['evidence'] ?? '')
+                              .isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 12, top: 4),
+                          child: Text(
+                            issueDetails[entry.key]['evidence']!,
+                            style: AppFonts.inter(
+                              fontSize: 10,
+                              color: Colors.white38,
+                            ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),

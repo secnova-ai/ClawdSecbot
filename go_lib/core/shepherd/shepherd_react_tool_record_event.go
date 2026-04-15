@@ -78,6 +78,7 @@ func (t *recordSecurityEventTool) InvokableRun(ctx context.Context, argumentsInJ
 	}
 
 	event := SecurityEvent{
+		BotID:      botIDFromContext(ctx),
 		EventType:  eventType,
 		ActionDesc: actionDesc,
 		RiskType:   strings.TrimSpace(args.RiskType),

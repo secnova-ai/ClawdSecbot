@@ -3,10 +3,12 @@
     "risk_id": "config_perm_unsafe",
     "mitigation": {
       "type": "form",
+      "title": "Fix config file permissions",
+      "description": "This risk can be fixed automatically by tightening DinTalClaw config file permissions and reducing local read exposure.",
       "form_schema": [
         {
           "key": "fix_permission",
-          "label": "修复权限（Windows: ACL / Unix: chmod 600）",
+          "label": "Fix file permissions using ACL or chmod 600",
           "type": "boolean",
           "default_value": true
         }
@@ -17,10 +19,12 @@
     "risk_id": "memory_dir_perm_unsafe",
     "mitigation": {
       "type": "form",
+      "title": "Fix memory directory permissions",
+      "description": "This risk can be fixed automatically by restricting permissions on the memory directory so runtime memory data is less exposed.",
       "form_schema": [
         {
           "key": "fix_permission",
-          "label": "修复权限（Windows: ACL / Unix: chmod 700）",
+          "label": "Fix directory permissions using ACL or chmod 700",
           "type": "boolean",
           "default_value": true
         }
@@ -31,16 +35,30 @@
     "risk_id": "process_running_as_root",
     "mitigation": {
       "type": "suggestion",
-      "title": "进程以 root 运行风险",
-      "description": "DinTalClaw 进程以 root 用户运行，存在权限过大风险。建议以普通用户身份启动。",
+      "title": "Stop running DinTalClaw as root",
+      "description": "This risk requires manual remediation and should only display operational guidance. Move the service to a restricted non root account.",
       "suggestions": [
         {
           "priority": "P0",
-          "category": "立即措施",
+          "category": "Immediate actions",
           "items": [
             {
-              "action": "以普通用户运行",
-              "detail": "停止当前进程，切换到普通用户后重新启动 DinTalClaw"
+              "action": "Restart the service as a non root user",
+              "detail": "Stop the current root owned process and relaunch DinTalClaw with a dedicated low privilege account."
+            }
+          ]
+        },
+        {
+          "priority": "P1",
+          "category": "Hardening actions",
+          "items": [
+            {
+              "action": "Review startup scripts and service units",
+              "detail": "Verify that systemd units, container entry points, or shell scripts do not explicitly launch DinTalClaw as root."
+            },
+            {
+              "action": "Minimize writable paths",
+              "detail": "Grant the runtime account only the minimum write access needed for config, logs, and working directories."
             }
           ]
         }
@@ -51,10 +69,12 @@
     "risk_id": "log_dir_perm_unsafe",
     "mitigation": {
       "type": "form",
+      "title": "Fix log directory permissions",
+      "description": "This risk can be fixed automatically by restricting permissions on the log directory to reduce unauthorized read, delete, or tamper access.",
       "form_schema": [
         {
           "key": "fix_permission",
-          "label": "修复权限（Windows: ACL / Unix: chmod 700）",
+          "label": "Fix directory permissions using ACL or chmod 700",
           "type": "boolean",
           "default_value": true
         }
@@ -65,10 +85,12 @@
     "risk_id": "skills_not_scanned",
     "mitigation": {
       "type": "form",
+      "title": "Scan unreviewed skills",
+      "description": "This risk can be fixed automatically by running the skill security scan for installed DinTalClaw skills.",
       "form_schema": [
         {
           "key": "scan_skills",
-          "label": "扫描未检测的 Skills",
+          "label": "Run skill security scan",
           "type": "boolean",
           "default_value": true
         }
@@ -79,10 +101,12 @@
     "risk_id": "skill_agent_risk",
     "mitigation": {
       "type": "form",
+      "title": "Remediate risky skill",
+      "description": "This risk can be fixed automatically by applying a skill remediation action such as deletion when the skill is not trusted.",
       "form_schema": [
         {
           "key": "delete_skill",
-          "label": "删除此 Skill",
+          "label": "Delete this skill",
           "type": "boolean",
           "default_value": false
         }

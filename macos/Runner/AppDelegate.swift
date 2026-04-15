@@ -6,6 +6,7 @@ import desktop_multi_window
 class AppDelegate: FlutterAppDelegate {
   private var bookmarkHandler: SecurityScopedBookmarkHandler?
   private var appExitChannel: FlutterMethodChannel?
+  private let singleInstanceCoordinator = SingleInstanceCoordinator()
   
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     return false  // 窗口关闭后不退出应用,保持托盘运行
@@ -23,8 +24,29 @@ class AppDelegate: FlutterAppDelegate {
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
     return true
   }
+
+  override func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    if !flag, let window = mainFlutterWindow {
+      window.makeKeyAndOrderFront(nil)
+      sender.activate(ignoringOtherApps: true)
+    }
+    return true
+  }
   
   override func applicationDidFinishLaunching(_ notification: Notification) {
+    singleInstanceCoordinator.onActivateExistingInstance = { [weak self] in
+      guard let self else { return }
+      if let window = self.mainFlutterWindow {
+        window.makeKeyAndOrderFront(nil)
+      }
+      NSApp.activate(ignoringOtherApps: true)
+    }
+
+    if !singleInstanceCoordinator.acquireOrNotifyExisting() {
+      NSApp.terminate(nil)
+      return
+    }
+
     // Register security-scoped bookmark handler
     if let controller = mainFlutterWindow?.contentViewController as? FlutterViewController {
       bookmarkHandler = SecurityScopedBookmarkHandler(messenger: controller.engine.binaryMessenger)
@@ -41,6 +63,10 @@ class AppDelegate: FlutterAppDelegate {
       RegisterGeneratedPlugins(registry: controller)
       // 子窗口保留原生红黄绿按钮，不再隐藏
     }
+  }
+
+  override func applicationWillTerminate(_ notification: Notification) {
+    singleInstanceCoordinator.shutdown()
   }
 }
 

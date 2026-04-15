@@ -12,6 +12,13 @@ import (
 // Type definitions for ConversationMessage, ToolCallInfo, ToolResultInfo
 // are in aliases.go (aliased from core/shepherd)
 
+// NormalizedMessage is a compact comparable representation used for
+// heuristic conversation continuity checks.
+type NormalizedMessage struct {
+	Role    string
+	Content string
+}
+
 // extractToolCalls extracts tool call info from interface{}
 func extractToolCalls(toolCallsRaw interface{}) []ToolCallInfo {
 	var result []ToolCallInfo
@@ -186,6 +193,61 @@ func extractConversationMessage(msg openai.ChatCompletionMessageParamUnion) Conv
 	}
 
 	return cm
+}
+
+func normalizeComparableMessage(msg ConversationMessage) NormalizedMessage {
+	return NormalizedMessage{
+		Role:    strings.TrimSpace(strings.ToLower(msg.Role)),
+		Content: strings.TrimSpace(msg.Content),
+	}
+}
+
+func extractRecentComparableMessages(messages []openai.ChatCompletionMessageParamUnion, limit int) []NormalizedMessage {
+	all := extractComparableMessages(messages)
+	if limit <= 0 || len(all) <= limit {
+		return all
+	}
+	return cloneNormalizedMessages(all[len(all)-limit:])
+}
+
+func extractComparableMessages(messages []openai.ChatCompletionMessageParamUnion) []NormalizedMessage {
+	out := make([]NormalizedMessage, 0, len(messages))
+	for _, msg := range messages {
+		out = append(out, normalizeComparableMessage(extractConversationMessage(msg)))
+	}
+	return out
+}
+
+func cloneNormalizedMessages(messages []NormalizedMessage) []NormalizedMessage {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]NormalizedMessage, len(messages))
+	copy(out, messages)
+	return out
+}
+
+func containsRecentMessageWindow(messages []NormalizedMessage, window []NormalizedMessage) bool {
+	if len(window) == 0 {
+		return len(messages) > 0
+	}
+	if len(messages) < len(window) {
+		return false
+	}
+	maxStart := len(messages) - len(window)
+	for start := 0; start <= maxStart; start++ {
+		matched := true
+		for i := range window {
+			if messages[start+i] != window[i] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 // sdkToolCallsToInterface converts SDK tool calls to interface{} for ConversationMessage.ToolCalls

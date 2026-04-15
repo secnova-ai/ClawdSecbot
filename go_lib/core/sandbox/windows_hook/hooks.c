@@ -45,8 +45,8 @@ static PFN_GetAddrInfoW   fpGetAddrInfoW   = NULL;
 
 static void audit_log(const char *action, const char *detail);
 
-// 路径操作检查顺序：
-// 目录打开 -> 创建 -> 读取 -> 重命名 -> 写入 -> 删除
+// Path operation priority used for consistent audit naming.
+// Directory open -> create -> read -> rename -> write -> delete.
 #define PATH_OP_DIR_OPEN (1U << 0)
 #define PATH_OP_CREATE   (1U << 1)
 #define PATH_OP_READ     (1U << 2)
@@ -54,7 +54,7 @@ static void audit_log(const char *action, const char *detail);
 #define PATH_OP_WRITE    (1U << 4)
 #define PATH_OP_DELETE   (1U << 5)
 
-// 按统一顺序选择主操作名称，用于跨平台一致审计。
+// Pick the primary path operation name for cross-platform audit events.
 static const char *select_primary_path_op(unsigned int opMask) {
     if (opMask & PATH_OP_DIR_OPEN) return "PATH-DIR-OPEN";
     if (opMask & PATH_OP_CREATE) return "PATH-CREATE";
@@ -65,7 +65,7 @@ static const char *select_primary_path_op(unsigned int opMask) {
     return "PATH-READ";
 }
 
-// 将 CreateFileW 参数映射为路径操作位图。
+// Map CreateFileW parameters to the path operation bitmask.
 static unsigned int build_createfile_op_mask(DWORD desiredAccess, DWORD creationDisposition, DWORD flagsAndAttributes) {
     unsigned int opMask = 0;
     if (flagsAndAttributes & FILE_FLAG_BACKUP_SEMANTICS) {
@@ -118,7 +118,7 @@ static void audit_log(const char *action, const char *detail) {
     fflush(g_log);
 }
 
-// 输出统一沙箱事件日志，格式与 Linux 侧对齐:
+// Emit sandbox audit events using the same format as the Linux hook.
 // ACTION=<BLOCK|LOG_ONLY> TYPE=<...> TARGET=<...>
 static void audit_log_event(const char *action, const char *type, const char *target) {
     if (!g_log) return;

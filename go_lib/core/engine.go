@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"runtime"
 	"strings"
 
@@ -141,14 +142,15 @@ func (e *AssetDetectionEngine) matchJSON(snapshot SystemSnapshot, rule AssetFind
 	// 只匹配进程名称和进程路径，不匹配命令行参数，避免误报（如vim编辑包含关键字的文件）
 	if len(criteria.ProcessKeywords) > 0 {
 		procMatched := false
+		matchedPIDs := make([]string, 0)
 		for _, key := range criteria.ProcessKeywords {
 			key = strings.ToLower(key)
 			for _, proc := range snapshot.RunningProcesses {
 				// 只匹配进程名称或进程路径，不匹配命令行参数
-				if strings.Contains(strings.ToLower(proc.Name), key) ||
-					strings.Contains(strings.ToLower(proc.Path), key) {
+				if processMatchesKeyword(proc, key) {
 					procMatched = true
 					currentAsset.ProcessPaths = append(currentAsset.ProcessPaths, proc.Path)
+					matchedPIDs = append(matchedPIDs, fmt.Sprintf("%d", proc.Pid))
 					logging.Debug("规则 %s: 匹配到进程 %s (路径=%s, 关键字=%s)", rule.Name, proc.Name, proc.Path, key)
 				}
 			}
@@ -197,6 +199,13 @@ func (e *AssetDetectionEngine) matchJSON(snapshot SystemSnapshot, rule AssetFind
 		}
 	}
 
+	if len(criteria.ProcessKeywords) > 0 {
+		matchedPIDs := collectMatchedProcessPIDs(snapshot.RunningProcesses, currentAsset.ProcessPaths)
+		if len(matchedPIDs) > 0 {
+			currentAsset.Metadata["pid"] = strings.Join(matchedPIDs, ", ")
+		}
+	}
+
 	currentAsset.ProcessPaths = uniqueStrings(currentAsset.ProcessPaths)
 	return &currentAsset
 }
@@ -215,4 +224,62 @@ func uniqueStrings(input []string) []string {
 		}
 	}
 	return list
+}
+
+func collectMatchedProcessPIDs(processes []SystemProcess, processPaths []string) []string {
+	if len(processes) == 0 || len(processPaths) == 0 {
+		return []string{}
+	}
+
+	pathSet := make(map[string]struct{}, len(processPaths))
+	for _, path := range processPaths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		pathSet[path] = struct{}{}
+	}
+
+	pids := make([]string, 0)
+	for _, proc := range processes {
+		path := strings.TrimSpace(proc.Path)
+		if path == "" {
+			continue
+		}
+		if _, ok := pathSet[path]; !ok {
+			continue
+		}
+		pids = append(pids, fmt.Sprintf("%d", proc.Pid))
+	}
+
+	return uniqueStrings(pids)
+}
+
+func processMatchesKeyword(proc SystemProcess, keyword string) bool {
+	name := strings.ToLower(strings.TrimSpace(proc.Name))
+	path := strings.ToLower(strings.TrimSpace(proc.Path))
+	cmd := strings.ToLower(strings.TrimSpace(proc.Cmd))
+
+	if strings.Contains(name, keyword) || strings.Contains(path, keyword) {
+		return true
+	}
+
+	if !isWrapperRuntimeProcess(name, path) {
+		return false
+	}
+
+	return strings.Contains(cmd, keyword)
+}
+
+func isWrapperRuntimeProcess(name, path string) bool {
+	for _, token := range []string{
+		"node", "npm", "npx", "bun", "deno",
+		"python", "pythonw", "py",
+		"ruby", "java", "javaw",
+	} {
+		if strings.Contains(name, token) || strings.Contains(path, token) {
+			return true
+		}
+	}
+	return false
 }

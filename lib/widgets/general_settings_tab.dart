@@ -37,6 +37,8 @@ class GeneralSettingsTab extends StatefulWidget {
   final VoidCallback onRestoreConfig;
   final VoidCallback onShowAbout;
   final VoidCallback onReauthorizeDirectory;
+  final bool apiServerEnabled;
+  final ValueChanged<bool> onToggleApiServer;
 
   const GeneralSettingsTab({
     super.key,
@@ -48,6 +50,8 @@ class GeneralSettingsTab extends StatefulWidget {
     required this.onRestoreConfig,
     required this.onShowAbout,
     required this.onReauthorizeDirectory,
+    required this.apiServerEnabled,
+    required this.onToggleApiServer,
   });
 
   @override
@@ -199,8 +203,9 @@ class _GeneralSettingsTabState extends State<GeneralSettingsTab> {
     final value = int.tryParse(_customValueController.text.trim());
     if (value == null || value <= 0) {
       setState(() {
-        _customErrorText =
-            AppLocalizations.of(context)!.scheduledScanInvalidCustomValue;
+        _customErrorText = AppLocalizations.of(
+          context,
+        )!.scheduledScanInvalidCustomValue;
       });
       return;
     }
@@ -248,6 +253,14 @@ class _GeneralSettingsTabState extends State<GeneralSettingsTab> {
             const SizedBox(height: 8),
           ],
           _buildScheduledScanTile(context),
+          const SizedBox(height: 16),
+          _buildToggleTile(
+            icon: LucideIcons.server,
+            iconColor: const Color(0xFF22C55E),
+            title: 'API 服务',
+            value: widget.apiServerEnabled,
+            onToggle: () => widget.onToggleApiServer(!widget.apiServerEnabled),
+          ),
           const SizedBox(height: 16),
           _buildSectionHeader(l10n.dataManagement),
           const SizedBox(height: 8),
@@ -361,10 +374,7 @@ class _GeneralSettingsTabState extends State<GeneralSettingsTab> {
                 children: [
                   Text(
                     l10n.scheduledScanCustomHint,
-                    style: AppFonts.inter(
-                      fontSize: 12,
-                      color: Colors.white54,
-                    ),
+                    style: AppFonts.inter(fontSize: 12, color: Colors.white54),
                   ),
                   const SizedBox(height: 10),
                   Container(
@@ -564,9 +574,7 @@ class _GeneralSettingsTabState extends State<GeneralSettingsTab> {
             child: DefaultTextStyle.merge(
               style: AppFonts.inter(
                 fontSize: 13,
-                color: isSelected
-                    ? highlightedColor
-                    : Colors.white70,
+                color: isSelected ? highlightedColor : Colors.white70,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
               ),
               child: item.child,
@@ -732,5 +740,4 @@ class _GeneralSettingsTabState extends State<GeneralSettingsTab> {
       ),
     );
   }
-
 }

@@ -1,7 +1,9 @@
 ﻿#Requires -Version 5.1
 param(
     [int]$PprofPort = 0,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [ValidateSet('community', 'business')]
+    [string]$Type = 'community'
 )
 
 $ErrorActionPreference = "Stop"
@@ -242,6 +244,7 @@ function Assert-FlutterWindowsSymlinkSupport {
 Write-Host "============================================" -ForegroundColor White
 Write-Host "  BotSecManager - pprof mode (Windows)" -ForegroundColor White
 Write-Host "============================================" -ForegroundColor White
+Write-Host ("Type: {0}" -f $Type) -ForegroundColor White
 Write-Host ""
 
 if (-not $SkipBuild) {
@@ -305,5 +308,7 @@ $env:PUB_HOSTED_URL = "https://pub.flutter-io.cn"
 $env:FLUTTER_GIT_URL = "https://gitee.com/mirrors/flutter.git"
 $env:FLUTTER_ALREADY_LOCKED = "true"
 
-& flutter run -d windows --no-pub
+& flutter run -d windows --no-pub `
+    --dart-define=BUILD_VARIANT=personal `
+    --dart-define=BUILD_TYPE=$Type
 exit $LASTEXITCODE

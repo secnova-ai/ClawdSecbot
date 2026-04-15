@@ -16,6 +16,8 @@ import (
 var (
 	// globalDB is the shared database connection.
 	globalDB *sql.DB
+	// globalDBPath is current database file path.
+	globalDBPath string
 	// dbMutex guards database initialization and shutdown.
 	dbMutex sync.RWMutex
 )
@@ -39,6 +41,7 @@ func InitDBWithVersion(dbPath, currentVersion, versionFilePath string) (*DBInitS
 		globalDB.Close()
 		globalDB = nil
 	}
+	globalDBPath = dbPath
 
 	logging.Info("Initializing database connection: %s", dbPath)
 
@@ -392,9 +395,20 @@ func CloseDB() error {
 	if globalDB != nil {
 		err := globalDB.Close()
 		globalDB = nil
+		globalDBPath = ""
 		return err
 	}
+	globalDBPath = ""
 	return nil
+}
+
+// createAssetTables creates asset scanning tables.
+// IF NOT EXISTS keeps it idempotent and aligned with the Flutter-side schema.
+// GetDBPath 获取当前数据库文件路径。
+func GetDBPath() string {
+	dbMutex.RLock()
+	defer dbMutex.RUnlock()
+	return globalDBPath
 }
 
 // createAssetTables creates asset scanning tables.
@@ -443,6 +457,9 @@ func createAssetTables(db *sql.DB) error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			skill_name TEXT NOT NULL,
 			skill_hash TEXT NOT NULL UNIQUE,
+			skill_path TEXT NOT NULL DEFAULT '',
+			source_plugin TEXT NOT NULL DEFAULT '',
+			asset_id TEXT NOT NULL DEFAULT '',
 			scanned_at TEXT NOT NULL,
 			safe INTEGER NOT NULL,
 			issues TEXT,
@@ -452,6 +469,13 @@ func createAssetTables(db *sql.DB) error {
 	`); err != nil {
 		return fmt.Errorf("failed to create skill_scans table: %w", err)
 	}
+
+	// Add trusted column if it doesn't exist (migration for existing databases)
+	addColumnSafe(db, "skill_scans", "trusted", "INTEGER DEFAULT 0")
+	addColumnSafe(db, "skill_scans", "risk_level", "TEXT")
+	addColumnSafe(db, "skill_scans", "skill_path", "TEXT NOT NULL DEFAULT ''")
+	addColumnSafe(db, "skill_scans", "source_plugin", "TEXT NOT NULL DEFAULT ''")
+	addColumnSafe(db, "skill_scans", "asset_id", "TEXT NOT NULL DEFAULT ''")
 
 	logging.Info("Asset tables created/verified successfully")
 	return nil

@@ -141,6 +141,20 @@
   "mitigate": "Mitigate",
   "fixApplied": "Fix applied successfully",
   "cancel": "Cancel",
+  "mitigationDialogTitle": "Risk Mitigation",
+  "mitigationExecute": "Execute Fix",
+  "mitigationConfirmAutoFix": "Are you sure you want to execute the automatic remediation?",
+  "mitigationFieldRequired": "This field is required",
+  "mitigationFieldMinLength": "Minimum length is {length}",
+  "@mitigationFieldMinLength": {
+    "placeholders": {
+      "length": {"type": "int"}
+    }
+  },
+  "mitigationFieldInvalidFormat": "Invalid format",
+  "mitigationFieldInvalidRegex": "Invalid validation rule",
+  "mitigationUnsupportedFieldType": "Unsupported field type",
+  "mitigationCommandCopied": "Command copied to clipboard",
   "aiModelConfig": "AI Model Config",
 
   "skillScanTitle": "AI Skill Security Analysis",

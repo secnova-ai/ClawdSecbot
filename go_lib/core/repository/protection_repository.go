@@ -75,6 +75,15 @@ type ProtectionRepository struct {
 	db *sql.DB
 }
 
+const (
+	DefaultProtectionPolicyAssetID   = "__default_protection_policy__"
+	DefaultProtectionPolicyAssetName = "__default_protection_policy__"
+)
+
+func IsDefaultProtectionPolicyAssetID(assetID string) bool {
+	return strings.TrimSpace(assetID) == DefaultProtectionPolicyAssetID
+}
+
 // NewProtectionRepository 创建保护数据仓库实例
 func NewProtectionRepository(db *sql.DB) *ProtectionRepository {
 	if db == nil {
@@ -246,6 +255,11 @@ func (r *ProtectionRepository) GetProtectionConfig(assetID string) (*ProtectionC
 	return config, nil
 }
 
+// GetDefaultProtectionConfig 获取默认防护策略配置。
+func (r *ProtectionRepository) GetDefaultProtectionConfig() (*ProtectionConfig, error) {
+	return r.GetProtectionConfig(DefaultProtectionPolicyAssetID)
+}
+
 // GetEnabledProtectionConfigs 获取所有启用的保护配置
 func (r *ProtectionRepository) GetEnabledProtectionConfigs() ([]*ProtectionConfig, error) {
 	if r.db == nil {
@@ -256,7 +270,7 @@ func (r *ProtectionRepository) GetEnabledProtectionConfigs() ([]*ProtectionConfi
 		gateway_binary_path, gateway_config_path, custom_security_prompt, 
 		single_session_token_limit, daily_token_limit, 
 		path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at
-		FROM protection_config WHERE enabled = 1`)
+		FROM protection_config WHERE enabled = 1 AND asset_id <> ?`, DefaultProtectionPolicyAssetID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query enabled protection configs: %w", err)
 	}
@@ -277,6 +291,40 @@ func (r *ProtectionRepository) GetEnabledProtectionConfigs() ([]*ProtectionConfi
 	}
 
 	logging.Info("Enabled protection configs count: %d", len(configs))
+	return configs, nil
+}
+
+// GetAllProtectionConfigs 获取所有保护配置
+func (r *ProtectionRepository) GetAllProtectionConfigs() ([]*ProtectionConfig, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	rows, err := r.db.Query(`SELECT asset_name, asset_id, enabled, audit_only, sandbox_enabled,
+		gateway_binary_path, gateway_config_path, custom_security_prompt,
+		single_session_token_limit, daily_token_limit,
+		path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at
+		FROM protection_config WHERE asset_id <> ?`, DefaultProtectionPolicyAssetID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query protection configs: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []*ProtectionConfig
+	for rows.Next() {
+		config, err := scanProtectionConfigFromRows(rows)
+		if err != nil {
+			logging.Warning("Failed to scan protection config row: %v", err)
+			continue
+		}
+		configs = append(configs, config)
+	}
+
+	if configs == nil {
+		configs = []*ProtectionConfig{}
+	}
+
+	logging.Info("Protection configs count: %d", len(configs))
 	return configs, nil
 }
 
@@ -417,11 +465,12 @@ func (r *ProtectionRepository) ClearProtectionStatistics(assetID string) error {
 
 // --- Shepherd Rules ---
 
-// GetShepherdSensitiveActions 获取指定资产实例的Shepherd敏感操作列表
-func (r *ProtectionRepository) GetShepherdSensitiveActions(assetID string) ([]string, bool, error) {
+// GetShepherdSensitiveActions 获取指定资产实例的 Shepherd 敏感操作列表。
+func (r *ProtectionRepository) GetShepherdSensitiveActions(assetName string, assetID string) ([]string, bool, error) {
 	if r.db == nil {
 		return nil, false, fmt.Errorf("database not initialized")
 	}
+	_ = assetName
 	assetID = strings.TrimSpace(assetID)
 	if assetID == "" {
 		return nil, false, fmt.Errorf("asset_id is required")

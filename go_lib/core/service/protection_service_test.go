@@ -331,6 +331,32 @@ func TestGetShepherdSensitiveActions_SavedEmptyRules(t *testing.T) {
 	}
 }
 
+func TestGetShepherdSensitiveActions_IsolatedByAssetID(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	SaveShepherdSensitiveActions(`{"asset_name": "openclaw", "asset_id": "bot-1", "actions": ["file_write"]}`)
+	SaveShepherdSensitiveActions(`{"asset_name": "openclaw", "asset_id": "bot-2", "actions": ["shell_exec"]}`)
+
+	result1 := GetShepherdSensitiveActions("bot-1")
+	if result1["success"] != true {
+		t.Fatalf("Expected success=true, got: %v", result1)
+	}
+	actions1 := result1["data"].([]string)
+	if len(actions1) != 1 || actions1[0] != "file_write" {
+		t.Fatalf("unexpected bot-1 rules: %v", actions1)
+	}
+
+	result2 := GetShepherdSensitiveActions("bot-2")
+	if result2["success"] != true {
+		t.Fatalf("Expected success=true, got: %v", result2)
+	}
+	actions2 := result2["data"].([]string)
+	if len(actions2) != 1 || actions2[0] != "shell_exec" {
+		t.Fatalf("unexpected bot-2 rules: %v", actions2)
+	}
+}
+
 // TestClearAllData 验证清空所有运行数据
 func TestClearAllData(t *testing.T) {
 	cleanup := setupTestDB(t)

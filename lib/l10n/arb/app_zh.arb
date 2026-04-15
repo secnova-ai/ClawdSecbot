@@ -183,6 +183,20 @@
   "mitigate": "修复",
   "fixApplied": "修复成功",
   "cancel": "取消",
+  "mitigationDialogTitle": "\u98ce\u9669\u5904\u7f6e",
+  "mitigationExecute": "\u6267\u884c\u4fee\u590d",
+  "mitigationConfirmAutoFix": "\u786e\u5b9a\u8981\u6267\u884c\u81ea\u52a8\u4fee\u590d\u5417\uff1f",
+  "mitigationFieldRequired": "\u6b64\u9879\u5fc5\u586b",
+  "mitigationFieldMinLength": "\u6700\u5c0f\u957f\u5ea6\u4e3a {length}",
+  "@mitigationFieldMinLength": {
+    "placeholders": {
+      "length": {"type": "int"}
+    }
+  },
+  "mitigationFieldInvalidFormat": "\u683c\u5f0f\u4e0d\u6b63\u786e",
+  "mitigationFieldInvalidRegex": "\u65e0\u6548\u7684\u6821\u9a8c\u89c4\u5219",
+  "mitigationUnsupportedFieldType": "\u4e0d\u652f\u6301\u7684\u5b57\u6bb5\u7c7b\u578b",
+  "mitigationCommandCopied": "\u547d\u4ee4\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f",
   "aiModelConfig": "AI模型配置",
 
   "skillScanTitle": "AI 技能安全分析",

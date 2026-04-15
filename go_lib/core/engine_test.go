@@ -50,8 +50,89 @@ func TestDetect_PortAndProcess(t *testing.T) {
 	if len(asset.ProcessPaths) == 0 {
 		t.Error("Expected process paths to be recorded")
 	}
+	if asset.Metadata["pid"] != "502" {
+		t.Errorf("Expected pid metadata '502', got %q", asset.Metadata["pid"])
+	}
 
 	t.Logf("Detected Asset: %+v", asset)
+}
+
+func TestDetect_PortAndWrapperProcessCommandLine(t *testing.T) {
+	engine := NewEngine()
+
+	engine.LoadRule(AssetFinderRule{
+		Code:      "openclaw_gateway_active",
+		Name:      "Openclaw Gateway",
+		LifeCycle: RuleLifeCycleRuntime,
+		Desc:      "Detects active Openclaw Gateway via Port and Process",
+		Expression: RuleExpression{
+			Lang: "json_match",
+			Expr: `{"ports": [18789], "process_keywords": ["openclaw"]}`,
+		},
+	})
+
+	snapshot := SystemSnapshot{
+		OpenPorts: []int{18789},
+		RunningProcesses: []SystemProcess{
+			{
+				Pid:  13364,
+				Name: "node.exe",
+				Cmd:  `"C:\Program Files\nodejs\node.exe" C:\Users\hudy\AppData\Roaming\npm\node_modules\openclaw\dist\index.js gateway --port 18789`,
+				Path: `C:\Program Files\nodejs\node.exe`,
+			},
+		},
+		Services:   []string{},
+		FileExists: func(path string) bool { return false },
+	}
+
+	assets, err := engine.Detect(snapshot)
+	if err != nil {
+		t.Fatalf("Detection error: %v", err)
+	}
+	if len(assets) != 1 {
+		t.Fatalf("Expected 1 asset, got %d", len(assets))
+	}
+	if got := assets[0].Metadata["pid"]; got != "13364" {
+		t.Fatalf("Expected pid metadata '13364', got %q", got)
+	}
+	if len(assets[0].ProcessPaths) != 1 || assets[0].ProcessPaths[0] != `C:\Program Files\nodejs\node.exe` {
+		t.Fatalf("Expected node executable path to be recorded, got %v", assets[0].ProcessPaths)
+	}
+}
+
+func TestDetect_ConfigFileOnly_DoesNotFabricatePID(t *testing.T) {
+	engine := NewEngine()
+
+	engine.LoadRule(AssetFinderRule{
+		Code:      "openclaw_config_exist",
+		Name:      "Config File Detection",
+		LifeCycle: RuleLifeCycleStatic,
+		Desc:      "Detects Openclaw presence via Config File",
+		Expression: RuleExpression{
+			Lang: "json_match",
+			Expr: `{"file_paths": ["~/.openclaw"]}`,
+		},
+	})
+
+	snapshot := SystemSnapshot{
+		OpenPorts:        []int{},
+		RunningProcesses: []SystemProcess{},
+		Services:         []string{},
+		FileExists: func(path string) bool {
+			return path == "~/.openclaw"
+		},
+	}
+
+	assets, err := engine.Detect(snapshot)
+	if err != nil {
+		t.Fatalf("Detection error: %v", err)
+	}
+	if len(assets) != 1 {
+		t.Fatalf("Expected 1 asset, got %d", len(assets))
+	}
+	if assets[0].Metadata["pid"] != "" {
+		t.Fatalf("Expected empty pid metadata for static-only asset, got %q", assets[0].Metadata["pid"])
+	}
 }
 
 // TestDetect_ConfigFile 验证配置文件匹配规则

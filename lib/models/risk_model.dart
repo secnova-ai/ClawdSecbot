@@ -247,24 +247,32 @@ class FormItem {
 // 扫描结果
 class ScanResult {
   final Map<String, dynamic>? config;
-  final List<RiskInfo> risks;
+  final List<RiskInfo> riskInfo;
+  final List<RiskInfo> skillResult;
   final bool configFound;
   final String? configPath;
   final List<Asset> assets;
   final DateTime? scannedAt;
 
+  List<RiskInfo> get risks => [...riskInfo, ...skillResult];
+
   ScanResult({
     this.config,
-    required this.risks,
+    List<RiskInfo>? risks,
+    List<RiskInfo>? riskInfo,
+    List<RiskInfo>? skillResult,
     required this.configFound,
     this.configPath,
     this.assets = const [],
     this.scannedAt,
-  });
+  }) : riskInfo = List<RiskInfo>.unmodifiable(riskInfo ?? risks ?? const []),
+       skillResult = List<RiskInfo>.unmodifiable(skillResult ?? const []);
 
   Map<String, dynamic> toJson() {
     return {
       'config': config,
+      'risk_info': riskInfo.map((r) => r.toJson()).toList(),
+      'skill_result': skillResult.map((r) => r.toJson()).toList(),
       'risks': risks.map((r) => r.toJson()).toList(),
       'config_found': configFound,
       'config_path': configPath,
@@ -274,9 +282,22 @@ class ScanResult {
   }
 
   factory ScanResult.fromJson(Map<String, dynamic> json) {
+    final legacyRisks = (json['risks'] as List? ?? const [])
+        .map((r) => RiskInfo.fromJson(r))
+        .toList();
+
     return ScanResult(
       config: json['config'],
-      risks: (json['risks'] as List).map((r) => RiskInfo.fromJson(r)).toList(),
+      riskInfo:
+          (json['risk_info'] as List?)
+              ?.map((r) => RiskInfo.fromJson(r))
+              .toList() ??
+          legacyRisks,
+      skillResult:
+          (json['skill_result'] as List?)
+              ?.map((r) => RiskInfo.fromJson(r))
+              .toList() ??
+          const <RiskInfo>[],
       configFound: json['config_found'],
       configPath: json['config_path'],
       assets: (json['assets'] as List).map((a) => Asset.fromJson(a)).toList(),

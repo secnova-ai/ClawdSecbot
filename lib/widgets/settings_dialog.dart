@@ -20,6 +20,8 @@ class SettingsDialog extends StatefulWidget {
   final VoidCallback onRestoreConfig;
   final VoidCallback onShowAbout;
   final VoidCallback onReauthorizeDirectory;
+  final bool apiServerEnabled;
+  final ValueChanged<bool> onToggleApiServer;
 
   const SettingsDialog({
     super.key,
@@ -30,6 +32,8 @@ class SettingsDialog extends StatefulWidget {
     required this.onRestoreConfig,
     required this.onShowAbout,
     required this.onReauthorizeDirectory,
+    required this.apiServerEnabled,
+    required this.onToggleApiServer,
   });
 
   @override
@@ -45,12 +49,14 @@ class _SettingsDialogState extends State<SettingsDialog>
   int _currentTabIndex = 0;
   late bool _localLaunchAtStartup;
   late int _localScheduledScanIntervalSeconds;
+  late bool _localApiServerEnabled;
 
   @override
   void initState() {
     super.initState();
     _localLaunchAtStartup = widget.launchAtStartupEnabled;
     _localScheduledScanIntervalSeconds = widget.scheduledScanIntervalSeconds;
+    _localApiServerEnabled = widget.apiServerEnabled;
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
@@ -58,6 +64,14 @@ class _SettingsDialogState extends State<SettingsDialog>
         _currentTabIndex = _tabController.index;
       });
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant SettingsDialog oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.apiServerEnabled != widget.apiServerEnabled) {
+      _localApiServerEnabled = widget.apiServerEnabled;
+    }
   }
 
   @override
@@ -115,6 +129,13 @@ class _SettingsDialogState extends State<SettingsDialog>
     });
   }
 
+  void _handleToggleApiServer(bool enable) {
+    setState(() {
+      _localApiServerEnabled = enable;
+    });
+    widget.onToggleApiServer(enable);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -154,6 +175,8 @@ class _SettingsDialogState extends State<SettingsDialog>
                     onRestoreConfig: widget.onRestoreConfig,
                     onShowAbout: widget.onShowAbout,
                     onReauthorizeDirectory: widget.onReauthorizeDirectory,
+                    apiServerEnabled: _localApiServerEnabled,
+                    onToggleApiServer: _handleToggleApiServer,
                   ),
                 ],
               ),

@@ -3,6 +3,11 @@ project(sandbox_hook C)
 
 set(CMAKE_C_STANDARD 11)
 
+# Force static runtime library to avoid VCRUNTIME dependency
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 include(FetchContent)
 
 # MinHook: lightweight inline hooking library

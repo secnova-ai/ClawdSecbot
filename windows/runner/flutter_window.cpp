@@ -10,6 +10,18 @@ FlutterWindow::FlutterWindow(const flutter::DartProject& project)
 
 FlutterWindow::~FlutterWindow() {}
 
+void FlutterWindow::ShowAndFocusMainWindow() {
+  const HWND hwnd = GetHandle();
+  if (hwnd == nullptr) {
+    return;
+  }
+
+  ShowWindow(hwnd, SW_RESTORE);
+  ShowWindow(hwnd, SW_SHOWNORMAL);
+  SetForegroundWindow(hwnd);
+  SetFocus(hwnd);
+}
+
 bool FlutterWindow::OnCreate() {
   if (!Win32Window::OnCreate()) {
     return false;
@@ -69,6 +81,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case WM_SHOW_EXISTING_INSTANCE:
+      ShowAndFocusMainWindow();
+      return 0;
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;

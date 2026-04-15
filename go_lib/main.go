@@ -5,9 +5,11 @@ package main
 
 // DartCallback Dart 消息回调函数类型
 typedef void (*DartCallback)(const char* message);
+typedef void (*DartAppShutdownCallback)(const char* message);
 
 // 存储 Dart 回调指针
 static DartCallback dartCallback = NULL;
+static DartAppShutdownCallback dartAppShutdownCallback = NULL;
 
 // setDartCallback 设置 Dart 回调
 static inline void setDartCallback(DartCallback cb) {
@@ -17,6 +19,14 @@ static inline void setDartCallback(DartCallback cb) {
 // clearDartCallback 清除 Dart 回调
 static inline void clearDartCallback() {
     dartCallback = NULL;
+}
+
+static inline void setDartAppShutdownCallback(DartAppShutdownCallback cb) {
+    dartAppShutdownCallback = cb;
+}
+
+static inline void clearDartAppShutdownCallback() {
+    dartAppShutdownCallback = NULL;
 }
 
 // isDartCallbackSet 检查回调是否已设置
@@ -30,6 +40,12 @@ static inline void invokeDartCallback(const char* msg) {
         dartCallback(msg);
     }
 }
+
+static inline void invokeDartAppShutdownCallback(const char* msg) {
+    if (dartAppShutdownCallback != NULL) {
+        dartAppShutdownCallback(msg);
+    }
+}
 */
 import "C"
 
@@ -40,10 +56,12 @@ import (
 	"net/http/pprof"
 	"os"
 	"sync"
+	"time"
 	"unsafe"
 
 	"go_lib/chatmodel-routing/adapter"
 	"go_lib/core"
+	"go_lib/core/api"
 	"go_lib/core/callback_bridge"
 	"go_lib/core/proxy"
 	"go_lib/core/sandbox"
@@ -59,6 +77,7 @@ import (
 func init() {
 	resetSignals()
 	startPprofIfNeeded()
+	configureRealtimeExportHooks()
 }
 
 func startPprofIfNeeded() {
@@ -317,6 +336,12 @@ func ClearProtectionStatisticsFFI(assetIDC *C.char) *C.char {
 
 //export GetShepherdSensitiveActionsFFI
 func GetShepherdSensitiveActionsFFI(assetIDC *C.char) *C.char {
+	return jsonToCString(service.GetShepherdSensitiveActions(C.GoString(assetIDC)))
+}
+
+//export GetShepherdSensitiveActionsByAssetFFI
+func GetShepherdSensitiveActionsByAssetFFI(assetNameC, assetIDC *C.char) *C.char {
+	_ = C.GoString(assetNameC)
 	return jsonToCString(service.GetShepherdSensitiveActions(C.GoString(assetIDC)))
 }
 
@@ -750,6 +775,115 @@ var (
 	versionCheckServiceMu sync.Mutex
 )
 
+// API Server 全局实例
+var (
+	apiServer     *api.APIServer
+	apiServerLock sync.Mutex
+)
+
+var (
+	appShutdownCallbackMu sync.Mutex
+	appShutdownCallbackOn bool
+)
+
+func configureRealtimeExportHooks() {
+	proxy.SetCompletedTruthRecordCallback(func(record proxy.TruthRecord) {
+		appendTruthRecordAuditToExport(record)
+	})
+
+	shepherd.GetSecurityEventBuffer().SetExportCallback(func(event shepherd.SecurityEvent) {
+		appendSecurityEventToExport(event)
+	})
+}
+
+func appendTruthRecordAuditToExport(record proxy.TruthRecord) {
+	apiServerLock.Lock()
+	server := apiServer
+	apiServerLock.Unlock()
+	if server == nil {
+		return
+	}
+
+	toolCalls := make([]api.ToolCall, 0, len(record.ToolCalls))
+	for _, tc := range record.ToolCalls {
+		toolCalls = append(toolCalls, api.ToolCall{
+			Tool:       tc.Name,
+			Parameters: tc.Arguments,
+			Result:     tc.Result,
+		})
+	}
+
+	action := "ALLOW"
+	riskLevel := ""
+	riskReason := ""
+	if record.Decision != nil {
+		action = record.Decision.Action
+		riskLevel = record.Decision.RiskLevel
+		riskReason = record.Decision.Reason
+	}
+
+	requestContent := ""
+	for _, msg := range record.Messages {
+		if msg.Role == "user" {
+			requestContent = msg.Content
+			break
+		}
+	}
+
+	durationMs := 0
+	if record.StartedAt != "" && record.CompletedAt != "" {
+		if startedAt, err := time.Parse(time.RFC3339Nano, record.StartedAt); err == nil {
+			if completedAt, err := time.Parse(time.RFC3339Nano, record.CompletedAt); err == nil {
+				durationMs = int(completedAt.Sub(startedAt).Milliseconds())
+			}
+		}
+	}
+
+	entry := &api.AuditLogEntry{
+		BotID:         record.AssetID,
+		LogID:         record.RequestID,
+		LogTimestamp:  record.StartedAt,
+		RequestID:     record.RequestID,
+		Model:         record.Model,
+		Action:        action,
+		RiskLevel:     riskLevel,
+		RiskCauses:    riskReason,
+		DurationMs:    durationMs,
+		TokenCount:    record.PromptTokens + record.CompletionTokens,
+		UserRequest:   requestContent,
+		ToolCallCount: len(record.ToolCalls),
+		ToolCalls:     toolCalls,
+	}
+
+	if err := server.AppendAuditLog(entry); err != nil {
+		fmt.Fprintf(os.Stderr, "[export] append audit log failed: %v\n", err)
+	}
+}
+
+func appendSecurityEventToExport(event shepherd.SecurityEvent) {
+	apiServerLock.Lock()
+	server := apiServer
+	apiServerLock.Unlock()
+	if server == nil {
+		return
+	}
+
+	entry := &api.SecurityEventEntry{
+		BotID:      event.BotID,
+		EventID:    event.ID,
+		Timestamp:  event.Timestamp,
+		EventType:  event.EventType,
+		ActionDesc: event.ActionDesc,
+		RiskType:   event.RiskType,
+		Detail:     event.Detail,
+		Source:     event.Source,
+	}
+
+	if err := server.AppendSecurityEvent(entry); err != nil {
+		fmt.Fprintf(os.Stderr, "[export] append security event failed: %v\n", err)
+	}
+}
+
 //export RegisterMessageCallback
 func RegisterMessageCallback(callback C.DartCallback) *C.char {
 	callbackBridgeMu.Lock()
@@ -894,7 +1028,124 @@ func UpdateVersionCheckLanguageFFI(langC *C.char) *C.char {
 	return jsonToCString(map[string]interface{}{"success": true})
 }
 
+// ==================== API Server FFI ====================
+
+//export StartAPIServerFFI
+func StartAPIServerFFI(configJSON *C.char) *C.char {
+	apiServerLock.Lock()
+	defer apiServerLock.Unlock()
+
+	// 检查是否已有 apiServer 在运行
+	if apiServer != nil && apiServer.IsRunning() {
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   "API server is already running",
+		})
+	}
+
+	// 解析配置
+	var config struct {
+		Port int `json:"port"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(configJSON)), &config); err != nil {
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("invalid config: %v", err),
+		})
+	}
+
+	// 使用默认端口 23481
+	port := config.Port
+	if port == 0 {
+		port = 23481
+	}
+
+	// 创建并启动 API Server
+	apiServer = api.NewAPIServer()
+	apiServer.SetShutdownHandler(func(options api.AppShutdownOptions) error {
+		return triggerAppShutdown(options)
+	})
+	if err := apiServer.Start(port); err != nil {
+		apiServer = nil
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return jsonToCString(map[string]interface{}{
+		"success": true,
+		"port":    apiServer.Port(),
+		"token":   apiServer.Token(),
+		"url":     fmt.Sprintf("http://127.0.0.1:%d", apiServer.Port()),
+	})
+}
+
+//export StopAPIServerFFI
+func StopAPIServerFFI() *C.char {
+	apiServerLock.Lock()
+	defer apiServerLock.Unlock()
+
+	// 检查是否有 apiServer 在运行
+	if apiServer == nil || !apiServer.IsRunning() {
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   "API server is not running",
+		})
+	}
+
+	// 停止 API Server
+	if err := apiServer.Stop(); err != nil {
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	// 置空引用
+	apiServer = nil
+
+	return jsonToCString(map[string]interface{}{"success": true})
+}
+
 // ==================== 辅助函数 FFI ====================
+
+func triggerAppShutdown(options api.AppShutdownOptions) error {
+	appShutdownCallbackMu.Lock()
+	defer appShutdownCallbackMu.Unlock()
+
+	if !appShutdownCallbackOn {
+		return fmt.Errorf("app shutdown callback is not registered")
+	}
+
+	payload, err := json.Marshal(options)
+	if err != nil {
+		return fmt.Errorf("marshal shutdown payload: %w", err)
+	}
+
+	C.invokeDartAppShutdownCallback(C.CString(string(payload)))
+	return nil
+}
+
+//export RegisterAppShutdownCallback
+func RegisterAppShutdownCallback(callback C.DartAppShutdownCallback) *C.char {
+	appShutdownCallbackMu.Lock()
+	defer appShutdownCallbackMu.Unlock()
+
+	C.setDartAppShutdownCallback(callback)
+	appShutdownCallbackOn = true
+	return jsonToCString(map[string]interface{}{"success": true, "mode": "callback"})
+}
+
+//export UnregisterAppShutdownCallback
+func UnregisterAppShutdownCallback() *C.char {
+	appShutdownCallbackMu.Lock()
+	defer appShutdownCallbackMu.Unlock()
+
+	appShutdownCallbackOn = false
+	C.clearDartAppShutdownCallback()
+	return jsonToCString(map[string]interface{}{"success": true})
+}
 
 //export FreeString
 func FreeString(str *C.char) {
