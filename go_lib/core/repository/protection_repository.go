@@ -230,11 +230,6 @@ func (r *ProtectionRepository) SaveProtectionConfig(config *ProtectionConfig) er
 
 // GetProtectionConfig returns the protection config for the specified asset instance.
 func (r *ProtectionRepository) GetProtectionConfig(assetID string) (*ProtectionConfig, error) {
-// GetDefaultProtectionConfig 获取默认防护策略配置。
-func (r *ProtectionRepository) GetDefaultProtectionConfig() (*ProtectionConfig, error) {
-	return r.GetProtectionConfig(DefaultProtectionPolicyAssetID)
-}
-
 	if r.db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
@@ -258,6 +253,11 @@ func (r *ProtectionRepository) GetDefaultProtectionConfig() (*ProtectionConfig, 
 	}
 
 	return config, nil
+}
+
+// GetDefaultProtectionConfig 获取默认防护策略配置。
+func (r *ProtectionRepository) GetDefaultProtectionConfig() (*ProtectionConfig, error) {
+	return r.GetProtectionConfig(DefaultProtectionPolicyAssetID)
 }
 
 // GetEnabledProtectionConfigs 获取所有启用的保护配置
@@ -294,8 +294,6 @@ func (r *ProtectionRepository) GetEnabledProtectionConfigs() ([]*ProtectionConfi
 	return configs, nil
 }
 
-// SetProtectionEnabled updates the enabled state for the specified asset instance.
-func (r *ProtectionRepository) SetProtectionEnabled(assetID string, enabled bool) error {
 // GetAllProtectionConfigs 获取所有保护配置
 func (r *ProtectionRepository) GetAllProtectionConfigs() ([]*ProtectionConfig, error) {
 	if r.db == nil {
@@ -330,6 +328,8 @@ func (r *ProtectionRepository) GetAllProtectionConfigs() ([]*ProtectionConfig, e
 	return configs, nil
 }
 
+// SetProtectionEnabled updates the enabled state for the specified asset instance.
+func (r *ProtectionRepository) SetProtectionEnabled(assetID string, enabled bool) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
