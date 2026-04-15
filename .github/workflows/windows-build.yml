@@ -135,12 +135,40 @@ jobs:
       - name: Add MinGW to PATH
         shell: pwsh
         run: |
-          $mingwBin = "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin"
-          if (-not (Test-Path $mingwBin)) {
-            Write-Error "MinGW bin not found at $mingwBin"
+          $gcc = Get-Command gcc -ErrorAction SilentlyContinue
+          if ($gcc) {
+            Write-Host "gcc already available: $($gcc.Source)"
+            exit 0
+          }
+
+          $candidates = @(
+            "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin",
+            "C:\ProgramData\chocolatey\lib\mingw\tools\install\bin",
+            "C:\tools\mingw64\bin"
+          )
+
+          $resolved = $null
+          foreach ($path in $candidates) {
+            if (Test-Path (Join-Path $path "gcc.exe")) {
+              $resolved = $path
+              break
+            }
+          }
+
+          if (-not $resolved) {
+            $gccMatch = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw" -Recurse -Filter "gcc.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($gccMatch) {
+              $resolved = $gccMatch.Directory.FullName
+            }
+          }
+
+          if (-not $resolved) {
+            Write-Error "MinGW gcc.exe not found after installation"
             exit 1
           }
-          Add-Content -Path $env:GITHUB_PATH -Value $mingwBin
+
+          Write-Host "Using MinGW bin: $resolved"
+          Add-Content -Path $env:GITHUB_PATH -Value $resolved
 
       - name: Get dependencies
         run: flutter pub get
