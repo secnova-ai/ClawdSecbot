@@ -203,46 +203,45 @@ func MitigateRiskByPlugin(riskInfoJSON string) string {
 
 // ========== 防护控制函数 ==========
 
-// StartProtectionByAsset 启动指定资产实例的防护
-// assetName: plugin asset name (e.g. "openclaw"), used to locate the plugin
+// StartProtectionByAsset starts protection for the specified asset instance.
 // assetID: deterministic instance ID from ComputeAssetID, identifies the specific instance
-// configJSON: JSON 格式的防护配置字符串
-func StartProtectionByAsset(assetName string, assetID string, configJSON string) error {
+// configJSON: JSON protection config string
+func StartProtectionByAsset(assetID string, configJSON string) error {
 	var config ProtectionConfig
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 		return err
 	}
 
-	logging.Info("Core: Starting protection for asset: %s (id=%s)", assetName, assetID)
+	logging.Info("Core: Starting protection for asset: id=%s", assetID)
 
 	pm := GetPluginManager()
-	if err := pm.StartProtection(assetName, assetID, config); err != nil {
+	if err := pm.StartProtection(assetID, config); err != nil {
 		logging.Error("Core: Start protection failed: %v", err)
 		return err
 	}
 
-	logging.Info("Core: Protection started for asset: %s (id=%s)", assetName, assetID)
+	logging.Info("Core: Protection started for asset: id=%s", assetID)
 	return nil
 }
 
-// StopProtectionByAsset 停止指定资产实例的防护
-func StopProtectionByAsset(assetName string, assetID string) error {
-	logging.Info("Core: Stopping protection for asset: %s (id=%s)", assetName, assetID)
+// StopProtectionByAsset stops protection for the specified asset instance.
+func StopProtectionByAsset(assetID string) error {
+	logging.Info("Core: Stopping protection for asset: id=%s", assetID)
 
 	pm := GetPluginManager()
-	if err := pm.StopProtection(assetName, assetID); err != nil {
+	if err := pm.StopProtection(assetID); err != nil {
 		logging.Error("Core: Stop protection failed: %v", err)
 		return err
 	}
 
-	logging.Info("Core: Protection stopped for asset: %s (id=%s)", assetName, assetID)
+	logging.Info("Core: Protection stopped for asset: id=%s", assetID)
 	return nil
 }
 
-// GetProtectionStatusByAsset 获取指定资产实例的防护状态
-func GetProtectionStatusByAsset(assetName string, assetID string) (ProtectionStatus, error) {
+// GetProtectionStatusByAsset returns the protection status for the specified asset instance.
+func GetProtectionStatusByAsset(assetID string) (ProtectionStatus, error) {
 	pm := GetPluginManager()
-	return pm.GetProtectionStatus(assetName, assetID)
+	return pm.GetProtectionStatus(assetID)
 }
 
 // GetAllProtectionStatuses 获取所有资产的防护状态

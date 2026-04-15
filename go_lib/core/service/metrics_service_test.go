@@ -123,7 +123,7 @@ func TestGetDailyTokenUsage(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	result := GetDailyTokenUsage("openclaw", "openclaw:test-1")
+	result := GetDailyTokenUsage("openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}

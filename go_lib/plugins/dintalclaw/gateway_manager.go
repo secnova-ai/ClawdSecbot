@@ -52,7 +52,7 @@ func buildGatewayRestartRequestFromDB(assetID string) *GatewayRestartRequest {
 	}
 
 	repo := repository.NewProtectionRepository(nil)
-	config, err := repo.GetProtectionConfig(dintalclawAssetName, req.AssetID)
+	config, err := repo.GetProtectionConfig(req.AssetID)
 	if err != nil {
 		logging.Warning("[GatewayManager] Failed to read protection config from DB: %v, using defaults", err)
 		return req

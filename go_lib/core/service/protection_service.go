@@ -72,7 +72,7 @@ func SaveProtectionConfig(jsonStr string) map[string]interface{} {
 
 	// 如果传入的配置没有 BotModelConfig，从数据库中读取已有的值并保留
 	if config.BotModelConfig == nil && strings.TrimSpace(config.AssetID) != "" {
-		existing, err := repo.GetProtectionConfig(config.AssetName, config.AssetID)
+		existing, err := repo.GetProtectionConfig(config.AssetID)
 		if err == nil && existing != nil && existing.BotModelConfig != nil {
 			config.BotModelConfig = existing.BotModelConfig
 		}
@@ -86,10 +86,10 @@ func SaveProtectionConfig(jsonStr string) map[string]interface{} {
 	return successResult()
 }
 
-// GetProtectionConfig 获取保护配置
-func GetProtectionConfig(assetName string, assetID string) map[string]interface{} {
+// GetProtectionConfig returns the protection config for the specified asset instance.
+func GetProtectionConfig(assetID string) map[string]interface{} {
 	repo := repository.NewProtectionRepository(nil)
-	config, err := repo.GetProtectionConfig(assetName, assetID)
+	config, err := repo.GetProtectionConfig(assetID)
 	if err != nil {
 		logging.Error("Failed to get protection config: %v", err)
 		return errorResult(err)
@@ -139,7 +139,7 @@ func SetProtectionEnabled(jsonStr string) map[string]interface{} {
 	}
 
 	repo := repository.NewProtectionRepository(nil)
-	if err := repo.SetProtectionEnabled(input.AssetName, input.AssetID, input.Enabled); err != nil {
+	if err := repo.SetProtectionEnabled(input.AssetID, input.Enabled); err != nil {
 		logging.Error("Failed to set protection enabled: %v", err)
 		return errorResult(err)
 	}
@@ -147,10 +147,10 @@ func SetProtectionEnabled(jsonStr string) map[string]interface{} {
 	return successResult()
 }
 
-// DeleteProtectionConfig 删除保护配置
-func DeleteProtectionConfig(assetName string, assetID string) map[string]interface{} {
+// DeleteProtectionConfig removes the protection config for the specified asset instance.
+func DeleteProtectionConfig(assetID string) map[string]interface{} {
 	repo := repository.NewProtectionRepository(nil)
-	if err := repo.DeleteProtectionConfig(assetName, assetID); err != nil {
+	if err := repo.DeleteProtectionConfig(assetID); err != nil {
 		logging.Error("Failed to delete protection config: %v", err)
 		return errorResult(err)
 	}
@@ -177,10 +177,10 @@ func SaveProtectionStatistics(jsonStr string) map[string]interface{} {
 	return successResult()
 }
 
-// GetProtectionStatistics 获取保护统计
-func GetProtectionStatistics(assetName string, assetID string) map[string]interface{} {
+// GetProtectionStatistics returns the protection statistics for the specified asset instance.
+func GetProtectionStatistics(assetID string) map[string]interface{} {
 	repo := repository.NewProtectionRepository(nil)
-	stats, err := repo.GetProtectionStatistics(assetName, assetID)
+	stats, err := repo.GetProtectionStatistics(assetID)
 	if err != nil {
 		logging.Error("Failed to get protection statistics: %v", err)
 		return errorResult(err)
@@ -192,10 +192,10 @@ func GetProtectionStatistics(assetName string, assetID string) map[string]interf
 	return successDataResult(stats)
 }
 
-// ClearProtectionStatistics 清空保护统计
-func ClearProtectionStatistics(assetName string, assetID string) map[string]interface{} {
+// ClearProtectionStatistics clears the protection statistics for the specified asset instance.
+func ClearProtectionStatistics(assetID string) map[string]interface{} {
 	repo := repository.NewProtectionRepository(nil)
-	if err := repo.ClearProtectionStatistics(assetName, assetID); err != nil {
+	if err := repo.ClearProtectionStatistics(assetID); err != nil {
 		logging.Error("Failed to clear protection statistics: %v", err)
 		return errorResult(err)
 	}
@@ -205,9 +205,8 @@ func ClearProtectionStatistics(assetName string, assetID string) map[string]inte
 
 // ========== Shepherd规则操作 ==========
 
-// GetShepherdSensitiveActions 获取Shepherd敏感操作
-func GetShepherdSensitiveActions(assetName, assetID string) map[string]interface{} {
-	_ = assetName
+// GetShepherdSensitiveActions returns the sensitive actions for the specified asset instance.
+func GetShepherdSensitiveActions(assetID string) map[string]interface{} {
 	if strings.TrimSpace(assetID) == "" {
 		return errorResult(fmt.Errorf("asset_id is required"))
 	}
@@ -253,7 +252,7 @@ func SaveShepherdSensitiveActions(jsonStr string) map[string]interface{} {
 	if err != nil {
 		return errorResult(err)
 	}
-	if result := proxy.UpdateShepherdRulesByAssetInternal(input.AssetName, input.AssetID, string(rulesJSON)); result != "ok" {
+	if result := proxy.UpdateShepherdRulesByAssetInternal(input.AssetID, string(rulesJSON)); result != "ok" {
 		return errorMessageResult(result)
 	}
 

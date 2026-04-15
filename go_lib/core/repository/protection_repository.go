@@ -219,12 +219,11 @@ func (r *ProtectionRepository) SaveProtectionConfig(config *ProtectionConfig) er
 	return nil
 }
 
-// GetProtectionConfig 获取指定资产实例的保护配置
-func (r *ProtectionRepository) GetProtectionConfig(assetName string, assetID string) (*ProtectionConfig, error) {
+// GetProtectionConfig returns the protection config for the specified asset instance.
+func (r *ProtectionRepository) GetProtectionConfig(assetID string) (*ProtectionConfig, error) {
 	if r.db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
-	_ = assetName
 	assetID = strings.TrimSpace(assetID)
 	if assetID == "" {
 		return nil, fmt.Errorf("asset_id is required")
@@ -281,12 +280,11 @@ func (r *ProtectionRepository) GetEnabledProtectionConfigs() ([]*ProtectionConfi
 	return configs, nil
 }
 
-// SetProtectionEnabled 设置保护启用状态
-func (r *ProtectionRepository) SetProtectionEnabled(assetName string, assetID string, enabled bool) error {
+// SetProtectionEnabled updates the enabled state for the specified asset instance.
+func (r *ProtectionRepository) SetProtectionEnabled(assetID string, enabled bool) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	_ = assetName
 	assetID = strings.TrimSpace(assetID)
 	if assetID == "" {
 		return fmt.Errorf("asset_id is required")
@@ -307,12 +305,11 @@ func (r *ProtectionRepository) SetProtectionEnabled(assetName string, assetID st
 	return nil
 }
 
-// DeleteProtectionConfig 删除指定资产实例的保护配置
-func (r *ProtectionRepository) DeleteProtectionConfig(assetName string, assetID string) error {
+// DeleteProtectionConfig removes the protection config for the specified asset instance.
+func (r *ProtectionRepository) DeleteProtectionConfig(assetID string) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	_ = assetName
 	assetID = strings.TrimSpace(assetID)
 	if assetID == "" {
 		return fmt.Errorf("asset_id is required")
@@ -357,12 +354,11 @@ func (r *ProtectionRepository) SaveProtectionStatistics(stats *ProtectionStatist
 	return nil
 }
 
-// GetProtectionStatistics 获取指定资产实例的保护统计
-func (r *ProtectionRepository) GetProtectionStatistics(assetName string, assetID string) (*ProtectionStatistics, error) {
+// GetProtectionStatistics returns the protection statistics for the specified asset instance.
+func (r *ProtectionRepository) GetProtectionStatistics(assetID string) (*ProtectionStatistics, error) {
 	if r.db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
-	_ = assetName
 	assetID = strings.TrimSpace(assetID)
 	if assetID == "" {
 		return nil, fmt.Errorf("asset_id is required")
@@ -401,12 +397,11 @@ func (r *ProtectionRepository) GetProtectionStatistics(assetName string, assetID
 	return &stats, nil
 }
 
-// ClearProtectionStatistics 清空指定资产实例的保护统计
-func (r *ProtectionRepository) ClearProtectionStatistics(assetName string, assetID string) error {
+// ClearProtectionStatistics clears the protection statistics for the specified asset instance.
+func (r *ProtectionRepository) ClearProtectionStatistics(assetID string) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	_ = assetName
 	assetID = strings.TrimSpace(assetID)
 	if assetID == "" {
 		return fmt.Errorf("asset_id is required")
