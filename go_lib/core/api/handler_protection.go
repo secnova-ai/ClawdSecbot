@@ -594,7 +594,7 @@ func findProtectionConfigByBotID(repo *repository.ProtectionRepository, botID st
 
 	assetNames := []string{"openclaw", "Openclaw", "moltbot", "Moltbot"}
 	for _, assetName := range assetNames {
-		c, err := repo.GetProtectionConfig(assetName, botID)
+		c, err := repo.GetProtectionConfig(botID)
 		if err != nil {
 			return nil, "", err
 		}
@@ -686,14 +686,14 @@ func applyProtectionPolicyRuntime(previousConfig, config *repository.ProtectionC
 	}
 
 	if wasEnabled && !config.Enabled {
-		stopResult := stopProtectionProxyForPolicy(config.AssetName, config.AssetID)
+		stopResult := stopProtectionProxyForPolicy(config.AssetID)
 		if strings.Contains(stopResult, `"success":false`) {
 			logging.Warning("API: Failed to stop protection proxy for botId=%s: %s", config.AssetID, stopResult)
 		}
 		return
 	}
 
-	runningProxy := proxy.GetProxyProtectionByAsset(config.AssetName, config.AssetID)
+	runningProxy := proxy.GetProxyProtectionByAsset(config.AssetID)
 	if runningProxy != nil && runningProxy.IsRunning() {
 		runtimeCfg := &proxy.ProtectionRuntimeConfig{
 			AuditOnly:               config.AuditOnly,

@@ -25,8 +25,8 @@ const (
 	statusRefreshSeconds = 30
 )
 
-var exportProxyRunningByAsset = func(assetName, assetID string) bool {
-	pp := proxy.GetProxyProtectionByAsset(assetName, assetID)
+var exportProxyRunningByAsset = func(assetID string) bool {
+	pp := proxy.GetProxyProtectionByAsset(assetID)
 	return pp != nil && pp.IsRunning()
 }
 
@@ -348,9 +348,9 @@ func (s *ExportServiceImpl) collectBotInfoFromAssets(assets []core.Asset) []BotI
 
 		// Get protection config and statistics
 		protRepo := repository.NewProtectionRepository(nil)
-		config, err := protRepo.GetProtectionConfig(asset.SourcePlugin, asset.ID)
+		config, err := protRepo.GetProtectionConfig(asset.ID)
 		if err == nil && config != nil {
-			if config.Enabled && exportProxyRunningByAsset(asset.SourcePlugin, asset.ID) {
+			if config.Enabled && exportProxyRunningByAsset(asset.ID) {
 				if config.AuditOnly {
 					info.Protection = "bypass"
 				} else {
@@ -372,7 +372,7 @@ func (s *ExportServiceImpl) collectBotInfoFromAssets(assets []core.Asset) []BotI
 		}
 
 		// Get statistics
-		stats, err := protRepo.GetProtectionStatistics(asset.SourcePlugin, asset.ID)
+		stats, err := protRepo.GetProtectionStatistics(asset.ID)
 		if err == nil && stats != nil {
 			info.Metrics = &MetricsInfo{
 				AnalysisCount:         stats.AnalysisCount,
