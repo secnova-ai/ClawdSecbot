@@ -468,7 +468,7 @@ func TestAppShutdown_DisablesAllAssetProtectionInStatusFile(t *testing.T) {
 	}
 
 	originalStop := stopProtectionProxyForPolicy
-	stopProtectionProxyForPolicy = func(assetName, assetID string) string {
+	stopProtectionProxyForPolicy = func(assetID string) string {
 		return `{"success":true}`
 	}
 	t.Cleanup(func() {
@@ -562,7 +562,7 @@ func TestAppShutdown_RewritesExistingStatusFileWhenExportStopped(t *testing.T) {
 	}
 
 	originalStop := stopProtectionProxyForPolicy
-	stopProtectionProxyForPolicy = func(assetName, assetID string) string {
+	stopProtectionProxyForPolicy = func(assetID string) string {
 		return `{"success":true}`
 	}
 	t.Cleanup(func() {
@@ -969,8 +969,8 @@ func TestSetProtectionPolicy_InvalidBotIDDoesNotApplyRuntime(t *testing.T) {
 		t.Fatalf("start should not be called for invalid botId")
 		return ""
 	}
-	stopProtectionProxyForPolicy = func(assetName, assetID string) string {
-		t.Fatalf("stop should not be called for invalid botId: %s/%s", assetName, assetID)
+	stopProtectionProxyForPolicy = func(assetID string) string {
+		t.Fatalf("stop should not be called for invalid botId: %s", assetID)
 		return ""
 	}
 	syncGatewaySandboxForPolicy = func(assetName, assetID string) string {
@@ -1086,7 +1086,7 @@ func TestSetProtectionPolicy_ScannedBotWithoutConfigCreatesConfig(t *testing.T) 
 	apiResp := parseAPIResponse(t, resp.Body)
 	assertErrorCode(t, apiResp, CodeSuccess)
 
-	config, err := repository.NewProtectionRepository(nil).GetProtectionConfig("PolicyScanOnlySet", "policy-scan-only-set")
+	config, err := repository.NewProtectionRepository(nil).GetProtectionConfig("policy-scan-only-set")
 	if err != nil {
 		t.Fatalf("GetProtectionConfig failed: %v", err)
 	}
@@ -1205,7 +1205,7 @@ func TestHandleScan_AppliesDefaultPolicyToNewAssets(t *testing.T) {
 
 	assertStatusCode(t, rec.Code, http.StatusOK)
 
-	config, err := repo.GetProtectionConfig("PolicyScanAutoApply", "policy-scan-auto-apply")
+	config, err := repo.GetProtectionConfig("policy-scan-auto-apply")
 	if err != nil {
 		t.Fatalf("GetProtectionConfig failed: %v", err)
 	}
@@ -1281,7 +1281,7 @@ func TestHandleScan_AutoEnablesProtectionForNewAssetsWhenDefaultBotModelExists(t
 
 	assertStatusCode(t, rec.Code, http.StatusOK)
 
-	config, err := repo.GetProtectionConfig("PolicyScanAutoEnable", "policy-scan-auto-enable")
+	config, err := repo.GetProtectionConfig("policy-scan-auto-enable")
 	if err != nil {
 		t.Fatalf("GetProtectionConfig failed: %v", err)
 	}
@@ -1429,8 +1429,8 @@ func TestApplyProtectionPolicyRuntime_StartsProxyWhenProtectionBecomesEnabled(t 
 		startPayload = configJSON
 		return `{"success":true}`
 	}
-	stopProtectionProxyForPolicy = func(assetName, assetID string) string {
-		t.Fatalf("stop should not be called, asset=%s id=%s", assetName, assetID)
+	stopProtectionProxyForPolicy = func(assetID string) string {
+		t.Fatalf("stop should not be called, id=%s", assetID)
 		return ""
 	}
 	syncGatewaySandboxForPolicy = func(assetName, assetID string) string {
@@ -1476,7 +1476,7 @@ func TestApplyProtectionPolicyRuntime_StartsProxyWhenProtectionBecomesEnabled(t 
 }
 
 func TestApplyProtectionPolicyRuntime_StopsProxyWhenProtectionBecomesDisabled(t *testing.T) {
-	var stoppedAssetName, stoppedAssetID string
+	var stoppedAssetID string
 	originalStart := startProtectionProxyForPolicy
 	originalStop := stopProtectionProxyForPolicy
 	originalSync := syncGatewaySandboxForPolicy
@@ -1484,8 +1484,7 @@ func TestApplyProtectionPolicyRuntime_StopsProxyWhenProtectionBecomesDisabled(t 
 		t.Fatalf("start should not be called")
 		return ""
 	}
-	stopProtectionProxyForPolicy = func(assetName, assetID string) string {
-		stoppedAssetName = assetName
+	stopProtectionProxyForPolicy = func(assetID string) string {
 		stoppedAssetID = assetID
 		return `{"success":true}`
 	}
@@ -1504,8 +1503,8 @@ func TestApplyProtectionPolicyRuntime_StopsProxyWhenProtectionBecomesDisabled(t 
 
 	applyProtectionPolicyRuntime(oldConfig, newConfig, nil)
 
-	if stoppedAssetName != "openclaw" || stoppedAssetID != "bot-2" {
-		t.Fatalf("unexpected stop target: %s/%s", stoppedAssetName, stoppedAssetID)
+	if stoppedAssetID != "bot-2" {
+		t.Fatalf("unexpected stop target id: %s", stoppedAssetID)
 	}
 }
 
@@ -1518,7 +1517,7 @@ func TestApplyProtectionPolicyRuntime_SyncsSandboxLikeUIFlow(t *testing.T) {
 		t.Fatalf("start should not be called")
 		return ""
 	}
-	stopProtectionProxyForPolicy = func(assetName, assetID string) string {
+	stopProtectionProxyForPolicy = func(assetID string) string {
 		t.Fatalf("stop should not be called")
 		return ""
 	}
@@ -2369,7 +2368,7 @@ func TestCollectBotInfoFromAssets_UsesRuntimeProtectionStatus(t *testing.T) {
 	}
 
 	originalProxyRunningByAsset := exportProxyRunningByAsset
-	exportProxyRunningByAsset = func(assetName, assetID string) bool {
+	exportProxyRunningByAsset = func(assetID string) bool {
 		return false
 	}
 	t.Cleanup(func() {
@@ -2390,7 +2389,7 @@ func TestCollectBotInfoFromAssets_UsesRuntimeProtectionStatus(t *testing.T) {
 		t.Fatalf("Protection = %q, want %q when proxy is stopped", infos[0].Protection, "disabled")
 	}
 
-	exportProxyRunningByAsset = func(assetName, assetID string) bool {
+	exportProxyRunningByAsset = func(assetID string) bool {
 		return true
 	}
 	if err := repo.SaveProtectionConfig(&repository.ProtectionConfig{

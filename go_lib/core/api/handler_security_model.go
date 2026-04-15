@@ -98,7 +98,7 @@ func applySecurityModelRuntime(config *repository.SecurityModelConfig) {
 		if protectionConfig == nil {
 			continue
 		}
-		runningProxy := proxy.GetProxyProtectionByAsset(protectionConfig.AssetName, protectionConfig.AssetID)
+		runningProxy := proxy.GetProxyProtectionByAsset(protectionConfig.AssetID)
 		if runningProxy == nil || !runningProxy.IsRunning() {
 			continue
 		}
