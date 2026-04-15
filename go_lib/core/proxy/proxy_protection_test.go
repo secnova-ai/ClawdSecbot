@@ -67,6 +67,7 @@ func TestFormatQuotaExceededMessage_Format(t *testing.T) {
 		limit     int
 	}{
 		{"session small", "session", 100, 100},
+		{"conversation small", "conversation", 200, 300},
 		{"daily large", "daily", 999999, 1000000},
 		{"session zero", "session", 0, 0},
 	}

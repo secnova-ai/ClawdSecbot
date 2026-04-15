@@ -288,10 +288,9 @@ func extractUsage(extra map[string]interface{}, defaultPromptTokens, defaultComp
 
 // CheckToolCall performs the security check
 func (sg *ShepherdGate) CheckToolCall(ctx context.Context, contextMessages []ConversationMessage, toolCalls []ToolCallInfo, toolResults []ToolResultInfo, lastUserMessage string, requestID ...string) (*ShepherdDecision, error) {
-	rules := sg.GetUserRules()
-
 	sg.mu.RLock()
 	reactAnalyzer := sg.reactAnalyzer
+	rules := cloneUserRules(sg.userRules)
 	sg.mu.RUnlock()
 	lang := sg.getEffectiveLanguage()
 

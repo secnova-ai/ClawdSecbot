@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -72,6 +73,35 @@ func TestSkillSecurityScanRepository_SaveUnsafeSkill(t *testing.T) {
 	}
 	if record.Issues[0] != "Prompt injection detected" {
 		t.Errorf("Expected first issue 'Prompt injection detected', got '%s'", record.Issues[0])
+	}
+}
+
+func TestSkillSecurityScanRepository_PreservesStructuredIssueJSON(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	repo := NewSkillSecurityScanRepository(db)
+	rawIssue := `{"type":"prompt_injection","severity":"high","file":"SKILL.md","description":"Injected template","evidence":"prompt = f'Execute {user_input}'"}`
+
+	err := repo.SaveSkillScanResult(&SkillScanRecord{
+		SkillName: "json-skill",
+		SkillHash: "json-hash",
+		Safe:      false,
+		Issues:    []string{rawIssue},
+	})
+	if err != nil {
+		t.Fatalf("SaveSkillScanResult failed: %v", err)
+	}
+
+	record, err := repo.GetSkillScanByHash("json-hash")
+	if err != nil {
+		t.Fatalf("GetSkillScanByHash failed: %v", err)
+	}
+	if record == nil || len(record.Issues) != 1 {
+		t.Fatalf("Expected one issue, got %+v", record)
+	}
+	if !strings.Contains(record.Issues[0], `"evidence":"prompt = f'Execute {user_input}'"`) {
+		t.Fatalf("Expected evidence JSON to be preserved, got %s", record.Issues[0])
 	}
 }
 

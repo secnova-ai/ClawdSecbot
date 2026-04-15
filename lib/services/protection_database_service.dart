@@ -26,6 +26,8 @@ class ProtectionDatabaseService {
   ffi.DynamicLibrary? get _dylib => NativeLibraryService().dylib;
   FreeStringDart? get _freeString => NativeLibraryService().freeString;
 
+  String? _lastLoggedEnabledConfigsSummary;
+
   // --- Protection State methods ---
 
   /// Save protection state
@@ -143,9 +145,18 @@ class ProtectionDatabaseService {
         appLogger.warning('[ProtectionDB] Failed to parse config: $e');
       }
     }
-    appLogger.info(
-      '[ProtectionDB] Enabled protection configs count: ${configs.length}',
-    );
+    final enabledConfigsSummary = configs
+        .map(
+          (config) =>
+              '${config.assetName}|${config.assetID}|${config.enabled ? 1 : 0}',
+        )
+        .join(';');
+    if (_lastLoggedEnabledConfigsSummary != enabledConfigsSummary) {
+      _lastLoggedEnabledConfigsSummary = enabledConfigsSummary;
+      appLogger.info(
+        '[ProtectionDB] Enabled protection configs count: ${configs.length}',
+      );
+    }
     return configs;
   }
 
@@ -283,6 +294,13 @@ class ProtectionDatabaseService {
     if (data == null || data is! List) return [];
 
     return data.cast<String>();
+  }
+
+  Future<List<String>> getShepherdSensitiveActionsByAsset(
+    String assetName, [
+    String assetID = '',
+  ]) async {
+    return getShepherdSensitiveActions(assetName, assetID);
   }
 
   Future<void> saveShepherdSensitiveActions(

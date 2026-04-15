@@ -2,8 +2,9 @@
 # run_with_pprof.sh — 构建并以 pprof 性能分析模式运行应用
 #
 # 用法:
-#   ./scripts/run_with_pprof.sh              # 使用默认端口 6060
-#   ./scripts/run_with_pprof.sh 9090         # 使用自定义端口 9090
+#   ./scripts/run_with_pprof.sh                         # 使用默认端口 6060, community
+#   ./scripts/run_with_pprof.sh 9090                    # 使用自定义端口 9090
+#   ./scripts/run_with_pprof.sh 6060 business           # 使用 business 类型
 #   BOTSEC_PPROF_PORT=8080 ./scripts/run_with_pprof.sh  # 通过环境变量指定端口
 #
 # Linux: 在启动 Flutter 前会 cmake 重新编译 go_lib/core/sandbox/linux_hook/preload.c，并将 libsandbox_preload.so
@@ -27,6 +28,12 @@ cd "$PROJECT_ROOT"
 
 # 确定 pprof 端口: 命令行参数 > 环境变量 > 默认值 6060
 PPROF_PORT="${1:-${BOTSEC_PPROF_PORT:-6060}}"
+BUILD_TYPE="${2:-community}"
+
+if [[ "$BUILD_TYPE" != "community" && "$BUILD_TYPE" != "business" ]]; then
+    echo "错误: BUILD_TYPE 仅支持 community 或 business"
+    exit 1
+fi
 
 # sudo 执行助手: 优先无交互执行(已有缓存凭据), 否则回退到交互式 sudo
 run_with_sudo() {
@@ -40,6 +47,7 @@ run_with_sudo() {
 echo "============================================"
 echo "  BotSecManager — pprof 性能分析模式"
 echo "============================================"
+echo "Type: $BUILD_TYPE"
 echo ""
 
 # Step 1: 构建 Go 插件
@@ -174,4 +182,6 @@ if [ ! -f "$PROJECT_ROOT/.dart_tool/package_config.json" ]; then
     flutter pub get
 fi
 
-exec flutter run -d "$FLUTTER_DEVICE" --no-pub
+exec flutter run -d "$FLUTTER_DEVICE" --no-pub \
+    --dart-define=BUILD_VARIANT=personal \
+    --dart-define=BUILD_TYPE="$BUILD_TYPE"

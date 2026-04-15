@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	maxFileSize           = 50 * 1024 * 1024 // 50MB per file
-	maxBackupFiles        = 3
+	maxFileSize           = 20 * 1024 * 1024 // 20MB per file
+	maxBackupFiles        = 2
 	goLogFileName         = "go_proxy.log"
 	goHistoryLogFileName  = "go_history.log"
 	goShepherdGateLogFile = "go_shepherdgate.log"
@@ -178,7 +178,7 @@ func (l *Logger) rotateUnlocked() {
 	l.file.Sync()
 	l.file.Close()
 
-	// Rotate backup files: .3 -> delete, .2 -> .3, .1 -> .2
+	// Rotate backup files: .2 -> delete, .1 -> .2
 	for i := maxBackupFiles; i >= 1; i-- {
 		oldPath := fmt.Sprintf("%s.%d", l.logPath, i)
 		if i == maxBackupFiles {

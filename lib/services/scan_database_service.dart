@@ -50,6 +50,8 @@ class ScanDatabaseService {
   /// 从NativeLibraryService获取FreeString函数
   _FreeStringDart? get _freeString => NativeLibraryService().freeString;
 
+  String? _lastLoggedLatestScanSummary;
+
   // --- Scan Result methods ---
 
   Future<void> saveScanResult(ScanResult result) async {
@@ -126,34 +128,51 @@ class ScanDatabaseService {
                 .toList() ??
             [];
 
-        final risks = <RiskInfo>[];
+        final baseRisks = <RiskInfo>[];
+        final legacySkillRisks = <RiskInfo>[];
         for (final r in (data['risks'] as List?) ?? []) {
           final riskMap = r as Map<String, dynamic>;
-          risks.add(
-            RiskInfo(
-              id: riskMap['id'] ?? 'unknown',
-              title: riskMap['title'] ?? 'Unknown Risk',
-              description: riskMap['description'] ?? '',
-              level: _parseRiskLevel(riskMap['level']),
-              icon: _getIconForRisk(riskMap['level']),
-              args: riskMap['args'] != null
-                  ? Map<String, Object>.from(riskMap['args'])
-                  : null,
-              mitigation: riskMap['mitigation'] != null
-                  ? Mitigation.fromJson(riskMap['mitigation'])
-                  : null,
-            ),
+          final risk = RiskInfo(
+            id: riskMap['id'] ?? 'unknown',
+            title: riskMap['title'] ?? 'Unknown Risk',
+            description: riskMap['description'] ?? '',
+            level: _parseRiskLevel(riskMap['level']),
+            icon: _getIconForRisk(riskMap['level']),
+            args: riskMap['args'] != null
+                ? Map<String, Object>.from(riskMap['args'])
+                : null,
+            mitigation: riskMap['mitigation'] != null
+                ? Mitigation.fromJson(riskMap['mitigation'])
+                : null,
+            sourcePlugin: riskMap['source_plugin'] as String?,
           );
+          if (_isSkillRisk(risk)) {
+            legacySkillRisks.add(risk);
+          } else {
+            baseRisks.add(risk);
+          }
         }
 
-        appLogger.info(
-          '[ScanDB] Loaded latest scan via Go layer: ${assets.length} assets, ${risks.length} risks',
-        );
+        final skillRisks = await _loadSkillRisksFromDatabase();
+        if (skillRisks.isEmpty && legacySkillRisks.isNotEmpty) {
+          skillRisks.addAll(legacySkillRisks);
+        }
+
+        final latestScanSummary =
+            '${assets.length}|${baseRisks.length}|${skillRisks.length}|'
+            '${configFound ? 1 : 0}|${configPath ?? ''}|${scannedAtRaw ?? ''}';
+        if (_lastLoggedLatestScanSummary != latestScanSummary) {
+          _lastLoggedLatestScanSummary = latestScanSummary;
+          appLogger.info(
+            '[ScanDB] Loaded latest scan via Go layer: ${assets.length} assets, ${baseRisks.length} base risks, ${skillRisks.length} skill risks',
+          );
+        }
         return ScanResult(
           config: configJSON != null
               ? jsonDecode(configJSON) as Map<String, dynamic>
               : null,
-          risks: risks,
+          riskInfo: baseRisks,
+          skillResult: skillRisks,
           configFound: configFound,
           configPath: configPath,
           assets: assets,
@@ -320,12 +339,19 @@ class ScanDatabaseService {
       if (response['success'] == true && response['data'] != null) {
         return (response['data'] as List).map((item) {
           final data = item as Map<String, dynamic>;
+          final rawIssues =
+              (data['issues'] as List?)?.cast<String>() ?? <String>[];
           return {
             'skill_name': data['skill_name'],
             'skill_hash': data['skill_hash'],
+            'skill_path': data['skill_path'] as String? ?? '',
+            'source_plugin': data['source_plugin'] as String? ?? '',
+            'asset_id': data['asset_id'] as String? ?? '',
             'scanned_at': data['scanned_at'],
             'safe': data['safe'] as bool? ?? false,
-            'issues': (data['issues'] as List?)?.cast<String>() ?? <String>[],
+            'risk_level': data['risk_level'] as String? ?? '',
+            'issues': rawIssues.map(_formatSkillIssueText).toList(),
+            'issue_details': rawIssues.map(_parseSkillIssueDetail).toList(),
           };
         }).toList();
       }
@@ -355,6 +381,8 @@ class ScanDatabaseService {
       if (response['success'] == true && response['data'] != null) {
         return (response['data'] as List).map((item) {
           final data = item as Map<String, dynamic>;
+          final rawIssues =
+              (data['issues'] as List?)?.cast<String>() ?? <String>[];
           return {
             'skill_name': data['skill_name'],
             'skill_hash': data['skill_hash'],
@@ -362,7 +390,8 @@ class ScanDatabaseService {
             'safe': data['safe'] as bool? ?? false,
             'risk_level': data['risk_level'] as String? ?? '',
             'trusted': data['trusted'] as bool? ?? false,
-            'issues': (data['issues'] as List?)?.cast<String>() ?? <String>[],
+            'issues': rawIssues.map(_formatSkillIssueText).toList(),
+            'issue_details': rawIssues.map(_parseSkillIssueDetail).toList(),
           };
         }).toList();
       }
@@ -403,5 +432,66 @@ class ScanDatabaseService {
       }
     }
     return Icons.check_circle;
+  }
+
+  bool _isSkillRisk(RiskInfo risk) => risk.id == 'riskSkillSecurityIssue';
+
+  Future<List<RiskInfo>> _loadSkillRisksFromDatabase() async {
+    final riskySkills = await getRiskySkills();
+    return riskySkills.map((skill) {
+      final skillName = skill['skill_name'] as String? ?? 'Unknown Skill';
+      final issues = skill['issues'] as List<String>? ?? const <String>[];
+      final issueCount = issues.length;
+
+      return RiskInfo(
+        id: 'riskSkillSecurityIssue',
+        args: {
+          'skillName': skillName,
+          'issueCount': issueCount,
+          'issues': issues.join('; '),
+          if ((skill['skill_path'] as String? ?? '').isNotEmpty)
+            'skillPath': skill['skill_path'] as String,
+        },
+        title: 'Risky Skill: $skillName',
+        description: issueCount > 0
+            ? 'Skill "$skillName" has $issueCount security issue(s): ${issues.join("; ")}'
+            : 'Skill "$skillName" was flagged as potentially risky.',
+        level: _parseRiskLevel(skill['risk_level']),
+        icon: Icons.warning,
+      );
+    }).toList();
+  }
+
+  Map<String, String> _parseSkillIssueDetail(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return {
+          'type': decoded['type']?.toString() ?? 'security_risk',
+          'severity': decoded['severity']?.toString() ?? 'medium',
+          'file': decoded['file']?.toString() ?? '',
+          'description': decoded['description']?.toString() ?? raw,
+          'evidence': decoded['evidence']?.toString() ?? '',
+        };
+      }
+    } catch (_) {}
+
+    return {
+      'type': 'security_risk',
+      'severity': 'medium',
+      'file': '',
+      'description': raw,
+      'evidence': '',
+    };
+  }
+
+  String _formatSkillIssueText(String raw) {
+    final detail = _parseSkillIssueDetail(raw);
+    final file = detail['file'] ?? '';
+    final description = detail['description'] ?? raw;
+    if (file.isEmpty) {
+      return description;
+    }
+    return '[$file] $description';
   }
 }

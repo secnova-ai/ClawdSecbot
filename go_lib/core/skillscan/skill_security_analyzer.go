@@ -551,7 +551,17 @@ func buildUserPromptWithRecommendations(skillPath, skillName string, recommended
 func ConvertSkillIssuesToStrings(issues []SkillSecurityIssue) []string {
 	result := make([]string, len(issues))
 	for i, issue := range issues {
-		result[i] = fmt.Sprintf("[%s] %s in %s: %s", issue.Severity, issue.Type, issue.File, issue.Description)
+		result[i] = SerializeSkillIssue(issue)
 	}
 	return result
+}
+
+// SerializeSkillIssue converts a structured issue into a JSON string so it can
+// be stored in the legacy string-array column without losing evidence details.
+func SerializeSkillIssue(issue SkillSecurityIssue) string {
+	data, err := json.Marshal(issue)
+	if err != nil {
+		return fmt.Sprintf("[%s] %s in %s: %s", issue.Severity, issue.Type, issue.File, issue.Description)
+	}
+	return string(data)
 }

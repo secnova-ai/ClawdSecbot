@@ -2,6 +2,7 @@ package openclaw
 
 import (
 	"fmt"
+	"strings"
 
 	"go_lib/core"
 	"go_lib/core/logging"
@@ -195,5 +196,36 @@ func (s *OpenclawAssetScanner) enrichAssetWithConfig(asset *core.Asset) {
 				{Label: "Path", Value: configPath, Status: "neutral"},
 			},
 		})
+	}
+
+	if runtimeSection := buildRuntimeSection(asset); runtimeSection != nil {
+		asset.DisplaySections = append(asset.DisplaySections, *runtimeSection)
+	}
+}
+
+func buildRuntimeSection(asset *core.Asset) *core.DisplaySection {
+	if asset == nil {
+		return nil
+	}
+
+	items := make([]core.DisplayItem, 0, 2)
+	if pid := strings.TrimSpace(asset.Metadata["pid"]); pid != "" {
+		items = append(items, core.DisplayItem{Label: "PID", Value: pid, Status: "neutral"})
+	}
+	if len(asset.ProcessPaths) > 0 && strings.TrimSpace(asset.ProcessPaths[0]) != "" {
+		items = append(items, core.DisplayItem{
+			Label:  "Image Path",
+			Value:  strings.TrimSpace(asset.ProcessPaths[0]),
+			Status: "neutral",
+		})
+	}
+	if len(items) == 0 {
+		return nil
+	}
+
+	return &core.DisplaySection{
+		Title: "Runtime",
+		Icon:  "monitor",
+		Items: items,
 	}
 }

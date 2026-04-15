@@ -342,6 +342,7 @@ func (a *ToolCallReActAnalyzer) Analyze(ctx context.Context, contextMessages []C
 			eventType = "tool_execution"
 		}
 		securityEventBuffer.AddSecurityEvent(SecurityEvent{
+			BotID:      botIDFromContext(ctx),
 			EventType:  eventType,
 			ActionDesc: heuristic.Reason,
 			RiskType:   heuristic.RiskLevel,

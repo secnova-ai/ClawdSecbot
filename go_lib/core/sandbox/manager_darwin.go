@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 
+	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 )
 
@@ -57,7 +58,7 @@ func (m *SandboxManager) buildSandboxCommand() (*exec.Cmd, string, error) {
 	args := []string{"-f", policyPath, "openclaw"}
 	args = append(args, m.gatewayArgs...)
 
-	cmd := exec.Command("sandbox-exec", args...)
+	cmd := cmdutil.BackgroundCommand("sandbox-exec", args...)
 	cmd.Env = append(os.Environ(), m.gatewayEnv...)
 
 	setSysProcAttr(cmd)

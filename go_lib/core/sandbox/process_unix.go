@@ -9,6 +9,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"go_lib/core/cmdutil"
 )
 
 // KillProcess kills a specific process by PID
@@ -44,7 +46,7 @@ func IsProcessRunning(pid int) bool {
 
 // FindProcessesByName finds all processes matching a name/path pattern
 func FindProcessesByName(pattern string) ([]int, error) {
-	cmd := exec.Command("pgrep", "-f", pattern)
+	cmd := cmdutil.Command("pgrep", "-f", pattern)
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
@@ -71,7 +73,7 @@ func FindProcessesByName(pattern string) ([]int, error) {
 
 // GetProcessInfo returns information about a process
 func GetProcessInfo(pid int) (string, error) {
-	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "pid,ppid,comm,args")
+	cmd := cmdutil.Command("ps", "-p", strconv.Itoa(pid), "-o", "pid,ppid,comm,args")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -86,7 +88,9 @@ func gracefulTerminate(process *os.Process) error {
 
 // setSysProcAttr sets Unix-specific process attributes (process group)
 func setSysProcAttr(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
+	cmdutil.Prepare(cmd)
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
+	cmd.SysProcAttr.Setpgid = true
 }

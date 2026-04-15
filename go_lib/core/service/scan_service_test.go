@@ -2,7 +2,10 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"go_lib/core/repository"
 )
 
 // TestSaveScanResult 验证保存扫描结果
@@ -130,6 +133,41 @@ func TestSaveSkillScanResult(t *testing.T) {
 	result := SaveSkillScanResult(input)
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
+	}
+}
+
+func TestSaveSkillScanResult_PreservesStructuredIssueJSON(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	input := `{
+		"skill_name": "dangerous-skill",
+		"skill_hash": "evidence-hash",
+		"safe": false,
+		"issues": [
+			"{\"type\":\"prompt_injection\",\"severity\":\"high\",\"file\":\"SKILL.md\",\"description\":\"Injected template\",\"evidence\":\"prompt = f'Execute {user_input}'\"}"
+		]
+	}`
+
+	result := SaveSkillScanResult(input)
+	if result["success"] != true {
+		t.Fatalf("Expected success=true, got: %v", result)
+	}
+
+	saved := GetSkillScanByHash("evidence-hash")
+	if saved["success"] != true {
+		t.Fatalf("Expected saved lookup success=true, got: %v", saved)
+	}
+
+	data, ok := saved["data"].(*repository.SkillScanRecord)
+	if !ok || data == nil {
+		t.Fatalf("Expected SkillScanRecord, got %T", saved["data"])
+	}
+	if len(data.Issues) != 1 || data.Issues[0] == "" {
+		t.Fatalf("Expected one persisted issue, got %+v", data.Issues)
+	}
+	if !strings.Contains(data.Issues[0], `"evidence":"prompt = f'Execute {user_input}'"`) {
+		t.Fatalf("Expected evidence to be preserved, got %s", data.Issues[0])
 	}
 }
 

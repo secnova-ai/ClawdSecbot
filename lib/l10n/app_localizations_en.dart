@@ -315,6 +315,36 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cancel => 'Cancel';
 
   @override
+  String get mitigationDialogTitle => 'Risk Mitigation';
+
+  @override
+  String get mitigationExecute => 'Execute Fix';
+
+  @override
+  String get mitigationConfirmAutoFix =>
+      'Are you sure you want to execute the automatic remediation?';
+
+  @override
+  String get mitigationFieldRequired => 'This field is required';
+
+  @override
+  String mitigationFieldMinLength(int length) {
+    return 'Minimum length is $length';
+  }
+
+  @override
+  String get mitigationFieldInvalidFormat => 'Invalid format';
+
+  @override
+  String get mitigationFieldInvalidRegex => 'Invalid validation rule';
+
+  @override
+  String get mitigationUnsupportedFieldType => 'Unsupported field type';
+
+  @override
+  String get mitigationCommandCopied => 'Command copied to clipboard';
+
+  @override
   String get aiModelConfig => 'AI Model Config';
 
   @override

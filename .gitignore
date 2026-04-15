@@ -98,3 +98,4 @@ go_lib/go_lib
 .gocache-linux/
 .gocache-windows
 AGENTS.md
+export/

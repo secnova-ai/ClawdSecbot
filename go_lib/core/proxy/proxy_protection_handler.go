@@ -18,6 +18,114 @@ import (
 	"github.com/openai/openai-go"
 )
 
+const recentConversationMessageWindow = 3
+
+func appendRequestMessagesToTruthRecord(r *TruthRecord, req *openai.ChatCompletionNewParams) {
+	if r == nil || req == nil || len(r.Messages) > 0 {
+		return
+	}
+	for i, msg := range req.Messages {
+		r.Messages = append(r.Messages, RecordMessage{
+			Index:   i,
+			Role:    getMessageRole(msg),
+			Content: truncateToBytes(extractMessageContent(msg), maxRecordMessageBytes),
+		})
+	}
+}
+
+func appendAssistantMessageToTruthRecord(r *TruthRecord, content string) {
+	if r == nil {
+		return
+	}
+	assistantIndex := len(r.Messages)
+	if assistantIndex < r.MessageCount {
+		assistantIndex = r.MessageCount
+	}
+	r.Messages = append(r.Messages, RecordMessage{
+		Index:   assistantIndex,
+		Role:    "assistant",
+		Content: truncateToBytes(content, maxRecordMessageBytes),
+	})
+}
+
+func detectConversationContinuation(currentAll []NormalizedMessage, prevRecent []NormalizedMessage, currentCount, prevCount int) bool {
+	if len(currentAll) == 0 || len(prevRecent) == 0 {
+		return false
+	}
+	if currentCount <= prevCount {
+		return false
+	}
+	if prevCount > len(currentAll) {
+		return false
+	}
+	start := prevCount - len(prevRecent)
+	if start < 0 {
+		start = 0
+	}
+	end := start + len(prevRecent)
+	if end > len(currentAll) {
+		return false
+	}
+	for i := range prevRecent {
+		if currentAll[start+i] != prevRecent[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (pp *ProxyProtection) evaluateConversationWindow(req *openai.ChatCompletionNewParams) (int, int, bool) {
+	currentAll := extractComparableMessages(req.Messages)
+	currentRecent := extractRecentComparableMessages(req.Messages, recentConversationMessageWindow)
+	currentCount := len(req.Messages)
+
+	pp.metricsMu.Lock()
+	prevRecent := cloneNormalizedMessages(pp.lastRecentMessages)
+	prevCount := pp.lastRecentMessageCount
+	isContinuation := detectConversationContinuation(currentAll, prevRecent, currentCount, prevCount)
+	if !isContinuation {
+		pp.currentConversationTokenUsage = 0
+	}
+	pp.lastRecentMessages = cloneNormalizedMessages(currentRecent)
+	pp.lastRecentMessageCount = currentCount
+	currentUsage := pp.currentConversationTokenUsage
+	pp.metricsMu.Unlock()
+
+	return currentUsage, len(currentRecent), isContinuation
+}
+
+func (pp *ProxyProtection) addConversationTokens(totalTokens int) int {
+	pp.metricsMu.Lock()
+	defer pp.metricsMu.Unlock()
+	if totalTokens > 0 {
+		pp.currentConversationTokenUsage += totalTokens
+	}
+	return pp.currentConversationTokenUsage
+}
+
+func (pp *ProxyProtection) currentDailyTokenUsage() int {
+	pp.configMu.RLock()
+	initialUsage := pp.initialDailyUsage
+	pp.configMu.RUnlock()
+
+	pp.metricsMu.Lock()
+	runtimeUsage := pp.totalTokens - pp.baselineTotalTokens
+	pp.metricsMu.Unlock()
+	if runtimeUsage < 0 {
+		runtimeUsage = 0
+	}
+	return initialUsage + runtimeUsage
+}
+
+func (pp *ProxyProtection) updateRecordTokenTotals(requestID string, promptTokens, completionTokens, conversationTokens, dailyTokens int) {
+	pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+		r.PromptTokens = promptTokens
+		r.CompletionTokens = completionTokens
+		r.ConversationTokens = conversationTokens
+		r.DailyTokens = dailyTokens
+	})
+}
+
 // onRequest handles incoming requests
 func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatCompletionNewParams, rawBody []byte) (*chatmodelrouting.FilterRequestResult, bool) {
 	modelName := string(req.Model)
@@ -34,6 +142,57 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 	dailyLimit := pp.dailyTokenLimit
 	initialUsage := pp.initialDailyUsage
 	pp.configMu.RUnlock()
+
+	conversationUsage, recentMsgCount, isContinuation := pp.evaluateConversationWindow(req)
+	if sessionLimit > 0 {
+		if isContinuation {
+			pp.sendTerminalLog(fmt.Sprintf("Conversation quota continuing: recent_messages=%d usage=%d/%d", recentMsgCount, conversationUsage, sessionLimit))
+		} else {
+			pp.sendTerminalLog(fmt.Sprintf("Conversation quota reset: recent_messages=%d usage=%d/%d", recentMsgCount, conversationUsage, sessionLimit))
+		}
+		if conversationUsage >= sessionLimit {
+			reason := fmt.Sprintf("Conversation token quota exceeded (%d/%d)", conversationUsage, sessionLimit)
+			pp.sendTerminalLog(fmt.Sprintf(">>> %s, request blocked <<<", reason))
+
+			pp.auditMu.Lock()
+			pp.requestStartTime = time.Now()
+			pp.currentRequestID = fmt.Sprintf("req_%d_%d", time.Now().UnixNano(), pp.requestCount+1)
+			requestID := pp.currentRequestID
+			pp.auditMu.Unlock()
+
+			pp.sendLog("proxy_session_quota_exceeded", map[string]interface{}{
+				"current": conversationUsage,
+				"limit":   sessionLimit,
+				"model":   modelName,
+			})
+
+			mockMsg := formatQuotaExceededMessage("conversation", conversationUsage, sessionLimit)
+			pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+				r.Model = modelName
+				r.MessageCount = len(req.Messages)
+				r.Phase = RecordPhaseStopped
+				r.CompletedAt = time.Now().Format(time.RFC3339Nano)
+				r.FinishReason = "quota_exceeded"
+				r.ConversationTokens = conversationUsage
+				r.DailyTokens = pp.currentDailyTokenUsage()
+				r.OutputContent = truncateToBytes(mockMsg, maxRecordOutputBytes)
+				appendRequestMessagesToTruthRecord(r, req)
+				appendAssistantMessageToTruthRecord(r, mockMsg)
+				r.Decision = &SecurityDecision{
+					Action:     "BLOCK",
+					RiskLevel:  "QUOTA",
+					Reason:     reason,
+					Confidence: 100,
+				}
+				applyRecordPrimaryContent(r, RecordContentSecurity, mockMsg, true)
+			})
+
+			pp.emitMonitorRequestCreated(req, rawBody, stream)
+			pp.emitMonitorSecurityDecision("QUOTA_EXCEEDED", reason, true, mockMsg)
+			pp.emitMonitorResponseReturned("QUOTA_EXCEEDED", mockMsg, mockMsg)
+			return &chatmodelrouting.FilterRequestResult{MockContent: mockMsg}, false
+		}
+	}
 
 	// ==================== 单会话 Token 配额检查 ====================
 	if sessionLimit > 0 {
@@ -68,6 +227,12 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 				r.MessageCount = len(req.Messages)
 				r.Phase = RecordPhaseStopped
 				r.CompletedAt = time.Now().Format(time.RFC3339Nano)
+				r.FinishReason = "quota_exceeded"
+				r.ConversationTokens = conversationUsage
+				r.DailyTokens = pp.currentDailyTokenUsage()
+				r.OutputContent = truncateToBytes(mockMsg, maxRecordOutputBytes)
+				appendRequestMessagesToTruthRecord(r, req)
+				appendAssistantMessageToTruthRecord(r, mockMsg)
 				r.Decision = &SecurityDecision{
 					Action:     "BLOCK",
 					RiskLevel:  "QUOTA",
@@ -118,6 +283,10 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 				r.MessageCount = len(req.Messages)
 				r.Phase = RecordPhaseStopped
 				r.CompletedAt = time.Now().Format(time.RFC3339Nano)
+				r.FinishReason = "quota_exceeded"
+				r.OutputContent = truncateToBytes(mockMsg, maxRecordOutputBytes)
+				appendRequestMessagesToTruthRecord(r, req)
+				appendAssistantMessageToTruthRecord(r, mockMsg)
 				r.Decision = &SecurityDecision{
 					Action:     "BLOCK",
 					RiskLevel:  "QUOTA",
@@ -152,6 +321,8 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 		r.MessageCount = len(req.Messages)
 		r.Phase = RecordPhaseStarting
 		r.Decision = &SecurityDecision{Action: "ALLOW"}
+		r.ConversationTokens = conversationUsage
+		r.DailyTokens = pp.currentDailyTokenUsage()
 	})
 
 	pp.sendLog("proxy_new_request", map[string]interface{}{
@@ -668,7 +839,10 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 				securityModel := pp.shepherdGate.GetModelName()
 				logging.Info("[ProxyProtection] ShepherdGate tool result detection triggered: toolCalls=%d, toolResults=%d, securityModel=%s", len(toolCallInfos), len(toolResultInfos), securityModel)
 
-				decision, err := pp.shepherdGate.CheckToolCall(pp.ctx, contextMessages, toolCallInfos, toolResultInfos, cachedLastUserMsg, requestID)
+				// 使用代理服务的生命周期 context（pp.ctx）而非请求 context，
+				// 防止客户端断连或请求超时导致 ShepherdGate 分析中途取消，影响代理正常转发。
+				checkCtx := shepherd.WithBotID(pp.ctx, pp.assetID)
+				decision, err := pp.shepherdGate.CheckToolCall(checkCtx, contextMessages, toolCallInfos, toolResultInfos, cachedLastUserMsg, requestID)
 
 				pp.statsMu.Lock()
 				pp.analysisCount++
@@ -883,18 +1057,23 @@ func (pp *ProxyProtection) onResponse(ctx context.Context, resp *openai.ChatComp
 		pp.totalCompletionTokens += completionTokens
 		pp.totalTokens += totalTokens
 		pp.metricsMu.Unlock()
+		conversationTotal := pp.addConversationTokens(totalTokens)
+		dailyTotal := pp.currentDailyTokenUsage()
+		pp.updateRecordTokenTotals(requestID, promptTokens, completionTokens, conversationTotal, dailyTotal)
 
 		if hasUsageFromUpstream {
 			pp.sendLogForRequest(requestID, "proxy_token_usage", map[string]interface{}{
-				"promptTokens":     promptTokens,
-				"completionTokens": completionTokens,
-				"totalTokens":      totalTokens,
+				"promptTokens":       promptTokens,
+				"completionTokens":   completionTokens,
+				"totalTokens":        totalTokens,
+				"conversationTokens": conversationTotal,
 			})
 		} else {
 			pp.sendLogForRequest(requestID, "proxy_token_usage_estimated", map[string]interface{}{
-				"promptTokens":     promptTokens,
-				"completionTokens": completionTokens,
-				"totalTokens":      totalTokens,
+				"promptTokens":       promptTokens,
+				"completionTokens":   completionTokens,
+				"totalTokens":        totalTokens,
+				"conversationTokens": conversationTotal,
 			})
 		}
 		pp.sendMetricsToCallback()
@@ -956,17 +1135,23 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 		pp.totalCompletionTokens += deltaCompletionTokens
 		pp.totalTokens += deltaTotalTokens
 		pp.metricsMu.Unlock()
+		conversationTotal := pp.addConversationTokens(deltaTotalTokens)
+		dailyTotal := pp.currentDailyTokenUsage()
+		pp.updateRecordTokenTotals(
+			requestID,
+			currentRequestPromptTokens,
+			currentRequestCompletionTokens,
+			conversationTotal,
+			dailyTotal,
+		)
 
 		pp.sendLogForRequest(requestID, "proxy_token_usage", map[string]interface{}{
-			"promptTokens":     currentRequestPromptTokens,
-			"completionTokens": currentRequestCompletionTokens,
-			"totalTokens":      currentRequestTotalTokens,
+			"promptTokens":       currentRequestPromptTokens,
+			"completionTokens":   currentRequestCompletionTokens,
+			"totalTokens":        currentRequestTotalTokens,
+			"conversationTokens": conversationTotal,
 		})
 		pp.sendMetricsToCallback()
-		pp.updateTruthRecord(requestID, func(r *TruthRecord) {
-			r.PromptTokens = currentRequestPromptTokens
-			r.CompletionTokens = currentRequestCompletionTokens
-		})
 	}
 
 	if len(chunk.Choices) == 0 {
@@ -1201,6 +1386,15 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 			pp.totalCompletionTokens += completionTokens
 			pp.totalTokens += totalTokens
 			pp.metricsMu.Unlock()
+			conversationTotal := pp.addConversationTokens(totalTokens)
+			dailyTotal := pp.currentDailyTokenUsage()
+			pp.updateRecordTokenTotals(
+				requestID,
+				promptTokens,
+				completionTokens,
+				conversationTotal,
+				dailyTotal,
+			)
 			pp.sendMetricsToCallback()
 
 			pp.streamBuffer.promptTokens = promptTokens
@@ -1208,9 +1402,10 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 			pp.streamBuffer.totalTokens = totalTokens
 
 			pp.sendLogForRequest(requestID, "proxy_token_usage_estimated", map[string]interface{}{
-				"promptTokens":     promptTokens,
-				"completionTokens": completionTokens,
-				"totalTokens":      totalTokens,
+				"promptTokens":       promptTokens,
+				"completionTokens":   completionTokens,
+				"totalTokens":        totalTokens,
+				"conversationTokens": conversationTotal,
 			})
 		}
 		pp.streamBuffer.mu.Unlock()
@@ -1236,7 +1431,7 @@ func formatQuotaExceededMessage(quotaType string, current, limit int) string {
 
 	if lang == "zh" {
 		var quotaName string
-		if quotaType == "session" {
+		if quotaType == "session" || quotaType == "conversation" {
 			quotaName = "单会话 Token 配额已用尽"
 		} else {
 			quotaName = "每日 Token 配额已用尽"
@@ -1246,8 +1441,8 @@ func formatQuotaExceededMessage(quotaType string, current, limit int) string {
 	}
 
 	var quotaName string
-	if quotaType == "session" {
-		quotaName = "Session token quota exceeded"
+	if quotaType == "session" || quotaType == "conversation" {
+		quotaName = "Conversation token quota exceeded"
 	} else {
 		quotaName = "Daily token quota exceeded"
 	}

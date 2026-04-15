@@ -925,6 +925,7 @@ run_build_stage() {
         $flutter_build_mode \
         --no-tree-shake-icons \
         --dart-define=BUILD_VARIANT="$(build_variant_for_flutter)" \
+        --dart-define=BUILD_TYPE="$BUILD_TYPE" \
         --build-name="$VERSION" \
         --build-number="$BUILD_NUMBER"
 

@@ -25,6 +25,13 @@ typedef _CloseDatabaseDart = ffi.Pointer<Utf8> Function();
 typedef _FreeStringC = ffi.Void Function(ffi.Pointer<Utf8>);
 typedef FreeStringDart = void Function(ffi.Pointer<Utf8>);
 
+// FFI type definitions for API Server
+typedef _StartAPIServerFFIC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
+typedef _StartAPIServerFFIDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
+
+typedef _StopAPIServerFFIC = ffi.Pointer<Utf8> Function();
+typedef _StopAPIServerFFIDart = ffi.Pointer<Utf8> Function();
+
 /// 原生库服务：管理Go动态库（dylib）加载和全局Go运行时（日志、数据库）生命周期
 ///
 /// 该服务独立于任何插件业务逻辑，负责：
@@ -71,6 +78,7 @@ class NativeLibraryService {
   Future<void> initialize() async {
     if (_initialized) return;
 
+    // Prefer the database directory (Application Support) as Go workspace.
     final pluginDir = _getPluginDirectory();
     if (!await pluginDir.exists()) {
       appLogger.warning(
@@ -140,7 +148,7 @@ class NativeLibraryService {
     appLogger.info('[NativeLib] Native library closed');
   }
 
-  /// 通用FFI调用辅助：发送JSON请求并返回JSON结果
+  /// 通用 FFI 调用辅助：发送 JSON 请求并返回 JSON 结果
   Map<String, dynamic> callFFI(
     String funcName,
     Map<String, dynamic> Function(ffi.DynamicLibrary dylib) executor,
@@ -157,15 +165,85 @@ class NativeLibraryService {
     }
   }
 
+  /// 启动 API Server
+  ///
+  /// [port] 可选，默认为 0（自动分配可用端口）
+  /// 返回包含成功标志、端口、token 和 URL 的 Map
+  Future<Map<String, dynamic>> startApiServer({int port = 0}) async {
+    if (_cachedDylib == null) {
+      return {'success': false, 'error': 'Native library not initialized'};
+    }
+
+    try {
+      final startFunc = _cachedDylib!
+          .lookupFunction<_StartAPIServerFFIC, _StartAPIServerFFIDart>(
+            'StartAPIServerFFI',
+          );
+
+      final configJson = jsonEncode({'port': port});
+      final configPtr = configJson.toNativeUtf8();
+      final resultPtr = startFunc(configPtr);
+      final resultStr = resultPtr.toDartString();
+      _cachedFreeString!(resultPtr);
+      malloc.free(configPtr);
+
+      final result = jsonDecode(resultStr) as Map<String, dynamic>;
+      if (result['success'] == true) {
+        appLogger.info(
+          '[NativeLib] API Server started: port=${result['port']}',
+        );
+      } else {
+        appLogger.error(
+          '[NativeLib] Failed to start API Server: ${result['error']}',
+        );
+      }
+      return result;
+    } catch (e) {
+      appLogger.error('[NativeLib] startApiServer failed: $e');
+      return {'success': false, 'error': 'startApiServer failed: $e'};
+    }
+  }
+
+  /// 停止 API Server
+  ///
+  /// 返回包含成功标志的 Map
+  Future<Map<String, dynamic>> stopApiServer() async {
+    if (_cachedDylib == null) {
+      return {'success': false, 'error': 'Native library not initialized'};
+    }
+
+    try {
+      final stopFunc = _cachedDylib!
+          .lookupFunction<_StopAPIServerFFIC, _StopAPIServerFFIDart>(
+            'StopAPIServerFFI',
+          );
+
+      final resultPtr = stopFunc();
+      final resultStr = resultPtr.toDartString();
+      _cachedFreeString!(resultPtr);
+
+      final result = jsonDecode(resultStr) as Map<String, dynamic>;
+      if (result['success'] == true) {
+        appLogger.info('[NativeLib] API Server stopped');
+      } else {
+        appLogger.error(
+          '[NativeLib] Failed to stop API Server: ${result['error']}',
+        );
+      }
+      return result;
+    } catch (e) {
+      appLogger.error('[NativeLib] stopApiServer failed: $e');
+      return {'success': false, 'error': 'stopApiServer failed: $e'};
+    }
+  }
+
   /// 初始化Go路径管理器
   void _initGoPaths(ffi.DynamicLibrary dylib, FreeStringDart freeStr) {
     final appDataDir = DatabaseService().appDataDir;
-    if (appDataDir == null) {
-      appLogger.warning(
-        '[NativeLib] Cannot init Go paths: app data dir unavailable',
-      );
-      return;
-    }
+    // workspaceDir 使用插件目录的父目录
+    final pluginDir = _getPluginDirectory();
+    final fallbackWorkspaceDir = pluginDir.parent.path;
+    final workspaceDir = appDataDir ?? fallbackWorkspaceDir;
     // homeDir 使用用户主目录
     final homeDir =
         Platform.environment['HOME'] ??
@@ -175,7 +253,7 @@ class NativeLibraryService {
     try {
       final initPathsFFI = dylib
           .lookupFunction<_InitPathsFFIC, _InitPathsFFIDart>('InitPathsFFI');
-      final workspaceDirPtr = appDataDir.toNativeUtf8();
+      final workspaceDirPtr = workspaceDir.toNativeUtf8();
       final homeDirPtr = homeDir.toNativeUtf8();
       final resultPtr = initPathsFFI(workspaceDirPtr, homeDirPtr);
       final result = resultPtr.toDartString();

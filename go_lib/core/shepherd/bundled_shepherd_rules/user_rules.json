@@ -1,10 +1,10 @@
 {
   "SensitiveActions": [
-    "Writing to or modifying critical system files or files outside the project workspace. (Note: Creating or editing files inside the project is NOT sensitive)",
-    "Sending emails, messages, or notifications to external recipients. (Note: READING emails or messages is NOT sensitive)",
-    "Executing potentially dangerous shell commands (e.g., rm -rf /, chmod, systemctl). Standard development commands (e.g., mkdir, touch, build tools) and read-only commands are NOT sensitive.",
-    "Changing global system settings or configuration",
+    "Writing to or modifying critical system files or files outside the project workspace is sensitive. (Note: Creating or editing files inside the project is NOT sensitive)",
+    "Sending emails, messages, or notifications to external recipients is sensitive. (Note: READING emails or messages is NOT sensitive)",
+    "Executing potentially dangerous shell commands are sensitive(e.g., rm -rf /, chmod, systemctl). Standard development commands (e.g., mkdir, touch, build tools) and read-only commands are NOT sensitive.",
+    "Changing global system settings or configuration is sensitive",
     "Reading/writing MEMORY.md, memory/YYYY-MM-DD.md, AGENTS.md, TOOLS.md is considered safe and requires no confirmation.",
-    "Any payment or money transfer operations need to be confirmed."
+    "Any payment or money transfer operations must be confirmed."
   ]
 }

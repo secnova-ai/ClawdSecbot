@@ -9,6 +9,12 @@ class BuildConfig {
     defaultValue: 'personal',
   );
 
+  /// Distribution type: 'community', 'business', or 'appstore'.
+  static const String buildType = String.fromEnvironment(
+    'BUILD_TYPE',
+    defaultValue: 'community',
+  );
+
   /// Check if this is the App Store build
   static bool get isAppStore {
     // Debug override via environment variable
@@ -24,6 +30,9 @@ class BuildConfig {
   /// Check if this is the Personal build
   static bool get isPersonal => !isAppStore;
 
+  /// Check if this is the Business build.
+  static bool get isBusiness => !isAppStore && buildType == 'business';
+
   /// Check if sandbox is required (App Store builds must use sandbox)
   static bool get requiresSandbox => isAppStore;
 
@@ -35,6 +44,13 @@ class BuildConfig {
     if (isAppStore) {
       return 'App Store Edition';
     }
+    if (isBusiness) {
+      return 'Business Edition';
+    }
     return 'Personal Edition';
   }
+
+  static int get defaultScheduledScanIntervalSeconds => isBusiness ? 300 : 0;
+
+  static bool get defaultApiServerEnabled => isBusiness;
 }

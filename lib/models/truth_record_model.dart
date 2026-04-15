@@ -128,6 +128,8 @@ class TruthRecordModel {
   // Token 指标
   final int promptTokens;
   final int completionTokens;
+  final int conversationTokens;
+  final int dailyTokens;
 
   TruthRecordModel({
     required this.requestId,
@@ -148,6 +150,8 @@ class TruthRecordModel {
     this.decision,
     this.promptTokens = 0,
     this.completionTokens = 0,
+    this.conversationTokens = 0,
+    this.dailyTokens = 0,
   });
 
   // ==================== 计算 getter（替代原冗余字段） ====================
@@ -232,6 +236,8 @@ class TruthRecordModel {
           : null,
       promptTokens: json['prompt_tokens'] as int? ?? 0,
       completionTokens: json['completion_tokens'] as int? ?? 0,
+      conversationTokens: json['conversation_tokens'] as int? ?? 0,
+      dailyTokens: json['daily_tokens'] as int? ?? 0,
     );
   }
 
@@ -246,9 +252,7 @@ class TruthRecordModel {
       'model': model,
       'message_count': messageCount,
       'messages': messages
-          .map(
-            (m) => {'index': m.index, 'role': m.role, 'content': m.content},
-          )
+          .map((m) => {'index': m.index, 'role': m.role, 'content': m.content})
           .toList(),
       'phase': phase,
       'finish_reason': finishReason,
@@ -259,6 +263,8 @@ class TruthRecordModel {
       if (decision != null) 'decision': decision!.toJson(),
       'prompt_tokens': promptTokens,
       'completion_tokens': completionTokens,
+      'conversation_tokens': conversationTokens,
+      'daily_tokens': dailyTokens,
     };
   }
 

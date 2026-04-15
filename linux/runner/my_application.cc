@@ -19,6 +19,17 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+void my_application_present_main_window(MyApplication* application) {
+  GList* windows = gtk_application_get_windows(GTK_APPLICATION(application));
+  if (windows == nullptr) {
+    return;
+  }
+
+  GtkWindow* existing_window = GTK_WINDOW(windows->data);
+  gtk_widget_show(GTK_WIDGET(existing_window));
+  gtk_window_present(existing_window);
+}
+
 // 在 GTK 应用激活后设置默认窗口图标，避免在进程早期访问未就绪的
 // screen/icon-theme 导致 GTK 断言告警。
 static void apply_default_window_icon(void) {
@@ -167,6 +178,12 @@ static void register_plugins_for_sub_window(FlPluginRegistry* registry) {
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+
+  GList* windows = gtk_application_get_windows(GTK_APPLICATION(application));
+  if (windows != nullptr) {
+    my_application_present_main_window(self);
+    return;
+  }
 
   apply_default_window_icon();
   apply_dark_headerbar_css();

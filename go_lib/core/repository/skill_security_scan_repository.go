@@ -11,14 +11,17 @@ import (
 
 // SkillScanRecord represents a skill scan record in the skill_scans table
 type SkillScanRecord struct {
-	ID        int64    `json:"id"`
-	SkillName string   `json:"skill_name"`
-	SkillHash string   `json:"skill_hash"`
-	ScannedAt string   `json:"scanned_at"`
-	Safe      bool     `json:"safe"`
-	RiskLevel string   `json:"risk_level,omitempty"`
-	Issues    []string `json:"issues,omitempty"`
-	Trusted   bool     `json:"trusted"`
+	ID           int64    `json:"id"`
+	SkillName    string   `json:"skill_name"`
+	SkillHash    string   `json:"skill_hash"`
+	SkillPath    string   `json:"skill_path,omitempty"`
+	SourcePlugin string   `json:"source_plugin,omitempty"`
+	AssetID      string   `json:"asset_id,omitempty"`
+	ScannedAt    string   `json:"scanned_at"`
+	Safe         bool     `json:"safe"`
+	RiskLevel    string   `json:"risk_level,omitempty"`
+	Issues       []string `json:"issues,omitempty"`
+	Trusted      bool     `json:"trusted"`
 }
 
 // SkillSecurityScanRepository 技能安全扫描仓库
@@ -96,9 +99,10 @@ func (r *SkillSecurityScanRepository) SaveSkillScanResult(record *SkillScanRecor
 	}
 
 	_, err := r.db.Exec(`
-		INSERT OR REPLACE INTO skill_scans (skill_name, skill_hash, scanned_at, safe, issues, risk_level)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, record.SkillName, record.SkillHash, record.ScannedAt, safe, issuesJSON, riskLevel)
+		INSERT OR REPLACE INTO skill_scans
+			(skill_name, skill_hash, skill_path, source_plugin, asset_id, scanned_at, safe, issues, risk_level, trusted)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT trusted FROM skill_scans WHERE skill_hash = ?), 0))
+	`, record.SkillName, record.SkillHash, record.SkillPath, record.SourcePlugin, record.AssetID, record.ScannedAt, safe, issuesJSON, riskLevel, record.SkillHash)
 	if err != nil {
 		return fmt.Errorf("failed to save skill scan result: %w", err)
 	}
@@ -116,7 +120,7 @@ func (r *SkillSecurityScanRepository) GetSkillScanByHash(hash string) (*SkillSca
 	}
 
 	row := r.db.QueryRow(`
-		SELECT id, skill_name, skill_hash, scanned_at, safe, issues, risk_level, COALESCE(trusted, 0)
+		SELECT id, skill_name, skill_hash, skill_path, source_plugin, asset_id, scanned_at, safe, issues, risk_level, COALESCE(trusted, 0)
 		FROM skill_scans WHERE skill_hash = ?
 	`, hash)
 
@@ -126,8 +130,8 @@ func (r *SkillSecurityScanRepository) GetSkillScanByHash(hash string) (*SkillSca
 	var riskLevel sql.NullString
 	var trusted int
 
-	err := row.Scan(&record.ID, &record.SkillName, &record.SkillHash,
-		&record.ScannedAt, &safe, &issuesJSON, &riskLevel, &trusted)
+	err := row.Scan(&record.ID, &record.SkillName, &record.SkillHash, &record.SkillPath,
+		&record.SourcePlugin, &record.AssetID, &record.ScannedAt, &safe, &issuesJSON, &riskLevel, &trusted)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -174,7 +178,7 @@ func (r *SkillSecurityScanRepository) GetRiskySkills() ([]SkillScanRecord, error
 	}
 
 	rows, err := r.db.Query(`
-		SELECT id, skill_name, skill_hash, scanned_at, safe, issues, risk_level, COALESCE(trusted, 0)
+		SELECT id, skill_name, skill_hash, skill_path, source_plugin, asset_id, scanned_at, safe, issues, risk_level, COALESCE(trusted, 0)
 		FROM skill_scans WHERE safe = 0 AND (trusted IS NULL OR trusted = 0)
 	`)
 	if err != nil {
@@ -190,8 +194,8 @@ func (r *SkillSecurityScanRepository) GetRiskySkills() ([]SkillScanRecord, error
 		var riskLevel sql.NullString
 		var trusted int
 
-		if err := rows.Scan(&record.ID, &record.SkillName, &record.SkillHash,
-			&record.ScannedAt, &safe, &issuesJSON, &riskLevel, &trusted); err != nil {
+		if err := rows.Scan(&record.ID, &record.SkillName, &record.SkillHash, &record.SkillPath,
+			&record.SourcePlugin, &record.AssetID, &record.ScannedAt, &safe, &issuesJSON, &riskLevel, &trusted); err != nil {
 			logging.Warning("Failed to scan risky skill row: %v", err)
 			continue
 		}
@@ -225,7 +229,7 @@ func (r *SkillSecurityScanRepository) GetAllSkillScans() ([]SkillScanRecord, err
 	}
 
 	rows, err := r.db.Query(`
-		SELECT id, skill_name, skill_hash, scanned_at, safe, issues, risk_level, COALESCE(trusted, 0)
+		SELECT id, skill_name, skill_hash, skill_path, source_plugin, asset_id, scanned_at, safe, issues, risk_level, COALESCE(trusted, 0)
 		FROM skill_scans ORDER BY scanned_at DESC
 	`)
 	if err != nil {
@@ -241,8 +245,8 @@ func (r *SkillSecurityScanRepository) GetAllSkillScans() ([]SkillScanRecord, err
 		var riskLevel sql.NullString
 		var trusted int
 
-		if err := rows.Scan(&record.ID, &record.SkillName, &record.SkillHash,
-			&record.ScannedAt, &safe, &issuesJSON, &riskLevel, &trusted); err != nil {
+		if err := rows.Scan(&record.ID, &record.SkillName, &record.SkillHash, &record.SkillPath,
+			&record.SourcePlugin, &record.AssetID, &record.ScannedAt, &safe, &issuesJSON, &riskLevel, &trusted); err != nil {
 			logging.Warning("Failed to scan skill scan row: %v", err)
 			continue
 		}

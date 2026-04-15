@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 	"go_lib/core/sandbox"
 )
@@ -457,29 +458,29 @@ func buildLaunchCommand(root string, mode LaunchMode) *exec.Cmd {
 	switch mode {
 	case LaunchModeGUI:
 		if _, err := os.Stat(launchScript); err == nil {
-			return exec.Command("python3", launchScript)
+			return cmdutil.BackgroundCommand("python3", launchScript)
 		}
 		logging.Warning("[GatewayManager] LaunchMode=gui but launch.pyw not found, falling back to auto")
 	case LaunchModeBrowser:
 		if _, err := os.Stat(stappScript); err == nil {
-			return exec.Command("python3", "-m", "streamlit", "run", stappScript)
+			return cmdutil.BackgroundCommand("python3", "-m", "streamlit", "run", stappScript)
 		}
 		logging.Warning("[GatewayManager] LaunchMode=browser but stapp.py not found, falling back to auto")
 	case LaunchModeCLI:
 		if _, err := os.Stat(agentScript); err == nil {
-			return exec.Command("python3", agentScript)
+			return cmdutil.BackgroundCommand("python3", agentScript)
 		}
 		logging.Warning("[GatewayManager] LaunchMode=cli but agentmain.py not found, falling back to auto")
 	}
 
 	if _, err := os.Stat(launchScript); err == nil {
-		return exec.Command("python3", launchScript)
+		return cmdutil.BackgroundCommand("python3", launchScript)
 	}
 	if _, err := os.Stat(stappScript); err == nil {
-		return exec.Command("python3", "-m", "streamlit", "run", stappScript)
+		return cmdutil.BackgroundCommand("python3", "-m", "streamlit", "run", stappScript)
 	}
 	if _, err := os.Stat(agentScript); err == nil {
-		return exec.Command("python3", agentScript)
+		return cmdutil.BackgroundCommand("python3", agentScript)
 	}
 
 	return nil

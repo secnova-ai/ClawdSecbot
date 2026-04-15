@@ -98,9 +98,15 @@ type ProxyProtection struct {
 	totalPromptTokens     int
 	totalCompletionTokens int
 	// baselineTotalTokens is the historical token baseline loaded at proxy start.
-	// Quota checks should use runtime usage (totalTokens - baselineTotalTokens),
-	// not the cumulative total including historical sessions.
+	// It remains for UI continuity and aggregate metrics, but conversation quota
+	// checks use currentConversationTokenUsage instead of runtime delta totals.
 	baselineTotalTokens int
+	// single_session_token_limit is a legacy field name whose product semantics
+	// now mean "current conversation token quota". The conversation is tracked in
+	// memory via a recent-message heuristic instead of persisted IDs.
+	lastRecentMessages            []NormalizedMessage
+	lastRecentMessageCount        int
+	currentConversationTokenUsage int
 	// Audit (ShepherdGate) Metrics statistics
 	auditTokens           int
 	auditPromptTokens     int
@@ -429,12 +435,22 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 		return nil, fmt.Errorf("failed to create shepherd gate: %w", err)
 	}
 	shepherdGate.SetAssetContext(protectionConfig.AssetName, protectionConfig.AssetID)
-	if persistedActions, found, repoErr := repository.NewProtectionRepository(nil).GetShepherdSensitiveActions(protectionConfig.AssetID); repoErr != nil {
+	if persistedActions, found, repoErr := repository.NewProtectionRepository(nil).GetShepherdSensitiveActions(protectionConfig.AssetName, protectionConfig.AssetID); repoErr != nil {
 		logging.Warning("[ProxyProtection] Failed to load persisted shepherd rules for asset_id=%s: %v", protectionConfig.AssetID, repoErr)
 	} else if found {
 		shepherdGate.UpdateUserRules(persistedActions)
 	}
 	logging.Info("[ProxyProtection] Security model: Provider=%s, Model=%s", securityModel.Provider, securityModel.Model)
+	if protectionConfig.AssetName != "" {
+		repo := repository.NewProtectionRepository(nil)
+		userRules, found, err := repo.GetShepherdSensitiveActions(protectionConfig.AssetName, protectionConfig.AssetID)
+		if err != nil {
+			logging.Warning("[ProxyProtection] Failed to load instance user rules: asset=%s id=%s err=%v",
+				protectionConfig.AssetName, protectionConfig.AssetID, err)
+		} else if found {
+			shepherdGate.UpdateUserRules(userRules)
+		}
+	}
 
 	// ==================== Runtime Config ====================
 	auditOnly := false
@@ -482,7 +498,7 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 	pp.auditPromptTokens = protectionConfig.BaselineAuditPromptTokens
 	pp.auditCompletionTokens = protectionConfig.BaselineAuditCompletionTokens
 
-	logging.Info("[ProxyProtection] Token limits: session=%d, daily=%d, initialDailyUsage=%d, auditOnly=%v",
+	logging.Info("[ProxyProtection] Token limits: conversation=%d, daily=%d, initialDailyUsage=%d, auditOnly=%v",
 		pp.singleSessionTokenLimit, pp.dailyTokenLimit, pp.initialDailyUsage, pp.auditOnly)
 
 	// Create filter with callbacks
@@ -524,7 +540,7 @@ func (pp *ProxyProtection) UpdateProtectionConfig(runtime *ProtectionRuntimeConf
 		}
 	}
 
-	pp.sendTerminalLog(fmt.Sprintf("防护配置已更新 - 审计模式: %v, 单会话限额: %d, 每日限额: %d, 已用: %d",
+	pp.sendTerminalLog(fmt.Sprintf("防护配置已更新 - 审计模式: %v, 连续对话限额: %d, 每日限额: %d, 已用: %d",
 		pp.auditOnly, pp.singleSessionTokenLimit, pp.dailyTokenLimit, pp.initialDailyUsage))
 }
 
@@ -559,6 +575,17 @@ func (pp *ProxyProtection) GetShepherdRules() *shepherd.UserRules {
 		return &shepherd.UserRules{SensitiveActions: []string{}}
 	}
 	return pp.shepherdGate.GetUserRules()
+}
+
+// UpdateUserRules hot-updates instance-level Shepherd rules for the active proxy.
+func (pp *ProxyProtection) UpdateUserRules(sensitiveActions []string) {
+	if pp == nil || pp.shepherdGate == nil {
+		return
+	}
+	pp.shepherdGate.UpdateUserRules(sensitiveActions)
+	pp.sendTerminalLog(fmt.Sprintf("Shepherd user rules updated: %d rule(s)", len(sensitiveActions)))
+	logging.Info("[ProxyProtection] Shepherd user rules updated: asset=%s id=%s count=%d",
+		pp.assetName, pp.assetID, len(sensitiveActions))
 }
 
 // updateBotForwardingProvider hot-swaps the proxy's forwarding provider
@@ -948,6 +975,9 @@ func (pp *ProxyProtection) ResetStatistics() {
 	pp.totalPromptTokens = 0
 	pp.totalCompletionTokens = 0
 	pp.baselineTotalTokens = 0
+	pp.lastRecentMessages = nil
+	pp.lastRecentMessageCount = 0
+	pp.currentConversationTokenUsage = 0
 	pp.auditTokens = 0
 	pp.auditPromptTokens = 0
 	pp.auditCompletionTokens = 0

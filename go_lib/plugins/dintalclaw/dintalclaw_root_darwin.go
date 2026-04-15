@@ -3,9 +3,10 @@
 package dintalclaw
 
 import (
-	"os/exec"
 	"strconv"
 	"strings"
+
+	"go_lib/core/cmdutil"
 )
 
 // dintalclawAnyPIDRunsAsRoot 判断任一 DinTalClaw 相关进程是否以 root(UID 0) 运行
@@ -21,7 +22,7 @@ func dintalclawAnyPIDRunsAsRoot() bool {
 
 // darwinProcUID 通过 ps 读取进程有效 UID
 func darwinProcUID(pid int) (int, bool) {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "uid=").Output()
+	out, err := cmdutil.Command("ps", "-p", strconv.Itoa(pid), "-o", "uid=").Output()
 	if err != nil {
 		return 0, false
 	}

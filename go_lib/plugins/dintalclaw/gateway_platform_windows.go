@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 )
 
@@ -19,11 +20,11 @@ import (
 func findDintalclawPIDs() []int {
 	var pids []int
 
-	out, err := exec.Command("wmic", "process", "where",
+	out, err := cmdutil.Command("wmic", "process", "where",
 		"Name='python.exe' or Name='python3.exe' or Name='pythonw.exe'",
 		"get", "ProcessId,CommandLine", "/format:list").Output()
 	if err != nil {
-		out, err = exec.Command("tasklist", "/V", "/FO", "CSV").Output()
+		out, err = cmdutil.Command("tasklist", "/V", "/FO", "CSV").Output()
 		if err != nil {
 			return pids
 		}
@@ -111,7 +112,7 @@ func findPIDsFromTasklist(output string) []int {
 func getChildPIDs(parentPID int) []int {
 	var children []int
 
-	out, err := exec.Command("wmic", "process", "where",
+	out, err := cmdutil.Command("wmic", "process", "where",
 		fmt.Sprintf("ParentProcessId=%d", parentPID),
 		"get", "ProcessId", "/format:list").Output()
 	if err != nil {
@@ -138,7 +139,7 @@ func getChildPIDs(parentPID int) []int {
 func getListenersForPID(pid int) []Listener {
 	var listeners []Listener
 
-	out, err := exec.Command("netstat", "-ano").Output()
+	out, err := cmdutil.Command("netstat", "-ano").Output()
 	if err != nil {
 		return listeners
 	}
@@ -175,7 +176,7 @@ func getListenersForPID(pid int) []Listener {
 
 // getProcessNameForPID 在 Windows 上获取进程对应的脚本名称
 func getProcessNameForPID(pid int) string {
-	out, err := exec.Command("wmic", "process", "where",
+	out, err := cmdutil.Command("wmic", "process", "where",
 		fmt.Sprintf("ProcessId=%d", pid),
 		"get", "Name,CommandLine", "/format:list").Output()
 	if err != nil {
@@ -244,7 +245,7 @@ func killAllDintalclawProcesses() {
 
 	for _, pid := range allPIDs {
 		logging.Info("[GatewayManager] Killing PID=%d via taskkill /F", pid)
-		_ = exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F").Run()
+		_ = cmdutil.Command("taskkill", "/PID", strconv.Itoa(pid), "/F").Run()
 	}
 
 	time.Sleep(2 * time.Second)
@@ -318,29 +319,29 @@ func buildLaunchCommand(root string, mode LaunchMode) *exec.Cmd {
 	switch mode {
 	case LaunchModeGUI:
 		if _, err := os.Stat(launchScript); err == nil {
-			return exec.Command("pythonw", launchScript)
+			return cmdutil.BackgroundCommand("pythonw", launchScript)
 		}
 		logging.Warning("[GatewayManager] LaunchMode=gui but launch.pyw not found, falling back to auto")
 	case LaunchModeBrowser:
 		if _, err := os.Stat(stappScript); err == nil {
-			return exec.Command("python", "-m", "streamlit", "run", stappScript)
+			return cmdutil.BackgroundCommand("python", "-m", "streamlit", "run", stappScript)
 		}
 		logging.Warning("[GatewayManager] LaunchMode=browser but stapp.py not found, falling back to auto")
 	case LaunchModeCLI:
 		if _, err := os.Stat(agentScript); err == nil {
-			return exec.Command("python", agentScript)
+			return cmdutil.BackgroundCommand("python", agentScript)
 		}
 		logging.Warning("[GatewayManager] LaunchMode=cli but agentmain.py not found, falling back to auto")
 	}
 
 	if _, err := os.Stat(launchScript); err == nil {
-		return exec.Command("pythonw", launchScript)
+		return cmdutil.BackgroundCommand("pythonw", launchScript)
 	}
 	if _, err := os.Stat(stappScript); err == nil {
-		return exec.Command("python", "-m", "streamlit", "run", stappScript)
+		return cmdutil.BackgroundCommand("python", "-m", "streamlit", "run", stappScript)
 	}
 	if _, err := os.Stat(agentScript); err == nil {
-		return exec.Command("python", agentScript)
+		return cmdutil.BackgroundCommand("python", agentScript)
 	}
 
 	return nil

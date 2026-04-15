@@ -54,6 +54,7 @@ var EnsureScanSkillsReleased = skillscan.EnsureScanSkillsReleased
 var ScanSkillForPromptInjection = skillscan.ScanSkillForPromptInjection
 var detectPromptInjectionPatterns = skillscan.DetectPromptInjectionPatterns
 var listSkillsInDir = skillscan.ListSkillsInDir
+var SerializeSkillIssue = skillscan.SerializeSkillIssue
 
 // calculateSkillHash wraps skillscan.CalculateSkillHash (lowercase -> exported)
 var calculateSkillHash = skillscan.CalculateSkillHash
