@@ -52,8 +52,9 @@ class ProtectionService {
 
   /// 按资产创建/获取防护服务实例，自动绑定资产名与 ID。
   factory ProtectionService.forAsset(String assetName, [String assetID = '']) {
-    final service =
-        ProtectionService(buildAssetScopedInstanceKey(assetName, assetID));
+    final service = ProtectionService(
+      buildAssetScopedInstanceKey(assetName, assetID),
+    );
     service.setAssetName(assetName, assetID);
     return service;
   }
@@ -415,14 +416,12 @@ class ProtectionService {
       }
 
       final hasAssetBinding = _hasAssetBinding;
-      final assetName = _assetName;
       final assetID = _assetID;
 
       final resultStr = await Isolate.run(() {
-        if (hasAssetBinding && assetName != null) {
+        if (hasAssetBinding) {
           return ProtectionProxyFFI.stopProtectionProxyByAssetInIsolate(
             libPath,
-            assetName,
             assetID,
           );
         }
@@ -502,14 +501,8 @@ class ProtectionService {
               SetProtectionProxyAuditOnlyByAssetC,
               SetProtectionProxyAuditOnlyByAssetDart
             >('SetProtectionProxyAuditOnlyByAsset');
-        final assetNamePtr = _assetName!.toNativeUtf8();
         final assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = setAuditOnlyFunc(
-          assetNamePtr,
-          assetIDPtr,
-          auditOnly ? 1 : 0,
-        );
-        malloc.free(assetNamePtr);
+        resultPtr = setAuditOnlyFunc(assetIDPtr, auditOnly ? 1 : 0);
         malloc.free(assetIDPtr);
       } else {
         final setAuditOnlyFunc = dylib
@@ -605,10 +598,8 @@ class ProtectionService {
               UpdateProtectionConfigByAssetC,
               UpdateProtectionConfigByAssetDart
             >('UpdateProtectionConfigByAsset');
-        final assetNamePtr = assetName.toNativeUtf8();
         final assetIDPtr = assetID.toNativeUtf8();
-        resultPtr = updateConfig(assetNamePtr, assetIDPtr, configPtr);
-        malloc.free(assetNamePtr);
+        resultPtr = updateConfig(assetIDPtr, configPtr);
         malloc.free(assetIDPtr);
       } else if (_hasAssetBinding) {
         final updateConfig = dylib
@@ -616,10 +607,8 @@ class ProtectionService {
               UpdateProtectionConfigByAssetC,
               UpdateProtectionConfigByAssetDart
             >('UpdateProtectionConfigByAsset');
-        final assetNamePtr = _assetName!.toNativeUtf8();
         final assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = updateConfig(assetNamePtr, assetIDPtr, configPtr);
-        malloc.free(assetNamePtr);
+        resultPtr = updateConfig(assetIDPtr, configPtr);
         malloc.free(assetIDPtr);
       } else {
         final updateConfig = dylib
@@ -665,14 +654,12 @@ class ProtectionService {
       }
 
       final hasAssetBinding = _hasAssetBinding;
-      final assetName = _assetName;
       final assetID = _assetID;
 
       final resultStr = await Isolate.run(() {
-        if (hasAssetBinding && assetName != null) {
+        if (hasAssetBinding) {
           return ProtectionProxyFFI.syncGatewaySandboxByAssetInIsolate(
             libPath,
-            assetName,
             assetID,
           );
         }
@@ -762,10 +749,8 @@ class ProtectionService {
               UpdateProtectionConfigByAssetC,
               UpdateProtectionConfigByAssetDart
             >('UpdateProtectionConfigByAsset');
-        final assetNamePtr = _assetName!.toNativeUtf8();
         final assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = updateConfig(assetNamePtr, assetIDPtr, configPtr);
-        malloc.free(assetNamePtr);
+        resultPtr = updateConfig(assetIDPtr, configPtr);
         malloc.free(assetIDPtr);
       } else {
         final updateConfig = dylib
@@ -813,10 +798,8 @@ class ProtectionService {
               UpdateSecurityModelConfigByAssetC,
               UpdateSecurityModelConfigByAssetDart
             >('UpdateSecurityModelConfigByAsset');
-        final assetNamePtr = _assetName!.toNativeUtf8();
         final assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = updateSecModel(assetNamePtr, assetIDPtr, configPtr);
-        malloc.free(assetNamePtr);
+        resultPtr = updateSecModel(assetIDPtr, configPtr);
         malloc.free(assetIDPtr);
       } else {
         final updateSecModel = dylib
@@ -859,10 +842,8 @@ class ProtectionService {
               GetProtectionProxyStatusByAssetC,
               GetProtectionProxyStatusByAssetDart
             >('GetProtectionProxyStatusByAsset');
-        final assetNamePtr = _assetName!.toNativeUtf8();
         final assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = getStatus(assetNamePtr, assetIDPtr);
-        malloc.free(assetNamePtr);
+        resultPtr = getStatus(assetIDPtr);
         malloc.free(assetIDPtr);
       } else {
         final getStatus = dylib
@@ -1033,7 +1014,7 @@ class ProtectionService {
     try {
       final dylib = _getDylib();
       late final ffi.Pointer<Utf8> Function() hasBackupFunc;
-      ffi.Pointer<Utf8>? assetNamePtr;
+      ffi.Pointer<Utf8>? assetIDPtr;
       ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>)? hasBackupByAssetFunc;
       if (_hasAssetBinding) {
         hasBackupByAssetFunc = dylib
@@ -1053,13 +1034,13 @@ class ProtectionService {
 
       final ffi.Pointer<Utf8> resultPtr;
       if (_hasAssetBinding) {
-        assetNamePtr = _assetName!.toNativeUtf8();
-        resultPtr = hasBackupByAssetFunc!(assetNamePtr);
+        assetIDPtr = _assetID.toNativeUtf8();
+        resultPtr = hasBackupByAssetFunc!(assetIDPtr);
       } else {
         resultPtr = hasBackupFunc();
       }
-      if (assetNamePtr != null) {
-        malloc.free(assetNamePtr);
+      if (assetIDPtr != null) {
+        malloc.free(assetIDPtr);
       }
       final resultStr = resultPtr.toDartString();
       freeString(resultPtr);
@@ -1094,13 +1075,13 @@ class ProtectionService {
 
       // 通过 Isolate 执行恢复操作，避免阻塞 UI 线程
       final hasAssetBinding = _hasAssetBinding;
-      final assetName = _assetName;
+      final assetID = _assetID;
 
       final resultStr = await Isolate.run(() {
-        if (hasAssetBinding && assetName != null) {
+        if (hasAssetBinding) {
           return ProtectionProxyFFI.restoreToInitialConfigByAssetInIsolate(
             libPath,
-            assetName,
+            assetID,
           );
         }
         return ProtectionProxyFFI.restoreToInitialConfigInIsolate(libPath);

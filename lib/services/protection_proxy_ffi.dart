@@ -20,42 +20,34 @@ typedef StopProtectionProxyC = ffi.Pointer<Utf8> Function();
 typedef StopProtectionProxyDart = ffi.Pointer<Utf8> Function();
 
 typedef StopProtectionProxyByAssetC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef StopProtectionProxyByAssetDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
 typedef GetProtectionProxyStatusC = ffi.Pointer<Utf8> Function();
 typedef GetProtectionProxyStatusDart = ffi.Pointer<Utf8> Function();
 
 typedef GetProtectionProxyStatusByAssetC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef GetProtectionProxyStatusByAssetDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
 typedef SetProtectionProxyAuditOnlyC = ffi.Pointer<Utf8> Function(ffi.Int32);
 typedef SetProtectionProxyAuditOnlyDart = ffi.Pointer<Utf8> Function(int);
 
 typedef SetProtectionProxyAuditOnlyByAssetC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Int32);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Int32);
 typedef SetProtectionProxyAuditOnlyByAssetDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, int);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, int);
 
 typedef UpdateProtectionConfigC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef UpdateProtectionConfigDart =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
 typedef UpdateProtectionConfigByAssetC =
-    ffi.Pointer<Utf8> Function(
-      ffi.Pointer<Utf8>,
-      ffi.Pointer<Utf8>,
-      ffi.Pointer<Utf8>,
-    );
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 typedef UpdateProtectionConfigByAssetDart =
-    ffi.Pointer<Utf8> Function(
-      ffi.Pointer<Utf8>,
-      ffi.Pointer<Utf8>,
-      ffi.Pointer<Utf8>,
-    );
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 
 typedef UpdateSecurityModelConfigC =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
@@ -63,17 +55,9 @@ typedef UpdateSecurityModelConfigDart =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
 typedef UpdateSecurityModelConfigByAssetC =
-    ffi.Pointer<Utf8> Function(
-      ffi.Pointer<Utf8>,
-      ffi.Pointer<Utf8>,
-      ffi.Pointer<Utf8>,
-    );
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 typedef UpdateSecurityModelConfigByAssetDart =
-    ffi.Pointer<Utf8> Function(
-      ffi.Pointer<Utf8>,
-      ffi.Pointer<Utf8>,
-      ffi.Pointer<Utf8>,
-    );
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 
 // 【已移除】ApplyOpenclawConfigForProtection 不再暴露 FFI，网关启动逻辑已内聚到 StartProtectionProxy
 // typedef ApplyOpenclawConfigForProtectionC = ...
@@ -121,32 +105,26 @@ typedef HasInitialBackupFFIC = ffi.Pointer<Utf8> Function();
 typedef HasInitialBackupFFIDart = ffi.Pointer<Utf8> Function();
 
 typedef HasInitialBackupByAssetFFIC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetID);
 typedef HasInitialBackupByAssetFFIDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetID);
 
 typedef RestoreToInitialConfigFFIC = ffi.Pointer<Utf8> Function();
 typedef RestoreToInitialConfigFFIDart = ffi.Pointer<Utf8> Function();
 
 typedef RestoreToInitialConfigByAssetFFIC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetID);
 typedef RestoreToInitialConfigByAssetFFIDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetID);
 
 // --- 网关沙箱同步 ---
 typedef SyncGatewaySandboxC = ffi.Pointer<Utf8> Function();
 typedef SyncGatewaySandboxDart = ffi.Pointer<Utf8> Function();
 
-typedef SyncGatewaySandboxByAssetNameC =
-    ffi.Pointer<Utf8> Function(
-      ffi.Pointer<Utf8> assetName,
-      ffi.Pointer<Utf8> assetID,
-    );
-typedef SyncGatewaySandboxByAssetNameDart =
-    ffi.Pointer<Utf8> Function(
-      ffi.Pointer<Utf8> assetName,
-      ffi.Pointer<Utf8> assetID,
-    );
+typedef SyncGatewaySandboxByAssetC =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetID);
+typedef SyncGatewaySandboxByAssetDart =
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetID);
 
 /// 防护代理 FFI 的 Isolate 安全调用入口（静态方法可在后台 Isolate 中使用）。
 class ProtectionProxyFFI {
@@ -194,10 +172,9 @@ class ProtectionProxyFFI {
     return resultStr;
   }
 
-  /// 在后台 Isolate 中执行按资产路由的 StopProtectionProxyByAsset。
+  /// Execute StopProtectionProxyByAsset in a background Isolate.
   static String stopProtectionProxyByAssetInIsolate(
     String libPath,
-    String assetName,
     String assetID,
   ) {
     final dylib = ffi.DynamicLibrary.open(libPath);
@@ -210,10 +187,8 @@ class ProtectionProxyFFI {
       'FreeString',
     );
 
-    final assetNamePtr = assetName.toNativeUtf8();
     final assetIDPtr = assetID.toNativeUtf8();
-    final resultPtr = stopProxy(assetNamePtr, assetIDPtr);
-    malloc.free(assetNamePtr);
+    final resultPtr = stopProxy(assetIDPtr);
     malloc.free(assetIDPtr);
 
     final resultStr = resultPtr.toDartString();
@@ -240,26 +215,23 @@ class ProtectionProxyFFI {
     return resultStr;
   }
 
-  /// 在后台 Isolate 中执行按资产路由的网关沙箱同步。
+  /// Execute gateway sandbox sync by asset in a background Isolate.
   static String syncGatewaySandboxByAssetInIsolate(
     String libPath,
-    String assetName,
     String assetID,
   ) {
     final dylib = ffi.DynamicLibrary.open(libPath);
     final syncFunc = dylib
         .lookupFunction<
-          SyncGatewaySandboxByAssetNameC,
-          SyncGatewaySandboxByAssetNameDart
-        >('SyncGatewaySandboxByAssetName');
+          SyncGatewaySandboxByAssetC,
+          SyncGatewaySandboxByAssetDart
+        >('SyncGatewaySandboxByAsset');
     final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
       'FreeString',
     );
 
-    final assetNamePtr = assetName.toNativeUtf8();
     final assetIDPtr = assetID.toNativeUtf8();
-    final resultPtr = syncFunc(assetNamePtr, assetIDPtr);
-    malloc.free(assetNamePtr);
+    final resultPtr = syncFunc(assetIDPtr);
     malloc.free(assetIDPtr);
 
     final resultStr = resultPtr.toDartString();
@@ -287,10 +259,10 @@ class ProtectionProxyFFI {
     return resultStr;
   }
 
-  /// 在后台 Isolate 中执行按资产路由的配置恢复。
+  /// Execute RestoreToInitialConfigByAssetFFI in a background Isolate.
   static String restoreToInitialConfigByAssetInIsolate(
     String libPath,
-    String assetName,
+    String assetID,
   ) {
     final dylib = ffi.DynamicLibrary.open(libPath);
     final restoreFunc = dylib
@@ -302,9 +274,9 @@ class ProtectionProxyFFI {
       'FreeString',
     );
 
-    final assetNamePtr = assetName.toNativeUtf8();
-    final resultPtr = restoreFunc(assetNamePtr);
-    malloc.free(assetNamePtr);
+    final assetIDPtr = assetID.toNativeUtf8();
+    final resultPtr = restoreFunc(assetIDPtr);
+    malloc.free(assetIDPtr);
 
     final resultStr = resultPtr.toDartString();
     freeString(resultPtr);

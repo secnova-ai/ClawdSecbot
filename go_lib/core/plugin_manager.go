@@ -151,9 +151,8 @@ func (pm *PluginManager) bindAssetInstance(plugin BotPlugin, asset Asset) {
 	}
 }
 
-func (pm *PluginManager) resolvePluginInstance(assetName, assetID string) (*AssetPluginInstance, error) {
+func (pm *PluginManager) resolvePluginInstance(assetID string) (*AssetPluginInstance, error) {
 	assetID = strings.TrimSpace(assetID)
-	assetName = strings.TrimSpace(assetName)
 	if assetID == "" {
 		return nil, fmt.Errorf("assetID is required")
 	}
@@ -162,9 +161,6 @@ func (pm *PluginManager) resolvePluginInstance(assetName, assetID string) (*Asse
 	inst := pm.instances[assetID]
 	pm.mu.RUnlock()
 	if inst != nil {
-		if assetName != "" && normalizeAssetName(assetName) != normalizeAssetName(inst.AssetName) {
-			logging.Warning("resolvePluginInstance: ignore assetName mismatch for assetID=%s, expected=%s, got=%s", assetID, inst.AssetName, assetName)
-		}
 		return inst, nil
 	}
 	return nil, fmt.Errorf("asset instance not found: assetID %s, run asset scan first", assetID)
@@ -332,8 +328,8 @@ func (pm *PluginManager) getAssetInstanceCountsByPlugin() map[string]int {
 }
 
 // StartProtection starts protection by asset instance.
-func (pm *PluginManager) StartProtection(assetName string, assetID string, config ProtectionConfig) error {
-	inst, err := pm.resolvePluginInstance(assetName, assetID)
+func (pm *PluginManager) StartProtection(assetID string, config ProtectionConfig) error {
+	inst, err := pm.resolvePluginInstance(assetID)
 	if err != nil {
 		return err
 	}
@@ -349,8 +345,8 @@ func (pm *PluginManager) StartProtection(assetName string, assetID string, confi
 }
 
 // StopProtection stops protection by asset instance.
-func (pm *PluginManager) StopProtection(assetName string, assetID string) error {
-	inst, err := pm.resolvePluginInstance(assetName, assetID)
+func (pm *PluginManager) StopProtection(assetID string) error {
+	inst, err := pm.resolvePluginInstance(assetID)
 	if err != nil {
 		return err
 	}
@@ -366,8 +362,8 @@ func (pm *PluginManager) StopProtection(assetName string, assetID string) error 
 }
 
 // GetProtectionStatus gets protection status by asset instance.
-func (pm *PluginManager) GetProtectionStatus(assetName string, assetID string) (ProtectionStatus, error) {
-	inst, err := pm.resolvePluginInstance(assetName, assetID)
+func (pm *PluginManager) GetProtectionStatus(assetID string) (ProtectionStatus, error) {
+	inst, err := pm.resolvePluginInstance(assetID)
 	if err != nil {
 		return ProtectionStatus{}, err
 	}

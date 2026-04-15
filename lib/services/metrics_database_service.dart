@@ -8,10 +8,6 @@ import 'native_library_service.dart';
 // FFI type definitions
 typedef _OneArgC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef _OneArgDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef _TwoArgC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
-typedef _TwoArgDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 
 /// API 指标 FFI 持久化门面：通过 FFI 委托 Go 层进行数据持久化，Flutter 不直接操作 DB。
 class MetricsDatabaseService {
@@ -153,15 +149,13 @@ class MetricsDatabaseService {
     if (dylib == null || _freeString == null) return 0;
 
     try {
-      final func = dylib.lookupFunction<_TwoArgC, _TwoArgDart>(
+      final func = dylib.lookupFunction<_OneArgC, _OneArgDart>(
         'GetDailyTokenUsageFFI',
       );
-      final assetNamePtr = assetName.toNativeUtf8();
       final assetIDPtr = assetID.toNativeUtf8();
-      final resultPtr = func(assetNamePtr, assetIDPtr);
+      final resultPtr = func(assetIDPtr);
       final resultStr = resultPtr.toDartString();
       _freeString!(resultPtr);
-      malloc.free(assetNamePtr);
       malloc.free(assetIDPtr);
 
       final result = jsonDecode(resultStr) as Map<String, dynamic>;

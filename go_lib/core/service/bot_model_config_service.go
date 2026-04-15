@@ -37,7 +37,7 @@ func SaveBotModelConfig(jsonStr string) map[string]interface{} {
 	repo := repository.NewProtectionRepository(nil)
 
 	// Load existing protection config.
-	config, err := repo.GetProtectionConfig(input.AssetName, input.AssetID)
+	config, err := repo.GetProtectionConfig(input.AssetID)
 	if err != nil {
 		logging.Error("Failed to get protection config: %v", err)
 		return errorResult(err)
@@ -72,12 +72,12 @@ func SaveBotModelConfig(jsonStr string) map[string]interface{} {
 
 // GetBotModelConfig loads bot model config for a specific asset instance.
 // Internally it reads from ProtectionConfig.BotModelConfig.
-func GetBotModelConfig(assetName string, assetID string) map[string]interface{} {
+func GetBotModelConfig(assetID string) map[string]interface{} {
 	if strings.TrimSpace(assetID) == "" {
 		return errorMessageResult("asset_id is required")
 	}
 	repo := repository.NewProtectionRepository(nil)
-	config, err := repo.GetProtectionConfig(assetName, assetID)
+	config, err := repo.GetProtectionConfig(assetID)
 	if err != nil {
 		logging.Error("Failed to get protection config: %v", err)
 		return errorResult(err)
@@ -89,7 +89,7 @@ func GetBotModelConfig(assetName string, assetID string) map[string]interface{} 
 
 	// Build response payload.
 	result := map[string]interface{}{
-		"asset_name": assetName,
+		"asset_name": config.AssetName,
 		"asset_id":   assetID,
 		"provider":   config.BotModelConfig.Provider,
 		"base_url":   config.BotModelConfig.BaseURL,
@@ -103,14 +103,14 @@ func GetBotModelConfig(assetName string, assetID string) map[string]interface{} 
 
 // DeleteBotModelConfig deletes bot model config for a specific asset instance.
 // Internally it clears ProtectionConfig.BotModelConfig.
-func DeleteBotModelConfig(assetName string, assetID string) map[string]interface{} {
+func DeleteBotModelConfig(assetID string) map[string]interface{} {
 	if strings.TrimSpace(assetID) == "" {
 		return errorMessageResult("asset_id is required")
 	}
 	repo := repository.NewProtectionRepository(nil)
 
 	// Load existing protection config.
-	config, err := repo.GetProtectionConfig(assetName, assetID)
+	config, err := repo.GetProtectionConfig(assetID)
 	if err != nil {
 		logging.Error("Failed to get protection config: %v", err)
 		return errorResult(err)
@@ -129,6 +129,6 @@ func DeleteBotModelConfig(assetName string, assetID string) map[string]interface
 		return errorResult(err)
 	}
 
-	logging.Info("Bot model config deleted via protection config: asset=%s (id=%s)", assetName, assetID)
+	logging.Info("Bot model config deleted via protection config: asset=%s (id=%s)", config.AssetName, assetID)
 	return successResult()
 }

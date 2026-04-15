@@ -89,7 +89,7 @@ func TestGetBotModelConfig(t *testing.T) {
 		"model": "test-model"
 	}`)
 
-	result := GetBotModelConfig("openclaw", "openclaw:test-1")
+	result := GetBotModelConfig("openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
@@ -122,7 +122,7 @@ func TestGetBotModelConfig_NoLegacyFallback(t *testing.T) {
 		"model": "legacy-model"
 	}`)
 
-	result := GetBotModelConfig("openclaw", "openclaw:instance-1")
+	result := GetBotModelConfig("openclaw:instance-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
@@ -145,13 +145,13 @@ func TestDeleteBotModelConfig(t *testing.T) {
 		"model": "test"
 	}`)
 
-	result := DeleteBotModelConfig("openclaw", "openclaw:test-1")
+	result := DeleteBotModelConfig("openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
 
 	// 验证已删除
-	check := GetBotModelConfig("openclaw", "openclaw:test-1")
+	check := GetBotModelConfig("openclaw:test-1")
 	if check["data"] != nil {
 		t.Error("Expected nil data after deletion")
 	}
@@ -177,7 +177,7 @@ func TestSaveBotModelConfig_NewProtectionConfig(t *testing.T) {
 	}
 
 	// 验证可以读回
-	getResult := GetBotModelConfig("Openclaw", "openclaw:test-1")
+	getResult := GetBotModelConfig("openclaw:test-1")
 	if getResult["success"] != true {
 		t.Fatalf("GetBotModelConfig failed: %v", getResult)
 	}

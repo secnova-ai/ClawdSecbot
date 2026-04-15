@@ -80,15 +80,12 @@ typedef GetSecurityModelConfigDart = ffi.Pointer<Utf8> Function();
 typedef SaveBotModelConfigC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef SaveBotModelConfigDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
-typedef GetBotModelConfigC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
-typedef GetBotModelConfigDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef GetBotModelConfigC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
+typedef GetBotModelConfigDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
-typedef DeleteBotModelConfigC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef DeleteBotModelConfigC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef DeleteBotModelConfigDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
 typedef FreeStringC = ffi.Void Function(ffi.Pointer<Utf8>);
 typedef FreeStringDart = void Function(ffi.Pointer<Utf8>);
@@ -460,12 +457,10 @@ class PluginService {
           .lookupFunction<GetBotModelConfigC, GetBotModelConfigDart>(
             'GetBotModelConfigFFI',
           );
-      final namePtr = assetName.toNativeUtf8();
       final idPtr = assetID.toNativeUtf8();
-      final resultPtr = func(namePtr, idPtr);
+      final resultPtr = func(idPtr);
       final result = resultPtr.toDartString();
       freeString!(resultPtr);
-      malloc.free(namePtr);
       malloc.free(idPtr);
       return jsonDecode(result) as Map<String, dynamic>;
     });
@@ -481,12 +476,10 @@ class PluginService {
           .lookupFunction<DeleteBotModelConfigC, DeleteBotModelConfigDart>(
             'DeleteBotModelConfigFFI',
           );
-      final namePtr = assetName.toNativeUtf8();
       final idPtr = assetID.toNativeUtf8();
-      final resultPtr = func(namePtr, idPtr);
+      final resultPtr = func(idPtr);
       final result = resultPtr.toDartString();
       freeString!(resultPtr);
-      malloc.free(namePtr);
       malloc.free(idPtr);
       return jsonDecode(result) as Map<String, dynamic>;
     });

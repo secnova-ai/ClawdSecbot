@@ -165,8 +165,8 @@ func MitigateRiskFFI(riskInfoC *C.char) *C.char {
 // ==================== 防护控制 FFI ====================
 
 //export StartProtectionFFI
-func StartProtectionFFI(assetNameC, assetIDC, configC *C.char) *C.char {
-	err := core.StartProtectionByAsset(C.GoString(assetNameC), C.GoString(assetIDC), C.GoString(configC))
+func StartProtectionFFI(assetIDC, configC *C.char) *C.char {
+	err := core.StartProtectionByAsset(C.GoString(assetIDC), C.GoString(configC))
 	if err != nil {
 		return errorCString(err)
 	}
@@ -174,8 +174,8 @@ func StartProtectionFFI(assetNameC, assetIDC, configC *C.char) *C.char {
 }
 
 //export StopProtectionFFI
-func StopProtectionFFI(assetNameC, assetIDC *C.char) *C.char {
-	err := core.StopProtectionByAsset(C.GoString(assetNameC), C.GoString(assetIDC))
+func StopProtectionFFI(assetIDC *C.char) *C.char {
+	err := core.StopProtectionByAsset(C.GoString(assetIDC))
 	if err != nil {
 		return errorCString(err)
 	}
@@ -183,8 +183,8 @@ func StopProtectionFFI(assetNameC, assetIDC *C.char) *C.char {
 }
 
 //export GetProtectionStatusFFI
-func GetProtectionStatusFFI(assetNameC, assetIDC *C.char) *C.char {
-	status, err := core.GetProtectionStatusByAsset(C.GoString(assetNameC), C.GoString(assetIDC))
+func GetProtectionStatusFFI(assetIDC *C.char) *C.char {
+	status, err := core.GetProtectionStatusByAsset(C.GoString(assetIDC))
 	if err != nil {
 		return errorCString(err)
 	}
@@ -276,8 +276,8 @@ func SaveProtectionConfigFFI(jsonC *C.char) *C.char {
 }
 
 //export GetProtectionConfigFFI
-func GetProtectionConfigFFI(assetNameC, assetIDC *C.char) *C.char {
-	return jsonToCString(service.GetProtectionConfig(C.GoString(assetNameC), C.GoString(assetIDC)))
+func GetProtectionConfigFFI(assetIDC *C.char) *C.char {
+	return jsonToCString(service.GetProtectionConfig(C.GoString(assetIDC)))
 }
 
 //export GetEnabledProtectionConfigsFFI
@@ -296,8 +296,8 @@ func SetProtectionEnabledFFI(jsonC *C.char) *C.char {
 }
 
 //export DeleteProtectionConfigFFI
-func DeleteProtectionConfigFFI(assetNameC, assetIDC *C.char) *C.char {
-	return jsonToCString(service.DeleteProtectionConfig(C.GoString(assetNameC), C.GoString(assetIDC)))
+func DeleteProtectionConfigFFI(assetIDC *C.char) *C.char {
+	return jsonToCString(service.DeleteProtectionConfig(C.GoString(assetIDC)))
 }
 
 //export SaveProtectionStatisticsFFI
@@ -306,18 +306,18 @@ func SaveProtectionStatisticsFFI(jsonC *C.char) *C.char {
 }
 
 //export GetProtectionStatisticsFFI
-func GetProtectionStatisticsFFI(assetNameC, assetIDC *C.char) *C.char {
-	return jsonToCString(service.GetProtectionStatistics(C.GoString(assetNameC), C.GoString(assetIDC)))
+func GetProtectionStatisticsFFI(assetIDC *C.char) *C.char {
+	return jsonToCString(service.GetProtectionStatistics(C.GoString(assetIDC)))
 }
 
 //export ClearProtectionStatisticsFFI
-func ClearProtectionStatisticsFFI(assetNameC, assetIDC *C.char) *C.char {
-	return jsonToCString(service.ClearProtectionStatistics(C.GoString(assetNameC), C.GoString(assetIDC)))
+func ClearProtectionStatisticsFFI(assetIDC *C.char) *C.char {
+	return jsonToCString(service.ClearProtectionStatistics(C.GoString(assetIDC)))
 }
 
 //export GetShepherdSensitiveActionsFFI
-func GetShepherdSensitiveActionsFFI(assetNameC, assetIDC *C.char) *C.char {
-	return jsonToCString(service.GetShepherdSensitiveActions(C.GoString(assetNameC), C.GoString(assetIDC)))
+func GetShepherdSensitiveActionsFFI(assetIDC *C.char) *C.char {
+	return jsonToCString(service.GetShepherdSensitiveActions(C.GoString(assetIDC)))
 }
 
 //export SaveShepherdSensitiveActionsFFI
@@ -462,8 +462,8 @@ func CleanOldApiMetricsFFI(jsonC *C.char) *C.char {
 }
 
 //export GetDailyTokenUsageFFI
-func GetDailyTokenUsageFFI(assetNameC, assetIDC *C.char) *C.char {
-	return jsonToCString(service.GetDailyTokenUsage(C.GoString(assetNameC), C.GoString(assetIDC)))
+func GetDailyTokenUsageFFI(assetIDC *C.char) *C.char {
+	return jsonToCString(service.GetDailyTokenUsage(C.GoString(assetIDC)))
 }
 
 // ==================== 模型配置 FFI ====================
@@ -484,13 +484,13 @@ func SaveBotModelConfigFFI(configJSON *C.char) *C.char {
 }
 
 //export GetBotModelConfigFFI
-func GetBotModelConfigFFI(assetNameC, assetIDC *C.char) *C.char {
-	return jsonToCString(service.GetBotModelConfig(C.GoString(assetNameC), C.GoString(assetIDC)))
+func GetBotModelConfigFFI(assetIDC *C.char) *C.char {
+	return jsonToCString(service.GetBotModelConfig(C.GoString(assetIDC)))
 }
 
 //export DeleteBotModelConfigFFI
-func DeleteBotModelConfigFFI(assetNameC, assetIDC *C.char) *C.char {
-	return jsonToCString(service.DeleteBotModelConfig(C.GoString(assetNameC), C.GoString(assetIDC)))
+func DeleteBotModelConfigFFI(assetIDC *C.char) *C.char {
+	return jsonToCString(service.DeleteBotModelConfig(C.GoString(assetIDC)))
 }
 
 // ==================== 应用设置 FFI ====================
@@ -914,8 +914,8 @@ func StopProtectionProxy() *C.char {
 }
 
 //export StopProtectionProxyByAsset
-func StopProtectionProxyByAsset(assetNameC, assetIDC *C.char) *C.char {
-	return C.CString(proxy.StopProtectionProxyByAssetInternal(C.GoString(assetNameC), C.GoString(assetIDC)))
+func StopProtectionProxyByAsset(assetIDC *C.char) *C.char {
+	return C.CString(proxy.StopProtectionProxyByAssetInternal(C.GoString(assetIDC)))
 }
 
 //export ResetProtectionStatistics
@@ -929,8 +929,8 @@ func GetProtectionProxyStatus() *C.char {
 }
 
 //export GetProtectionProxyStatusByAsset
-func GetProtectionProxyStatusByAsset(assetNameC, assetIDC *C.char) *C.char {
-	return C.CString(proxy.GetProtectionProxyStatusByAssetInternal(C.GoString(assetNameC), C.GoString(assetIDC)))
+func GetProtectionProxyStatusByAsset(assetIDC *C.char) *C.char {
+	return C.CString(proxy.GetProtectionProxyStatusByAssetInternal(C.GoString(assetIDC)))
 }
 
 //export UpdateProtectionConfig
@@ -939,9 +939,8 @@ func UpdateProtectionConfig(configJSON *C.char) *C.char {
 }
 
 //export UpdateProtectionConfigByAsset
-func UpdateProtectionConfigByAsset(assetNameC, assetIDC, configJSON *C.char) *C.char {
+func UpdateProtectionConfigByAsset(assetIDC, configJSON *C.char) *C.char {
 	return C.CString(proxy.UpdateProtectionConfigByAssetInternal(
-		C.GoString(assetNameC),
 		C.GoString(assetIDC),
 		C.GoString(configJSON),
 	))
@@ -953,9 +952,8 @@ func UpdateSecurityModelConfig(configJSON *C.char) *C.char {
 }
 
 //export UpdateSecurityModelConfigByAsset
-func UpdateSecurityModelConfigByAsset(assetNameC, assetIDC, configJSON *C.char) *C.char {
+func UpdateSecurityModelConfigByAsset(assetIDC, configJSON *C.char) *C.char {
 	return C.CString(proxy.UpdateSecurityModelConfigByAssetInternal(
-		C.GoString(assetNameC),
 		C.GoString(assetIDC),
 		C.GoString(configJSON),
 	))
@@ -972,9 +970,8 @@ func SetProtectionProxyAuditOnly(auditOnly C.int) *C.char {
 }
 
 //export SetProtectionProxyAuditOnlyByAsset
-func SetProtectionProxyAuditOnlyByAsset(assetNameC, assetIDC *C.char, auditOnly C.int) *C.char {
+func SetProtectionProxyAuditOnlyByAsset(assetIDC *C.char, auditOnly C.int) *C.char {
 	return C.CString(proxy.SetProtectionProxyAuditOnlyByAssetInternal(
-		C.GoString(assetNameC),
 		C.GoString(assetIDC),
 		auditOnly != 0,
 	))
@@ -993,18 +990,16 @@ func WaitForProtectionLogs(sessionID *C.char, timeoutMs C.int) *C.char {
 // ==================== ShepherdGate FFI (core/shepherd) ====================
 
 //export UpdateShepherdRulesFFI
-func UpdateShepherdRulesFFI(assetNameC, assetIDC, rulesJSON *C.char) *C.char {
+func UpdateShepherdRulesFFI(assetIDC, rulesJSON *C.char) *C.char {
 	return C.CString(proxy.UpdateShepherdRulesByAssetInternal(
-		C.GoString(assetNameC),
 		C.GoString(assetIDC),
 		C.GoString(rulesJSON),
 	))
 }
 
 //export GetShepherdRulesFFI
-func GetShepherdRulesFFI(assetNameC, assetIDC *C.char) *C.char {
+func GetShepherdRulesFFI(assetIDC *C.char) *C.char {
 	return C.CString(proxy.GetShepherdRulesByAssetInternal(
-		C.GoString(assetNameC),
 		C.GoString(assetIDC),
 	))
 }
@@ -1124,8 +1119,8 @@ func HasInitialBackupFFI() *C.char {
 }
 
 //export HasInitialBackupByAssetFFI
-func HasInitialBackupByAssetFFI(assetNameC *C.char) *C.char {
-	return C.CString(core.HasInitialBackupByPlugin(C.GoString(assetNameC)))
+func HasInitialBackupByAssetFFI(assetIDC *C.char) *C.char {
+	return C.CString(core.HasInitialBackupByAssetID(C.GoString(assetIDC)))
 }
 
 //export RestoreToInitialConfigFFI
@@ -1134,8 +1129,8 @@ func RestoreToInitialConfigFFI() *C.char {
 }
 
 //export RestoreToInitialConfigByAssetFFI
-func RestoreToInitialConfigByAssetFFI(assetNameC *C.char) *C.char {
-	return C.CString(core.RestoreToInitialConfigByPlugin(C.GoString(assetNameC)))
+func RestoreToInitialConfigByAssetFFI(assetIDC *C.char) *C.char {
+	return C.CString(core.RestoreToInitialConfigByAssetID(C.GoString(assetIDC)))
 }
 
 //export NotifyPluginAppExitFFI

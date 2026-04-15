@@ -117,7 +117,7 @@ func TestProtectionConfig_CRUD(t *testing.T) {
 	}
 
 	// 获取配置
-	got, err := repo.GetProtectionConfig("openclaw", "openclaw:test-1")
+	got, err := repo.GetProtectionConfig("openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetProtectionConfig failed: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestProtectionConfig_CRUD(t *testing.T) {
 	}
 
 	// 禁用
-	err = repo.SetProtectionEnabled("openclaw", "openclaw:test-1", false)
+	err = repo.SetProtectionEnabled("openclaw:test-1", false)
 	if err != nil {
 		t.Fatalf("SetProtectionEnabled failed: %v", err)
 	}
@@ -154,11 +154,11 @@ func TestProtectionConfig_CRUD(t *testing.T) {
 	}
 
 	// 删除
-	err = repo.DeleteProtectionConfig("openclaw", "openclaw:test-1")
+	err = repo.DeleteProtectionConfig("openclaw:test-1")
 	if err != nil {
 		t.Fatalf("DeleteProtectionConfig failed: %v", err)
 	}
-	got, err = repo.GetProtectionConfig("openclaw", "openclaw:test-1")
+	got, err = repo.GetProtectionConfig("openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetProtectionConfig failed: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestProtectionStatistics_SaveAndGet(t *testing.T) {
 		t.Fatalf("SaveProtectionStatistics failed: %v", err)
 	}
 
-	got, err := repo.GetProtectionStatistics("openclaw", "openclaw:test-1")
+	got, err := repo.GetProtectionStatistics("openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetProtectionStatistics failed: %v", err)
 	}
@@ -200,11 +200,11 @@ func TestProtectionStatistics_SaveAndGet(t *testing.T) {
 	}
 
 	// 清空
-	err = repo.ClearProtectionStatistics("openclaw", "openclaw:test-1")
+	err = repo.ClearProtectionStatistics("openclaw:test-1")
 	if err != nil {
 		t.Fatalf("ClearProtectionStatistics failed: %v", err)
 	}
-	got, err = repo.GetProtectionStatistics("openclaw", "openclaw:test-1")
+	got, err = repo.GetProtectionStatistics("openclaw:test-1")
 	if err != nil {
 		t.Fatalf("GetProtectionStatistics failed: %v", err)
 	}

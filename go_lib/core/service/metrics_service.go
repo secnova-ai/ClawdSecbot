@@ -85,9 +85,8 @@ func CleanOldApiMetrics(jsonStr string) map[string]interface{} {
 	return successResult()
 }
 
-// GetDailyTokenUsage 获取每日token使用量
-func GetDailyTokenUsage(assetName, assetID string) map[string]interface{} {
-	_ = assetName
+// GetDailyTokenUsage returns the daily token usage for the specified asset instance.
+func GetDailyTokenUsage(assetID string) map[string]interface{} {
 	repo := repository.NewMetricsRepository(nil)
 	usage, err := repo.GetDailyTokenUsage(assetID)
 	if err != nil {
