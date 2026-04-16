@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
+import 'dart:io';
 import 'package:ffi/ffi.dart';
-import 'package:path/path.dart' as path;
 import '../models/llm_config_model.dart';
 import '../utils/app_logger.dart';
 import 'model_config_database_service.dart';
@@ -65,9 +65,9 @@ typedef DeleteSkillDart =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> skillPath);
 
 typedef TrustSkillScanC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> skillName);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> skillHash);
 typedef TrustSkillScanDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> skillName);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> skillHash);
 
 typedef FreeStringC = ffi.Void Function(ffi.Pointer<Utf8>);
 typedef FreeStringDart = void Function(ffi.Pointer<Utf8>);
@@ -88,6 +88,17 @@ class BatchScanProgress {
     required this.currentSkill,
     required this.completed,
     this.error,
+  });
+}
+
+/// Skill 删除结果。
+class SkillDeleteResult {
+  final bool success;
+  final bool alreadyMissing;
+
+  const SkillDeleteResult({
+    required this.success,
+    this.alreadyMissing = false,
   });
 }
 
@@ -338,9 +349,24 @@ class SkillSecurityAnalyzerService {
     }
   }
 
-  /// Delete a skill directory
-  Future<bool> deleteSkill(String skillPath) async {
+  /// Delete a skill directory.
+  /// If the directory is already missing, treat it as successful deletion.
+  Future<SkillDeleteResult> deleteSkill({
+    required String skillPath,
+    required String skillHash,
+  }) async {
     try {
+      final normalizedSkillPath = skillPath.trim();
+      final normalizedSkillHash = skillHash.trim();
+      final targetDirectory = Directory(normalizedSkillPath);
+      if (!await targetDirectory.exists()) {
+        await ScanDatabaseService().deleteSkillScan(normalizedSkillHash);
+        appLogger.info(
+          '[SkillSecurityAnalyzer] Skill path already missing, treat as deleted: path=$normalizedSkillPath, hash=$normalizedSkillHash',
+        );
+        return const SkillDeleteResult(success: true, alreadyMissing: true);
+      }
+
       final dylib = _getDylib();
       final deleteSkill = dylib.lookupFunction<DeleteSkillC, DeleteSkillDart>(
         'DeleteSkill',
@@ -349,7 +375,7 @@ class SkillSecurityAnalyzerService {
         'FreeString',
       );
 
-      final skillPathPtr = skillPath.toNativeUtf8();
+      final skillPathPtr = normalizedSkillPath.toNativeUtf8();
       final resultPtr = deleteSkill(skillPathPtr);
       malloc.free(skillPathPtr);
 
@@ -358,18 +384,25 @@ class SkillSecurityAnalyzerService {
 
       final result = jsonDecode(resultStr);
       if (result['success'] == true) {
-        final skillName = path.basename(skillPath);
-        await ScanDatabaseService().deleteSkillScan(skillName);
+        await ScanDatabaseService().deleteSkillScan(normalizedSkillHash);
+        return SkillDeleteResult(
+          success: true,
+          alreadyMissing: result['already_missing'] == true,
+        );
+      } else {
+        appLogger.warning(
+          '[SkillSecurityAnalyzer] Delete skill failed: path=$normalizedSkillPath, hash=$normalizedSkillHash, error=${result['error'] ?? 'unknown'}',
+        );
       }
-      return result['success'] == true;
+      return const SkillDeleteResult(success: false);
     } catch (e) {
       appLogger.error('[SkillSecurityAnalyzer] Delete skill error', e);
-      return false;
+      return const SkillDeleteResult(success: false);
     }
   }
 
   /// Trust a skill (mark as trusted so it doesn't appear in risky skills list)
-  Future<bool> trustSkill(String skillName) async {
+  Future<bool> trustSkill(String skillHash) async {
     try {
       final dylib = _getDylib();
       final trustSkillScan = dylib
@@ -380,9 +413,9 @@ class SkillSecurityAnalyzerService {
         'FreeString',
       );
 
-      final skillNamePtr = skillName.toNativeUtf8();
-      final resultPtr = trustSkillScan(skillNamePtr);
-      malloc.free(skillNamePtr);
+      final skillHashPtr = skillHash.toNativeUtf8();
+      final resultPtr = trustSkillScan(skillHashPtr);
+      malloc.free(skillHashPtr);
 
       final resultStr = resultPtr.toDartString();
       freeString(resultPtr);

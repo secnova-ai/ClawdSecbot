@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -335,6 +336,13 @@ func DeleteSkillInternal(skillPath string) string {
 		return `{"success": false, "error": "skill path is not within skills directory"}`
 	}
 
+	if _, err := os.Stat(skillPath); err != nil {
+		if os.IsNotExist(err) {
+			return `{"success": true, "already_missing": true, "message": "skill path already missing"}`
+		}
+		return fmt.Sprintf(`{"success": false, "error": "failed to stat skill path: %v"}`, err)
+	}
+
 	if err := removeSkillDirectory(skillPath); err != nil {
 		return fmt.Sprintf(`{"success": false, "error": "failed to delete skill: %v"}`, err)
 	}
@@ -490,7 +498,7 @@ func (bs *BatchScanSession) run(config *repository.SecurityModelConfig) {
 			hash := bs.SkillHashes[skillName]
 			if hash != "" {
 				if saveErr := scanRepo.SaveSkillScanResult(&repository.SkillScanRecord{
-					SkillName: skillName, SkillHash: hash, Safe: false,
+					SkillName: skillName, SkillHash: hash, SkillPath: skillPath, SourcePlugin: nullclawPluginID, Safe: false,
 					Issues: []string{err.Error()}, RiskLevel: "error",
 				}); saveErr != nil {
 					logging.Error("[BatchScan] Failed to save error result for %s: %v", skillName, saveErr)
@@ -513,7 +521,7 @@ func (bs *BatchScanSession) run(config *repository.SecurityModelConfig) {
 			// Save failed result to DB so skill won't appear as "unscanned"
 			if hash != "" {
 				if saveErr := scanRepo.SaveSkillScanResult(&repository.SkillScanRecord{
-					SkillName: skillName, SkillHash: hash, Safe: false,
+					SkillName: skillName, SkillHash: hash, SkillPath: skillPath, SourcePlugin: nullclawPluginID, Safe: false,
 					Issues: []string{fmt.Sprintf("Analysis failed: %v", err)}, RiskLevel: "error",
 				}); saveErr != nil {
 					logging.Error("[BatchScan] Failed to save error result for %s: %v", skillName, saveErr)
@@ -536,7 +544,7 @@ func (bs *BatchScanSession) run(config *repository.SecurityModelConfig) {
 			riskLevel = result.RiskLevel
 		}
 		if err := scanRepo.SaveSkillScanResult(&repository.SkillScanRecord{
-			SkillName: skillName, SkillHash: hash, Safe: safe, Issues: issues, RiskLevel: riskLevel,
+			SkillName: skillName, SkillHash: hash, SkillPath: skillPath, SourcePlugin: nullclawPluginID, Safe: safe, Issues: issues, RiskLevel: riskLevel,
 		}); err != nil {
 			logging.Error("[BatchScan] Failed to save result for %s: %v", skillName, err)
 		} else {

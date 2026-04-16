@@ -113,3 +113,63 @@ func TestSyncGatewaySandboxByAssetAndPlugin_AssetIDMissingBindingReturnsError(t 
 		t.Fatalf("expected asset_id binding error, got: %s", result)
 	}
 }
+
+type skillDeleteCapabilityTestPlugin struct {
+	*testPlugin
+	ownedPrefix string
+	calls       int
+}
+
+func newSkillDeleteCapabilityTestPlugin(assetName, ownedPrefix string) *skillDeleteCapabilityTestPlugin {
+	return &skillDeleteCapabilityTestPlugin{
+		testPlugin:  newTestPlugin(assetName),
+		ownedPrefix: strings.ToLower(ownedPrefix),
+	}
+}
+
+func (p *skillDeleteCapabilityTestPlugin) DeleteSkill(skillPath string) string {
+	p.calls++
+	if strings.HasPrefix(strings.ToLower(skillPath), p.ownedPrefix) {
+		return fmt.Sprintf(`{"success":true,"plugin":"%s"}`, strings.ToLower(p.GetAssetName()))
+	}
+	return fmt.Sprintf(`{"success":false,"error":"skill path is not within skills directory (%s)"}`, strings.ToLower(p.GetAssetName()))
+}
+
+func TestDeleteSkillByPlugin_AutoRoutesBySkillPath(t *testing.T) {
+	pm := resetCapabilityTestPluginManager(t)
+
+	openPlugin := newSkillDeleteCapabilityTestPlugin("Openclaw", "/openclaw/skills/")
+	dintalPlugin := newSkillDeleteCapabilityTestPlugin("Dintalclaw", "/dintalclaw/memory/")
+	pm.Register(openPlugin)
+	pm.Register(dintalPlugin)
+
+	result := DeleteSkillByPlugin("", "/dintalclaw/memory/security/skill-a")
+
+	if !strings.Contains(result, `"success":true`) || !strings.Contains(strings.ToLower(result), `"plugin":"dintalclaw"`) {
+		t.Fatalf("expected auto routed delete to dintalclaw plugin, got: %s", result)
+	}
+	if openPlugin.calls != 1 {
+		t.Fatalf("expected openclaw delete attempted once, got: %d", openPlugin.calls)
+	}
+	if dintalPlugin.calls != 1 {
+		t.Fatalf("expected dintalclaw delete attempted once, got: %d", dintalPlugin.calls)
+	}
+}
+
+func TestDeleteSkillByPlugin_AutoRouteAllFailReturnsError(t *testing.T) {
+	pm := resetCapabilityTestPluginManager(t)
+
+	openPlugin := newSkillDeleteCapabilityTestPlugin("Openclaw", "/openclaw/skills/")
+	dintalPlugin := newSkillDeleteCapabilityTestPlugin("Dintalclaw", "/dintalclaw/memory/")
+	pm.Register(openPlugin)
+	pm.Register(dintalPlugin)
+
+	result := DeleteSkillByPlugin("", "/unknown/root/skill-a")
+
+	if !strings.Contains(result, `"success":false`) {
+		t.Fatalf("expected failure when no plugin owns path, got: %s", result)
+	}
+	if !strings.Contains(result, "failed to route delete_skill by path") {
+		t.Fatalf("expected routing failure reason in error, got: %s", result)
+	}
+}

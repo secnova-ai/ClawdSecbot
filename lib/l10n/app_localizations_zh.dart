@@ -1912,10 +1912,36 @@ class AppLocalizationsZh extends AppLocalizations {
   String get clearAll => '清空';
 
   @override
-  String get viewSkillScanResults => '技能检测结果';
+  String get viewSkillScanResults => '技能检测历史';
 
   @override
-  String get viewSkillScanResultsTitle => '技能检测结果';
+  String get viewSkillScanResultsTitle => '技能检测历史';
+
+  @override
+  String get rescanSecurityDiscovery => '安全发现';
+
+  @override
+  String get rescanAll => '所有信息';
+
+  @override
+  String get deleteRiskSkill => '删除技能';
+
+  @override
+  String deleteRiskSkillConfirm(String skill) {
+    return '确认删除技能 \"$skill\" 吗？';
+  }
+
+  @override
+  String get deleteRiskSkillSuccess => '技能删除成功';
+
+  @override
+  String get deleteRiskSkillAlreadyMissing => '技能目录已不存在，按已删除处理';
+
+  @override
+  String get deleteRiskSkillFailed => '技能删除失败';
+
+  @override
+  String get deleteRiskSkillUnavailable => '缺少技能路径或哈希，无法删除';
 
   @override
   String get noSkillScanResults => '暂无技能扫描记录';

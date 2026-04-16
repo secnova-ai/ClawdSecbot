@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"go_lib/core/logging"
 )
 
 // SkillScanCapability defines optional plugin capability for skill security scan flows.
@@ -225,15 +227,85 @@ func TestModelConnectionByPlugin(assetName, configJSON string) string {
 	return plugin.(ModelConnectionCapability).TestModelConnection(configJSON)
 }
 
-func DeleteSkillByPlugin(assetName, skillPath string) string {
-	plugin, err := resolvePluginByCapability(assetName, "delete_skill", func(p BotPlugin) bool {
-		_, ok := p.(SkillManagementCapability)
-		return ok
-	})
-	if err != nil {
-		return capabilityError(err)
+// parseCapabilityResult 解析 capability 返回 JSON，提取 success/error。
+func parseCapabilityResult(raw string) (bool, string) {
+	parsed := make(map[string]interface{})
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return false, fmt.Sprintf("invalid capability response: %v", err)
 	}
-	return plugin.(SkillManagementCapability).DeleteSkill(skillPath)
+	if success, ok := parsed["success"].(bool); ok && success {
+		return true, ""
+	}
+	if errMsg, ok := parsed["error"].(string); ok && strings.TrimSpace(errMsg) != "" {
+		return false, errMsg
+	}
+	return false, "capability returned unsuccessful result"
+}
+
+func DeleteSkillByPlugin(assetName, skillPath string) string {
+	assetName = strings.TrimSpace(assetName)
+	skillPath = strings.TrimSpace(skillPath)
+
+	if assetName != "" {
+		plugin, err := resolvePluginByCapability(assetName, "delete_skill", func(p BotPlugin) bool {
+			_, ok := p.(SkillManagementCapability)
+			return ok
+		})
+		if err != nil {
+			return capabilityError(err)
+		}
+		return plugin.(SkillManagementCapability).DeleteSkill(skillPath)
+	}
+
+	pm := GetPluginManager()
+	plugins := pm.getAllPluginsDeterministic()
+	matched := make([]BotPlugin, 0, len(plugins))
+	for _, plugin := range plugins {
+		if _, ok := plugin.(SkillManagementCapability); ok {
+			matched = append(matched, plugin)
+		}
+	}
+	if len(matched) == 0 {
+		return capabilityError(fmt.Errorf("no plugin supports capability: delete_skill"))
+	}
+	if len(matched) == 1 {
+		return matched[0].(SkillManagementCapability).DeleteSkill(skillPath)
+	}
+	if skillPath == "" {
+		return capabilityError(fmt.Errorf("skill_path is required when multiple plugins support capability: delete_skill"))
+	}
+
+	logging.Info("[DeleteSkillByPlugin] auto routing delete skill path: %s", skillPath)
+	failedReasons := make([]string, 0, len(matched))
+	for _, plugin := range matched {
+		response := plugin.(SkillManagementCapability).DeleteSkill(skillPath)
+		success, errMsg := parseCapabilityResult(response)
+		if success {
+			logging.Info(
+				"[DeleteSkillByPlugin] delete skill succeeded via plugin=%s path=%s",
+				plugin.GetAssetName(),
+				skillPath,
+			)
+			return response
+		}
+		failedReasons = append(
+			failedReasons,
+			fmt.Sprintf("%s: %s", plugin.GetAssetName(), errMsg),
+		)
+	}
+
+	logging.Warning(
+		"[DeleteSkillByPlugin] delete skill failed after auto routing path=%s errors=%s",
+		skillPath,
+		strings.Join(failedReasons, "; "),
+	)
+	return capabilityError(
+		fmt.Errorf(
+			"failed to route delete_skill by path %q: %s",
+			skillPath,
+			strings.Join(failedReasons, "; "),
+		),
+	)
 }
 
 func SyncGatewaySandboxByPlugin(assetName string) string {

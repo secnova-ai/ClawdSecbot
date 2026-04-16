@@ -119,10 +119,10 @@ func GetSkillScanByHash(hash string) map[string]interface{} {
 	return successDataResult(record)
 }
 
-// DeleteSkillScan 根据技能名称删除扫描记录
-func DeleteSkillScan(skillName string) map[string]interface{} {
+// DeleteSkillScan 根据技能哈希删除扫描记录
+func DeleteSkillScan(skillHash string) map[string]interface{} {
 	repo := repository.NewSkillSecurityScanRepository(nil)
-	if err := repo.DeleteSkillScan(skillName); err != nil {
+	if err := repo.DeleteSkillScan(skillHash); err != nil {
 		logging.Error("Failed to delete skill scan: %v", err)
 		return errorResult(err)
 	}
@@ -155,9 +155,9 @@ func GetAllSkillScans() map[string]interface{} {
 }
 
 // TrustSkill marks a skill as trusted (user accepts known risks)
-func TrustSkill(skillName string) map[string]interface{} {
+func TrustSkill(skillHash string) map[string]interface{} {
 	repo := repository.NewSkillSecurityScanRepository(nil)
-	if err := repo.TrustSkill(skillName); err != nil {
+	if err := repo.TrustSkill(skillHash); err != nil {
 		logging.Error("Failed to trust skill: %v", err)
 		return errorResult(err)
 	}
