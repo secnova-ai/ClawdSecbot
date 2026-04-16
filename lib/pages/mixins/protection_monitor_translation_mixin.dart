@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../l10n/app_localizations.dart';
-import '../protection_monitor_window.dart';
+import '../protection_monitor_page.dart';
 
 /// 日志翻译 Mixin
 /// 将 Go 层结构化日志 JSON 翻译为本地化字符串

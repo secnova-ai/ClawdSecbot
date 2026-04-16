@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:io';
 import '../utils/app_fonts.dart';
 import '../models/risk_model.dart';
 import '../services/plugin_service.dart';
+import '../utils/runtime_platform.dart';
 
 class MitigationDialog extends StatefulWidget {
   final RiskInfo risk;
@@ -333,7 +333,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
     if (!isZh) return item.label;
 
     if (item.key == 'fix_permission') {
-      if (!Platform.isWindows) {
+      if (!isRuntimeWindows) {
         return '修复目录/文件权限（Unix: chmod）';
       }
       switch (widget.risk.id) {

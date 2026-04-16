@@ -3,12 +3,12 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'dart:convert';
-import 'dart:io';
 import '../l10n/app_localizations.dart';
 import '../models/asset_model.dart';
 import '../models/risk_model.dart';
 import '../services/app_settings_database_service.dart';
 import '../utils/app_fonts.dart';
+import '../utils/runtime_platform.dart';
 import 'bot_icon_picker_dialog.dart';
 
 /// 扫描结果展示组件
@@ -441,7 +441,7 @@ class ScanResultView extends StatelessWidget {
       case 'riskRunningAsRoot':
         return l10n.riskRunningAsRootDesc;
       case 'config_perm_unsafe':
-        if (Platform.isWindows) {
+        if (isRuntimeWindows) {
           return _getWindowsAclRiskDesc(
             risk,
             l10n: l10n,
@@ -455,7 +455,7 @@ class ScanResultView extends StatelessWidget {
           risk.args?['current']?.toString() ?? '',
         );
       case 'config_dir_perm_unsafe':
-        if (Platform.isWindows) {
+        if (isRuntimeWindows) {
           return _getWindowsAclRiskDesc(
             risk,
             l10n: l10n,
@@ -477,7 +477,7 @@ class ScanResultView extends StatelessWidget {
       case 'logging_redact_off':
         return l10n.riskLoggingRedactOffDesc;
       case 'log_dir_perm_unsafe':
-        if (Platform.isWindows) {
+        if (isRuntimeWindows) {
           return _getWindowsAclRiskDesc(
             risk,
             l10n: l10n,
@@ -827,9 +827,7 @@ class _AssetCardState extends State<_AssetCard> {
 
   /// 将资产内部名称映射为用户友好的展示名称
   String _getAssetDisplayName(String name) {
-    const displayNames = {
-      'dintalclaw': '政务龙虾',
-    };
+    const displayNames = {'dintalclaw': '政务龙虾'};
     return displayNames[name] ?? name;
   }
 
@@ -1235,14 +1233,15 @@ class _AssetCardState extends State<_AssetCard> {
               : SystemMouseCursors.basic,
           child: GestureDetector(
             onTap: canProtect
-                ? () =>
-                      widget.onShowProtectionConfig(asset, isEditMode: false)
+                ? () => widget.onShowProtectionConfig(asset, isEditMode: false)
                 : null,
             child: Opacity(
               opacity: canProtect ? 1.0 : 0.4,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
                     colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],

@@ -1,15 +1,7 @@
 import 'dart:convert';
-import 'dart:ffi' as ffi;
-import 'package:ffi/ffi.dart';
+import '../core_transport/transport_registry.dart';
 import '../models/audit_log_model.dart';
 import '../utils/app_logger.dart';
-import 'native_library_service.dart';
-
-// FFI type definitions
-typedef _OneArgC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef _OneArgDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef _NoArgC = ffi.Pointer<Utf8> Function();
-typedef _NoArgDart = ffi.Pointer<Utf8> Function();
 
 /// 审计日志 FFI 持久化门面：通过 FFI 委托 Go 层进行数据持久化，Flutter 不直接操作 DB。
 class AuditLogDatabaseService {
@@ -19,9 +11,6 @@ class AuditLogDatabaseService {
   factory AuditLogDatabaseService() => _instance;
 
   AuditLogDatabaseService._internal();
-
-  ffi.DynamicLibrary? get _dylib => NativeLibraryService().dylib;
-  FreeStringDart? get _freeString => NativeLibraryService().freeString;
 
   /// Save an audit log entry
   Future<void> saveAuditLog(AuditLog log) async {
@@ -305,17 +294,13 @@ class AuditLogDatabaseService {
   // --- Helper methods ---
 
   Map<String, dynamic> _callFFINoArg(String funcName) {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
       return {'success': false, 'error': 'Native library not initialized'};
     }
 
     try {
-      final func = dylib.lookupFunction<_NoArgC, _NoArgDart>(funcName);
-      final resultPtr = func();
-      final result = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      return jsonDecode(result) as Map<String, dynamic>;
+      return transport.callNoArg(funcName);
     } catch (e) {
       appLogger.error('[AuditDB] $funcName failed: $e');
       return {'success': false, 'error': '$funcName failed: $e'};
@@ -323,19 +308,13 @@ class AuditLogDatabaseService {
   }
 
   Map<String, dynamic> _callFFI(String funcName, String jsonStr) {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
       return {'success': false, 'error': 'Native library not initialized'};
     }
 
     try {
-      final func = dylib.lookupFunction<_OneArgC, _OneArgDart>(funcName);
-      final argPtr = jsonStr.toNativeUtf8();
-      final resultPtr = func(argPtr);
-      final result = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(argPtr);
-      return jsonDecode(result) as Map<String, dynamic>;
+      return transport.callOneArg(funcName, jsonStr);
     } catch (e) {
       appLogger.error('[AuditDB] $funcName failed: $e');
       return {'success': false, 'error': '$funcName failed: $e'};

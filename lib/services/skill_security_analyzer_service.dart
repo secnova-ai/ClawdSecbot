@@ -1,78 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ffi' as ffi;
-import 'package:ffi/ffi.dart';
+
 import 'package:path/path.dart' as path;
+
+import '../core_transport/transport_registry.dart';
 import '../models/llm_config_model.dart';
 import '../utils/app_logger.dart';
 import 'model_config_database_service.dart';
-import 'native_library_service.dart' hide FreeStringDart;
 import 'scan_database_service.dart';
 
-// C function signatures - 单技能扫描（保留兼容）
-typedef StartSkillSecurityScanC =
-    ffi.Pointer<Utf8> Function(
-      ffi.Pointer<Utf8> skillPath,
-      ffi.Pointer<Utf8> modelConfigJSON,
-    );
-typedef StartSkillSecurityScanDart =
-    ffi.Pointer<Utf8> Function(
-      ffi.Pointer<Utf8> skillPath,
-      ffi.Pointer<Utf8> modelConfigJSON,
-    );
-
-typedef GetSkillSecurityScanLogC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scanID);
-typedef GetSkillSecurityScanLogDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scanID);
-
-typedef GetSkillSecurityScanResultC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scanID);
-typedef GetSkillSecurityScanResultDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scanID);
-
-typedef CancelSkillSecurityScanC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scanID);
-typedef CancelSkillSecurityScanDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scanID);
-
-// C function signatures - 批量扫描
-typedef StartBatchSkillScanC = ffi.Pointer<Utf8> Function();
-typedef StartBatchSkillScanDart = ffi.Pointer<Utf8> Function();
-
-typedef GetBatchSkillScanLogC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> batchID);
-typedef GetBatchSkillScanLogDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> batchID);
-
-typedef GetBatchSkillScanResultsC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> batchID);
-typedef GetBatchSkillScanResultsDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> batchID);
-
-typedef CancelBatchSkillScanC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> batchID);
-typedef CancelBatchSkillScanDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> batchID);
-
-typedef TestModelConnectionFFIC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> configJSON);
-typedef TestModelConnectionFFIDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> configJSON);
-
-typedef DeleteSkillC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> skillPath);
-typedef DeleteSkillDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> skillPath);
-
-typedef TrustSkillScanC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> skillName);
-typedef TrustSkillScanDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> skillName);
-
-typedef FreeStringC = ffi.Void Function(ffi.Pointer<Utf8>);
-typedef FreeStringDart = void Function(ffi.Pointer<Utf8>);
-
-/// 批量扫描进度信息
+/// Batch scan progress info.
 class BatchScanProgress {
   final List<String> logs;
   final int currentIndex;
@@ -96,6 +33,7 @@ class SkillSecurityAnalyzerService {
       StreamController<String>.broadcast();
   final StreamController<BatchScanProgress> _progressController =
       StreamController<BatchScanProgress>.broadcast();
+
   Timer? _pollTimer;
   String? _currentBatchID;
 
@@ -103,15 +41,6 @@ class SkillSecurityAnalyzerService {
   Stream<BatchScanProgress> get progressStream => _progressController.stream;
   bool get isScanning => _currentBatchID != null;
 
-  ffi.DynamicLibrary _getDylib() {
-    final dylib = NativeLibraryService().dylib;
-    if (dylib == null) {
-      throw Exception('Plugin library not loaded');
-    }
-    return dylib;
-  }
-
-  /// 加载安全模型配置（用于 skill 扫描）
   Future<SecurityModelConfig> loadConfig() async {
     try {
       final dbService = ModelConfigDatabaseService();
@@ -126,7 +55,6 @@ class SkillSecurityAnalyzerService {
       );
     }
 
-    // 返回默认配置
     return SecurityModelConfig(
       provider: 'ollama',
       endpoint: 'http://localhost:11434',
@@ -135,7 +63,6 @@ class SkillSecurityAnalyzerService {
     );
   }
 
-  /// Check if model is configured (has valid configuration saved)
   Future<bool> isModelConfigured() async {
     try {
       final dbService = ModelConfigDatabaseService();
@@ -151,7 +78,6 @@ class SkillSecurityAnalyzerService {
     }
   }
 
-  /// 保存安全模型配置到数据库
   Future<bool> saveConfig(SecurityModelConfig config) async {
     try {
       final dbService = ModelConfigDatabaseService();
@@ -162,75 +88,39 @@ class SkillSecurityAnalyzerService {
     }
   }
 
-  /// 测试模型连接
-  Future<Map<String, dynamic>> testConnection(
-    SecurityModelConfig config,
-  ) async {
-    try {
-      final dylib = _getDylib();
-      final testModelConnection = dylib
-          .lookupFunction<TestModelConnectionFFIC, TestModelConnectionFFIDart>(
-            'TestModelConnectionFFI',
-          );
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-
-      final configJSON = jsonEncode(config.toJson());
-      final configPtr = configJSON.toNativeUtf8();
-      final resultPtr = testModelConnection(configPtr);
-      malloc.free(configPtr);
-
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
-
-      return jsonDecode(resultStr) as Map<String, dynamic>;
-    } catch (e) {
-      appLogger.error('[SkillSecurityAnalyzer] Failed to test connection', e);
-      return {'success': false, 'error': e.toString()};
-    }
+  Future<Map<String, dynamic>> testConnection(SecurityModelConfig config) async {
+    final request = {
+      'provider': config.provider,
+      'endpoint': config.endpoint,
+      'api_key': config.apiKey,
+      'model': config.model,
+      if (config.secretKey.isNotEmpty) 'secret_key': config.secretKey,
+    };
+    return _callOneArg('TestModelConnectionFFI', jsonEncode(request));
   }
 
-  // ==================== 批量扫描 ====================
-
-  /// 启动批量技能扫描（零参数，Go 层自动发现技能和配置）
   Future<Map<String, dynamic>> startBatchScan() async {
     if (_currentBatchID != null) {
       throw Exception('A batch scan is already in progress');
     }
 
-    final dylib = _getDylib();
-    final startBatch = dylib
-        .lookupFunction<StartBatchSkillScanC, StartBatchSkillScanDart>(
-          'StartBatchSkillScan',
-        );
-    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-      'FreeString',
-    );
-
-    final resultPtr = startBatch();
-    final resultStr = resultPtr.toDartString();
-    freeString(resultPtr);
-
-    final result = jsonDecode(resultStr) as Map<String, dynamic>;
+    final result = _callNoArg('StartBatchSkillScan');
     if (result['success'] != true) {
       return result;
     }
 
-    // Handle "no skills to scan" case - return early without attempting to get batch_id
-    if (result['success'] == true && (result['total'] as int? ?? 0) == 0) {
+    if ((result['total'] as int? ?? 0) == 0) {
       return result;
     }
 
-    _currentBatchID = result['batch_id'] as String;
+    _currentBatchID = result['batch_id'] as String?;
     _startBatchPolling();
-
     return result;
   }
 
   void _startBatchPolling() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) {
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
       if (_currentBatchID != null) {
         _pollBatchLogs(_currentBatchID!);
       }
@@ -239,35 +129,17 @@ class SkillSecurityAnalyzerService {
 
   void _pollBatchLogs(String batchID) {
     try {
-      final dylib = _getDylib();
-      final getLog = dylib
-          .lookupFunction<GetBatchSkillScanLogC, GetBatchSkillScanLogDart>(
-            'GetBatchSkillScanLog',
-          );
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
+      final result = _callOneArg('GetBatchSkillScanLog', batchID);
 
-      final batchIDPtr = batchID.toNativeUtf8();
-      final resultPtr = getLog(batchIDPtr);
-      malloc.free(batchIDPtr);
-
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
-
-      final result = jsonDecode(resultStr) as Map<String, dynamic>;
-
-      // 发送日志到 stream
       final logs = result['logs'] as List?;
       if (logs != null) {
-        for (var log in logs) {
+        for (final log in logs) {
           _logController.add(log.toString());
         }
       }
 
-      // 发送进度到 stream
       final progress = BatchScanProgress(
-        logs: (logs ?? []).map((e) => e.toString()).toList(),
+        logs: (logs ?? const []).map((e) => e.toString()).toList(),
         currentIndex: result['current_index'] as int? ?? 0,
         total: result['total'] as int? ?? 0,
         currentSkill: result['current_skill'] as String? ?? '',
@@ -276,12 +148,10 @@ class SkillSecurityAnalyzerService {
       );
       _progressController.add(progress);
 
-      // 检查是否完成
       if (result['completed'] == true) {
         _pollTimer?.cancel();
         _currentBatchID = null;
-
-        if (result['error'] != null && result['error'].toString().isNotEmpty) {
+        if ((result['error'] as String?)?.isNotEmpty == true) {
           _logController.add('Error: ${result['error']}');
         }
       }
@@ -290,46 +160,14 @@ class SkillSecurityAnalyzerService {
     }
   }
 
-  /// 获取批量扫描最终结果
   Future<Map<String, dynamic>> getBatchScanResults(String batchID) async {
-    final dylib = _getDylib();
-    final getResults = dylib
-        .lookupFunction<
-          GetBatchSkillScanResultsC,
-          GetBatchSkillScanResultsDart
-        >('GetBatchSkillScanResults');
-    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-      'FreeString',
-    );
-
-    final batchIDPtr = batchID.toNativeUtf8();
-    final resultPtr = getResults(batchIDPtr);
-    malloc.free(batchIDPtr);
-
-    final resultStr = resultPtr.toDartString();
-    freeString(resultPtr);
-
-    return jsonDecode(resultStr) as Map<String, dynamic>;
+    return _callOneArg('GetBatchSkillScanResults', batchID);
   }
 
-  /// 取消批量扫描
   Future<void> cancelBatchScan() async {
     if (_currentBatchID == null) return;
-
     try {
-      final dylib = _getDylib();
-      final cancelBatch = dylib
-          .lookupFunction<CancelBatchSkillScanC, CancelBatchSkillScanDart>(
-            'CancelBatchSkillScan',
-          );
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-
-      final batchIDPtr = _currentBatchID!.toNativeUtf8();
-      final resultPtr = cancelBatch(batchIDPtr);
-      malloc.free(batchIDPtr);
-      freeString(resultPtr);
+      _callOneArg('CancelBatchSkillScan', _currentBatchID!);
     } catch (e) {
       appLogger.error('[SkillSecurityAnalyzer] Cancel batch scan error', e);
     } finally {
@@ -338,60 +176,54 @@ class SkillSecurityAnalyzerService {
     }
   }
 
-  /// Delete a skill directory
   Future<bool> deleteSkill(String skillPath) async {
     try {
-      final dylib = _getDylib();
-      final deleteSkill = dylib.lookupFunction<DeleteSkillC, DeleteSkillDart>(
-        'DeleteSkill',
-      );
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-
-      final skillPathPtr = skillPath.toNativeUtf8();
-      final resultPtr = deleteSkill(skillPathPtr);
-      malloc.free(skillPathPtr);
-
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
-
-      final result = jsonDecode(resultStr);
+      final result = _callOneArg('DeleteSkill', skillPath);
       if (result['success'] == true) {
         final skillName = path.basename(skillPath);
         await ScanDatabaseService().deleteSkillScan(skillName);
+        return true;
       }
-      return result['success'] == true;
+      return false;
     } catch (e) {
       appLogger.error('[SkillSecurityAnalyzer] Delete skill error', e);
       return false;
     }
   }
 
-  /// Trust a skill (mark as trusted so it doesn't appear in risky skills list)
   Future<bool> trustSkill(String skillName) async {
     try {
-      final dylib = _getDylib();
-      final trustSkillScan = dylib
-          .lookupFunction<TrustSkillScanC, TrustSkillScanDart>(
-            'TrustSkillScan',
-          );
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-
-      final skillNamePtr = skillName.toNativeUtf8();
-      final resultPtr = trustSkillScan(skillNamePtr);
-      malloc.free(skillNamePtr);
-
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
-
-      final result = jsonDecode(resultStr);
+      final result = _callOneArg('TrustSkillScan', skillName);
       return result['success'] == true;
     } catch (e) {
       appLogger.error('[SkillSecurityAnalyzer] Trust skill error', e);
       return false;
+    }
+  }
+
+  Map<String, dynamic> _callNoArg(String method) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
+      return {'success': false, 'error': 'Transport not initialized'};
+    }
+    try {
+      return transport.callNoArg(method);
+    } catch (e) {
+      appLogger.error('[SkillSecurityAnalyzer] $method failed', e);
+      return {'success': false, 'error': '$method failed: $e'};
+    }
+  }
+
+  Map<String, dynamic> _callOneArg(String method, String arg) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
+      return {'success': false, 'error': 'Transport not initialized'};
+    }
+    try {
+      return transport.callOneArg(method, arg);
+    } catch (e) {
+      appLogger.error('[SkillSecurityAnalyzer] $method failed', e);
+      return {'success': false, 'error': '$method failed: $e'};
     }
   }
 

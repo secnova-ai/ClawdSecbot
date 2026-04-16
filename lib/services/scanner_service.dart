@@ -1,9 +1,10 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../l10n/app_localizations.dart';
 import '../models/risk_model.dart';
 import '../config/build_config.dart';
+import '../utils/runtime_env.dart';
+import '../utils/runtime_platform.dart';
 import 'plugin_service.dart';
 import 'scan_database_service.dart';
 
@@ -71,14 +72,13 @@ class BotScanner {
     }
 
     // 检查运行权限
-    if (Platform.isLinux || Platform.isMacOS) {
+    if (isRuntimeLinux || isRuntimeMacOS) {
       // This checks if the *scanner itself* is running as root,
       // which might be relevant if it needs to check other users' files.
       // But usually running as root is a risk for the tool itself.
       // We'll keep it as a general warning.
       try {
-        final env = Platform.environment;
-        final uidStr = env['UID'] ?? env['EUID'];
+        final uidStr = getRuntimeEnv('UID') ?? getRuntimeEnv('EUID');
         if (uidStr != null) {
           final uid = int.tryParse(uidStr);
           if (uid == 0) {

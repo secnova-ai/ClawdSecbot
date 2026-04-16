@@ -6,7 +6,7 @@ import '../../models/protection_analysis_model.dart';
 import '../../models/truth_record_model.dart';
 import '../../services/protection_service.dart';
 import '../../utils/app_logger.dart';
-import '../protection_monitor_window.dart';
+import '../protection_monitor_page.dart';
 
 mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
   // ============ 需要主 State 提供的状态 ============

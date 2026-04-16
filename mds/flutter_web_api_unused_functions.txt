@@ -1,0 +1,12 @@
+ClearAllAuditLogsByFilterFFI
+GetAllProtectionStatusFFI
+GetAllSandboxStatus
+GetAuditLogStatisticsByFilterFFI
+GetProtectionStatusFFI
+GetShepherdRulesFFI
+StartProtectionFFI
+StopProtectionFFI
+SyncGatewaySandboxByAssetName
+UpdateBotForwardingProvider
+UpdateShepherdRulesFFI
+WaitForProtectionLogs
