@@ -1,0 +1,115 @@
+[
+  {
+    "risk_id": "config_perm_unsafe",
+    "mitigation": {
+      "type": "form",
+      "title": "Fix config file permissions",
+      "description": "This risk can be fixed automatically by tightening config file permissions.",
+      "form_schema": [
+        {
+          "key": "fix_permission",
+          "label": "Apply secure file permission",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "config_dir_perm_unsafe",
+    "mitigation": {
+      "type": "form",
+      "title": "Fix config directory permissions",
+      "description": "This risk can be fixed automatically by tightening config directory permissions.",
+      "form_schema": [
+        {
+          "key": "fix_permission",
+          "label": "Apply secure directory permission",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "redact_secrets_disabled",
+    "mitigation": {
+      "type": "form",
+      "title": "Enable secret redaction",
+      "description": "This risk can be fixed automatically by enabling security.redact_secrets.",
+      "form_schema": [
+        {
+          "key": "enable_redaction",
+          "label": "Enable redact_secrets",
+          "type": "boolean",
+          "default_value": true
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "terminal_backend_local",
+    "mitigation": {
+      "type": "suggestion",
+      "title": "Evaluate local execution boundary",
+      "description": "Local terminal backend runs commands directly on host. Consider moving to a safer execution backend where possible.",
+      "suggestions": [
+        {
+          "priority": "P1",
+          "category": "Execution Boundary",
+          "items": [
+            {
+              "action": "Review whether this Hermes instance should execute tools on the local host",
+              "detail": "Confirm host-level command execution is required for this workload."
+            },
+            {
+              "action": "Use stricter approval policies for local terminal backend",
+              "detail": "Enforce gated approvals to reduce direct host-side execution risk."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "approvals_mode_disabled",
+    "mitigation": {
+      "type": "form",
+      "title": "Re-enable approval gating",
+      "description": "This risk can be fixed automatically by setting approvals.mode to a gated mode.",
+      "form_schema": [
+        {
+          "key": "mode",
+          "label": "Approvals mode",
+          "type": "select",
+          "options": ["manual", "smart"],
+          "default_value": "manual"
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "model_base_url_public",
+    "mitigation": {
+      "type": "suggestion",
+      "title": "Review custom endpoint exposure",
+      "description": "A custom non-local base_url can bypass expected trust boundaries if endpoint ownership is unclear.",
+      "suggestions": [
+        {
+          "priority": "P1",
+          "category": "Endpoint Trust",
+          "items": [
+            {
+              "action": "Validate ownership and TLS settings of custom model endpoint",
+              "detail": "Ensure endpoint certificate, domain ownership, and transport security meet policy."
+            },
+            {
+              "action": "Prefer local or private network endpoint where feasible",
+              "detail": "Reduce external exposure by routing model traffic to trusted internal infrastructure."
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

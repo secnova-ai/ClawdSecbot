@@ -70,9 +70,10 @@ import (
 	"go_lib/core/shepherd"
 
 	// Import all plugins to trigger init() registration
-	_ "go_lib/plugins/dintalclaw"
-	_ "go_lib/plugins/nullclaw"
-	_ "go_lib/plugins/openclaw"
+	dintalclaw "go_lib/plugins/dintalclaw"
+	hermes "go_lib/plugins/hermes"
+	nullclaw "go_lib/plugins/nullclaw"
+	openclaw "go_lib/plugins/openclaw"
 )
 
 func init() {
@@ -143,6 +144,25 @@ func resolveSandboxAssetIdentity(assetName, assetID string) (assetKey string, di
 		displayName = assetKey
 	}
 	return assetKey, displayName, nil
+}
+
+//export SetConfigPathFFI
+func SetConfigPathFFI(pathC *C.char) *C.char {
+	path := C.GoString(pathC)
+	openclaw.SetConfigPath(path)
+	nullclaw.SetConfigPath(path)
+	dintalclaw.SetConfigPath(path)
+	hermes.SetConfigPath(path)
+	return jsonToCString(map[string]interface{}{"success": true, "path": path})
+}
+
+//export SetAppStoreBuildFFI
+func SetAppStoreBuildFFI(isAppStore C.int) *C.char {
+	value := isAppStore != 0
+	openclaw.SetAppStoreBuild(value)
+	nullclaw.SetAppStoreBuild(value)
+	hermes.SetAppStoreBuild(value)
+	return jsonToCString(map[string]interface{}{"success": true, "is_app_store": value})
 }
 
 // ==================== 全局初始化 FFI ====================
