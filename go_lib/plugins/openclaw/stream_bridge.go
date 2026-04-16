@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -333,6 +334,13 @@ func TestModelConnectionInternal(configJSON string) string {
 func DeleteSkillInternal(skillPath string) string {
 	if !isWithinSkillsDirs(skillPath) {
 		return `{"success": false, "error": "skill path is not within skills directory"}`
+	}
+
+	if _, err := os.Stat(skillPath); err != nil {
+		if os.IsNotExist(err) {
+			return `{"success": true, "already_missing": true, "message": "skill path already missing"}`
+		}
+		return fmt.Sprintf(`{"success": false, "error": "failed to stat skill path: %v"}`, err)
 	}
 
 	if err := removeSkillDirectory(skillPath); err != nil {

@@ -155,7 +155,10 @@ class ScanDatabaseService {
 
         final skillRisks = await _loadSkillRisksFromDatabase();
         if (skillRisks.isEmpty && legacySkillRisks.isNotEmpty) {
-          skillRisks.addAll(legacySkillRisks);
+          final enrichedLegacySkillRisks = await _enrichLegacySkillRisksFromDatabase(
+            legacySkillRisks,
+          );
+          skillRisks.addAll(enrichedLegacySkillRisks);
         }
 
         final latestScanSummary =
@@ -295,8 +298,8 @@ class ScanDatabaseService {
     }
   }
 
-  /// Delete skill scan record by skill name
-  Future<void> deleteSkillScan(String skillName) async {
+  /// Delete skill scan record by skill hash
+  Future<void> deleteSkillScan(String skillHash) async {
     final dylib = _dylib;
     if (dylib == null || _freeString == null) return;
 
@@ -306,15 +309,15 @@ class ScanDatabaseService {
             'DeleteSkillScanFFI',
           );
 
-      final namePtr = skillName.toNativeUtf8();
-      final resultPtr = deleteFn(namePtr);
+      final hashPtr = skillHash.toNativeUtf8();
+      final resultPtr = deleteFn(hashPtr);
       final resultStr = resultPtr.toDartString();
       _freeString!(resultPtr);
-      malloc.free(namePtr);
+      malloc.free(hashPtr);
 
       final response = jsonDecode(resultStr);
       if (response['success'] == true) {
-        appLogger.info('[ScanDB] Skill scan deleted via Go layer: $skillName');
+        appLogger.info('[ScanDB] Skill scan deleted via Go layer: $skillHash');
       }
     } catch (e) {
       appLogger.error('[ScanDB] Failed to delete skill scan', e);
@@ -341,6 +344,7 @@ class ScanDatabaseService {
           final data = item as Map<String, dynamic>;
           final rawIssues =
               (data['issues'] as List?)?.cast<String>() ?? <String>[];
+          final rawIssueCount = rawIssues.length;
           return {
             'skill_name': data['skill_name'],
             'skill_hash': data['skill_hash'],
@@ -352,6 +356,7 @@ class ScanDatabaseService {
             'risk_level': data['risk_level'] as String? ?? '',
             'issues': rawIssues.map(_formatSkillIssueText).toList(),
             'issue_details': rawIssues.map(_parseSkillIssueDetail).toList(),
+            'issue_count': rawIssueCount,
           };
         }).toList();
       }
@@ -383,6 +388,8 @@ class ScanDatabaseService {
           final data = item as Map<String, dynamic>;
           final rawIssues =
               (data['issues'] as List?)?.cast<String>() ?? <String>[];
+          final rawIssueCount = rawIssues.length;
+          final deletedAt = data['deleted_at'] as String? ?? '';
           return {
             'skill_name': data['skill_name'],
             'skill_hash': data['skill_hash'],
@@ -392,6 +399,9 @@ class ScanDatabaseService {
             'trusted': data['trusted'] as bool? ?? false,
             'issues': rawIssues.map(_formatSkillIssueText).toList(),
             'issue_details': rawIssues.map(_parseSkillIssueDetail).toList(),
+            'issue_count': rawIssueCount,
+            'deleted_at': deletedAt,
+            'deleted': deletedAt.trim().isNotEmpty,
           };
         }).toList();
       }
@@ -438,26 +448,132 @@ class ScanDatabaseService {
 
   Future<List<RiskInfo>> _loadSkillRisksFromDatabase() async {
     final riskySkills = await getRiskySkills();
-    return riskySkills.map((skill) {
+    final mergedRiskySkills = _mergeRiskySkillsByPath(riskySkills);
+    return mergedRiskySkills.map((skill) {
       final skillName = skill['skill_name'] as String? ?? 'Unknown Skill';
       final issues = skill['issues'] as List<String>? ?? const <String>[];
-      final issueCount = issues.length;
+      final persistedIssueCount = (skill['issue_count'] as num?)?.toInt() ?? 0;
+      final issueCount = persistedIssueCount > issues.length
+          ? persistedIssueCount
+          : issues.length;
+      final normalizedIssueCount = issueCount > 0 ? issueCount : 1;
 
       return RiskInfo(
         id: 'riskSkillSecurityIssue',
         args: {
           'skillName': skillName,
-          'issueCount': issueCount,
+          if ((skill['skill_hash'] as String? ?? '').isNotEmpty)
+            'skillHash': skill['skill_hash'] as String,
+          'issueCount': normalizedIssueCount,
           'issues': issues.join('; '),
           if ((skill['skill_path'] as String? ?? '').isNotEmpty)
             'skillPath': skill['skill_path'] as String,
         },
         title: 'Risky Skill: $skillName',
-        description: issueCount > 0
-            ? 'Skill "$skillName" has $issueCount security issue(s): ${issues.join("; ")}'
+        description: normalizedIssueCount > 0
+            ? 'Skill "$skillName" has $normalizedIssueCount security issue(s): ${issues.join("; ")}'
             : 'Skill "$skillName" was flagged as potentially risky.',
         level: _parseRiskLevel(skill['risk_level']),
         icon: Icons.warning,
+      );
+    }).toList();
+  }
+
+  /// 按技能路径去重并合并问题列表，避免风险技能展示重复。
+  List<Map<String, dynamic>> _mergeRiskySkillsByPath(
+    List<Map<String, dynamic>> riskySkills,
+  ) {
+    final merged = <String, Map<String, dynamic>>{};
+    for (final skill in riskySkills) {
+      final skillName = (skill['skill_name'] as String? ?? '').trim();
+      final skillHash = (skill['skill_hash'] as String? ?? '').trim();
+      final skillPath = (skill['skill_path'] as String? ?? '').trim();
+      final key = skillPath.isNotEmpty
+          ? 'path:${skillPath.toLowerCase()}'
+          : 'fallback:${skillName.toLowerCase()}|${skillHash.toLowerCase()}';
+
+      final issueList = (skill['issues'] as List<String>? ?? const <String>[])
+          .where((issue) => issue.trim().isNotEmpty)
+          .toList();
+      final rawIssueCount = (skill['issue_count'] as num?)?.toInt() ?? 0;
+      final normalizedIssueCount = rawIssueCount > 0
+          ? rawIssueCount
+          : issueList.length;
+
+      final existed = merged[key];
+      if (existed == null) {
+        final newSkill = Map<String, dynamic>.from(skill);
+        newSkill['issues'] = issueList.toSet().toList();
+        newSkill['issue_count'] = normalizedIssueCount;
+        merged[key] = newSkill;
+        continue;
+      }
+
+      final existedIssues =
+          (existed['issues'] as List<String>? ?? const <String>[]).toSet();
+      existedIssues.addAll(issueList);
+      existed['issues'] = existedIssues.toList();
+      final mergedIssueCount = (existed['issue_count'] as num?)?.toInt() ?? 0;
+      final dedupIssueCount = existedIssues.length;
+      final nextIssueCount = [
+        mergedIssueCount,
+        normalizedIssueCount,
+        dedupIssueCount,
+      ].reduce((a, b) => a > b ? a : b);
+      existed['issue_count'] = nextIssueCount;
+    }
+    return merged.values.toList();
+  }
+
+  /// 为历史扫描结果中的技能风险补齐删除所需参数（skillHash/skillPath）。
+  Future<List<RiskInfo>> _enrichLegacySkillRisksFromDatabase(
+    List<RiskInfo> legacySkillRisks,
+  ) async {
+    final riskySkills = await getRiskySkills();
+    final skillMetaByName = <String, Map<String, String>>{};
+    for (final skill in riskySkills) {
+      final skillName = (skill['skill_name'] as String? ?? '').trim();
+      if (skillName.isEmpty) {
+        continue;
+      }
+      skillMetaByName[skillName] = {
+        'skillHash': skill['skill_hash'] as String? ?? '',
+        'skillPath': skill['skill_path'] as String? ?? '',
+      };
+    }
+
+    return legacySkillRisks.map((risk) {
+      final args = risk.args != null
+          ? Map<String, Object>.from(risk.args!)
+          : <String, Object>{};
+      final skillName = (args['skillName']?.toString() ?? '').trim();
+      if (skillName.isEmpty) {
+        return risk;
+      }
+
+      final metadata = skillMetaByName[skillName];
+      if (metadata == null) {
+        return risk;
+      }
+
+      final riskSkillHash = (args['skillHash']?.toString() ?? '').trim();
+      final riskSkillPath = (args['skillPath']?.toString() ?? '').trim();
+      if (riskSkillHash.isEmpty && (metadata['skillHash'] ?? '').isNotEmpty) {
+        args['skillHash'] = metadata['skillHash']!;
+      }
+      if (riskSkillPath.isEmpty && (metadata['skillPath'] ?? '').isNotEmpty) {
+        args['skillPath'] = metadata['skillPath']!;
+      }
+
+      return RiskInfo(
+        id: risk.id,
+        title: risk.title,
+        description: risk.description,
+        level: risk.level,
+        icon: risk.icon,
+        args: args,
+        mitigation: risk.mitigation,
+        sourcePlugin: risk.sourcePlugin,
       );
     }).toList();
   }

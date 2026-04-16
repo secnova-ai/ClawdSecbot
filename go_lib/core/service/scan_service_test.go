@@ -100,6 +100,8 @@ func TestGetScannedSkillHashes(t *testing.T) {
 	SaveSkillScanResult(`{
 		"skill_name": "test-skill",
 		"skill_hash": "hash123",
+		"skill_path": "/tmp/test-skill",
+		"source_plugin": "openclaw",
 		"safe": true,
 		"issues": []
 	}`)
@@ -203,7 +205,7 @@ func TestGetSkillScanByHash(t *testing.T) {
 	}
 }
 
-// TestDeleteSkillScan 验证删除技能扫描记录
+// TestDeleteSkillScan 验证删除技能扫描记录（软删除）
 func TestDeleteSkillScan(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
@@ -215,15 +217,19 @@ func TestDeleteSkillScan(t *testing.T) {
 		"issues": []
 	}`)
 
-	result := DeleteSkillScan("to-delete")
+	result := DeleteSkillScan("del_hash")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
 
-	// 验证已删除
+	// 验证记录仍可查询，且带删除标记
 	check := GetSkillScanByHash("del_hash")
-	if check["data"] != nil {
-		t.Error("Expected nil data after deletion")
+	data, ok := check["data"].(*repository.SkillScanRecord)
+	if !ok || data == nil {
+		t.Fatalf("Expected SkillScanRecord after soft delete, got %T", check["data"])
+	}
+	if data.DeletedAt == "" {
+		t.Error("Expected deleted_at to be populated after soft delete")
 	}
 }
 
@@ -235,6 +241,7 @@ func TestGetRiskySkills(t *testing.T) {
 	// 保存一个安全的和一个有风险的
 	SaveSkillScanResult(`{"skill_name": "safe-skill", "skill_hash": "safe1", "safe": true, "issues": []}`)
 	SaveSkillScanResult(`{"skill_name": "risky-skill", "skill_hash": "risky1", "safe": false, "issues": ["danger"]}`)
+	DeleteSkillScan("risky1")
 
 	result := GetRiskySkills()
 	if result["success"] != true {
@@ -245,8 +252,8 @@ func TestGetRiskySkills(t *testing.T) {
 	dataJSON, _ := json.Marshal(result["data"])
 	var records []map[string]interface{}
 	json.Unmarshal(dataJSON, &records)
-	if len(records) != 1 {
-		t.Errorf("Expected 1 risky skill, got %d", len(records))
+	if len(records) != 0 {
+		t.Errorf("Expected deleted risky skill to be excluded, got %d", len(records))
 	}
 }
 
@@ -259,7 +266,7 @@ func TestGetAllSkillScans(t *testing.T) {
 	SaveSkillScanResult(`{"skill_name": "safe-skill", "skill_hash": "hash_s", "safe": true, "issues": []}`)
 	SaveSkillScanResult(`{"skill_name": "risky-skill", "skill_hash": "hash_r", "safe": false, "issues": ["danger"]}`)
 	SaveSkillScanResult(`{"skill_name": "trusted-skill", "skill_hash": "hash_t", "safe": false, "issues": ["known-issue"]}`)
-	TrustSkill("trusted-skill")
+	TrustSkill("hash_t")
 
 	result := GetAllSkillScans()
 	if result["success"] != true {

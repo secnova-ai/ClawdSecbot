@@ -253,8 +253,8 @@ func GetSkillScanByHash(hashC *C.char) *C.char {
 }
 
 //export DeleteSkillScanFFI
-func DeleteSkillScanFFI(skillNameC *C.char) *C.char {
-	return jsonToCString(service.DeleteSkillScan(C.GoString(skillNameC)))
+func DeleteSkillScanFFI(skillHashC *C.char) *C.char {
+	return jsonToCString(service.DeleteSkillScan(C.GoString(skillHashC)))
 }
 
 //export GetRiskySkills
@@ -263,8 +263,8 @@ func GetRiskySkills() *C.char {
 }
 
 //export TrustSkillScan
-func TrustSkillScan(skillNameC *C.char) *C.char {
-	return jsonToCString(service.TrustSkill(C.GoString(skillNameC)))
+func TrustSkillScan(skillHashC *C.char) *C.char {
+	return jsonToCString(service.TrustSkill(C.GoString(skillHashC)))
 }
 
 //export GetAllSkillScansFFI

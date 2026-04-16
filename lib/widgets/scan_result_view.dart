@@ -11,29 +11,37 @@ import '../services/app_settings_database_service.dart';
 import '../utils/app_fonts.dart';
 import 'bot_icon_picker_dialog.dart';
 
+enum RescanAction { securityDiscovery, fullScan }
+
 /// 扫描结果展示组件
 /// 用于展示扫描完成后的资产列表和风险信息
 class ScanResultView extends StatelessWidget {
   final ScanResult result;
   final Set<String> protectedAssets;
   final bool isRestoringProtection;
+  final RescanAction selectedRescanAction;
+  final ValueChanged<RescanAction> onRescanActionChanged;
   final VoidCallback onRescan;
   final VoidCallback onViewSkillScanResults;
   final void Function(Asset asset, {required bool isEditMode})
   onShowProtectionConfig;
   final void Function(Asset asset) onShowProtectionMonitor;
   final void Function(RiskInfo risk) onShowMitigation;
+  final Future<void> Function(RiskInfo risk) onDeleteRiskSkill;
 
   const ScanResultView({
     super.key,
     required this.result,
     required this.protectedAssets,
     required this.isRestoringProtection,
+    required this.selectedRescanAction,
+    required this.onRescanActionChanged,
     required this.onRescan,
     required this.onViewSkillScanResults,
     required this.onShowProtectionConfig,
     required this.onShowProtectionMonitor,
     required this.onShowMitigation,
+    required this.onDeleteRiskSkill,
   });
 
   @override
@@ -47,7 +55,7 @@ class ScanResultView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 扫描完成标题
+          // 扫描完成标题（始终同一行，窄屏时右侧操作区自适应缩放）
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -64,97 +72,37 @@ class ScanResultView extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n.scanComplete,
-                    style: AppFonts.inter(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  ),
-                  if (scannedAtText != null) ...[
-                    const SizedBox(height: 4),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      l10n.lastScanTime(scannedAtText),
+                      l10n.scanComplete,
                       style: AppFonts.inter(
-                        fontSize: 11,
-                        color: Colors.white38,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
                       ),
                     ),
+                    if (scannedAtText != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        l10n.lastScanTime(scannedAtText),
+                        style: AppFonts.inter(
+                          fontSize: 11,
+                          color: Colors.white38,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
-              const Spacer(),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: onViewSkillScanResults,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          LucideIcons.fileSearch,
-                          color: Colors.white70,
-                          size: 14,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          l10n.viewSkillScanResults,
-                          style: AppFonts.inter(
-                            fontSize: 12,
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
               ),
-              const SizedBox(width: 8),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: onRescan,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          LucideIcons.refreshCw,
-                          color: Colors.white70,
-                          size: 14,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          l10n.rescan,
-                          style: AppFonts.inter(
-                            fontSize: 12,
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+              const SizedBox(width: 12),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: _buildHeaderActions(l10n),
                 ),
               ),
             ],
@@ -281,6 +229,128 @@ class ScanResultView extends StatelessWidget {
     );
   }
 
+  /// 构建标题区域的右侧操作按钮组（保持单行布局）。
+  Widget _buildHeaderActions(AppLocalizations l10n) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: onViewSkillScanResults,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    LucideIcons.fileSearch,
+                    color: Colors.white70,
+                    size: 14,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    l10n.viewSkillScanResults,
+                    style: AppFonts.inter(fontSize: 12, color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: onRescan,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          LucideIcons.refreshCw,
+                          color: Colors.white70,
+                          size: 14,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          l10n.rescan,
+                          style: AppFonts.inter(
+                            fontSize: 12,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Container(
+                width: 1,
+                height: 16,
+                color: Colors.white.withValues(alpha: 0.22),
+              ),
+              PopupMenuButton<RescanAction>(
+                tooltip: '',
+                onSelected: onRescanActionChanged,
+                color: const Color(0xFF1F2937),
+                elevation: 10,
+                offset: const Offset(0, 40),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
+                ),
+                itemBuilder: (context) => [
+                  PopupMenuItem<RescanAction>(
+                    value: RescanAction.securityDiscovery,
+                    height: 40,
+                    child: _buildRescanMenuItem(
+                      text: l10n.rescanSecurityDiscovery,
+                      selected:
+                          selectedRescanAction == RescanAction.securityDiscovery,
+                    ),
+                  ),
+                  PopupMenuItem<RescanAction>(
+                    value: RescanAction.fullScan,
+                    height: 40,
+                    child: _buildRescanMenuItem(
+                      text: l10n.rescanAll,
+                      selected: selectedRescanAction == RescanAction.fullScan,
+                    ),
+                  ),
+                ],
+                child: const Padding(
+                  padding: EdgeInsets.fromLTRB(8, 6, 8, 6),
+                  child: Icon(
+                    LucideIcons.chevronDown,
+                    color: Colors.white70,
+                    size: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildRiskCard(
     BuildContext context,
     RiskInfo risk,
@@ -355,23 +425,42 @@ class ScanResultView extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                if (risk.mitigation != null)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: ElevatedButton.icon(
-                      onPressed: () => onShowMitigation(risk),
-                      icon: const Icon(LucideIcons.wrench, size: 14),
-                      label: Text(l10n.mitigate),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF6366F1),
-                        foregroundColor: Colors.white,
-                        textStyle: AppFonts.inter(fontSize: 12),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
+                if (risk.mitigation != null || _canDeleteRiskSkill(risk))
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (risk.mitigation != null)
+                        ElevatedButton.icon(
+                          onPressed: () => onShowMitigation(risk),
+                          icon: const Icon(LucideIcons.wrench, size: 14),
+                          label: Text(l10n.mitigate),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF6366F1),
+                            foregroundColor: Colors.white,
+                            textStyle: AppFonts.inter(fontSize: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
+                      if (_canDeleteRiskSkill(risk))
+                        ElevatedButton.icon(
+                          onPressed: () => onDeleteRiskSkill(risk),
+                          icon: const Icon(LucideIcons.trash2, size: 14),
+                          label: Text(l10n.deleteRiskSkill),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFEF4444),
+                            foregroundColor: Colors.white,
+                            textStyle: AppFonts.inter(fontSize: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
               ],
             ),
@@ -379,6 +468,42 @@ class ScanResultView extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  bool _canDeleteRiskSkill(RiskInfo risk) {
+    return risk.id == 'riskSkillSecurityIssue';
+  }
+
+  /// 构建重新扫描下拉菜单项
+  Widget _buildRescanMenuItem({required String text, required bool selected}) {
+    return Row(
+      children: [
+        Icon(
+          selected ? LucideIcons.checkCircle2 : LucideIcons.circle,
+          size: 14,
+          color: selected ? const Color(0xFF6366F1) : Colors.white38,
+        ),
+        const SizedBox(width: 8),
+        Text(
+          text,
+          style: AppFonts.inter(
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            color: selected ? Colors.white : Colors.white70,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 返回当前重新扫描模式标签
+  String _rescanActionLabel(AppLocalizations l10n, RescanAction action) {
+    switch (action) {
+      case RescanAction.securityDiscovery:
+        return l10n.rescanSecurityDiscovery;
+      case RescanAction.fullScan:
+        return l10n.rescanAll;
+    }
   }
 
   String _getRiskTitle(RiskInfo risk, AppLocalizations l10n) {

@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../config/build_config.dart';
 import '../l10n/app_localizations.dart';
+import '../models/asset_model.dart';
 import '../models/risk_model.dart';
 import 'plugin_service.dart';
 import 'scan_database_service.dart';
@@ -64,6 +65,32 @@ class BotScanner {
     );
   }
 
+  Future<ScanResult> rediscoverSecurityFindings({
+    required List<Asset> assets,
+    required bool configFound,
+    String? configPath,
+    Map<String, dynamic>? config,
+  }) async {
+    _log('Refreshing security findings...');
+    await Future.delayed(const Duration(milliseconds: 150));
+
+    final baseRisks = await _pluginService.assessRisksOnly();
+    _log('Found ${baseRisks.length} potential issues.');
+
+    _checkSystemRisks(baseRisks);
+    final skillRisks = await _loadRiskySkills();
+
+    return ScanResult(
+      config: config,
+      riskInfo: baseRisks,
+      skillResult: skillRisks,
+      configFound: configFound,
+      configPath: configPath,
+      assets: assets,
+      scannedAt: DateTime.now(),
+    );
+  }
+
   void _checkSystemRisks(List<RiskInfo> risks) {
     if (BuildConfig.isAppStore) {
       _log('Skipping system risk checks (App Store build)');
@@ -100,21 +127,29 @@ class BotScanner {
 
     try {
       final riskySkills = await ScanDatabaseService().getRiskySkills();
-      for (final skill in riskySkills) {
+      final mergedRiskySkills = _mergeRiskySkillsByPath(riskySkills);
+      for (final skill in mergedRiskySkills) {
         final skillName = skill['skill_name'] as String;
         final issues = skill['issues'] as List<String>;
-        final issueCount = issues.length;
+        final persistedIssueCount = (skill['issue_count'] as num?)?.toInt() ?? 0;
+        final issueCount = persistedIssueCount > issues.length
+            ? persistedIssueCount
+            : issues.length;
+        final normalizedIssueCount = issueCount > 0 ? issueCount : 1;
         final title = _l10n != null
             ? _l10n!.riskSkillSecurityIssue(skillName)
             : 'Risky Skill: $skillName';
         final description = _l10n != null
-            ? (issueCount > 0
-                  ? _l10n!.riskSkillSecurityIssueDesc(skillName, issueCount)
+            ? (normalizedIssueCount > 0
+                  ? _l10n!.riskSkillSecurityIssueDesc(
+                      skillName,
+                      normalizedIssueCount,
+                    )
                   : (_l10n!.localeName.startsWith('zh')
                         ? '技能 "$skillName" 存在安全风险。建议删除此技能。'
                         : 'Skill "$skillName" is risky. Consider deleting it.'))
-            : (issueCount > 0
-                  ? 'Skill "$skillName" has $issueCount security issue(s): ${issues.join("; ")}'
+            : (normalizedIssueCount > 0
+                  ? 'Skill "$skillName" has $normalizedIssueCount security issue(s): ${issues.join("; ")}'
                   : 'Skill "$skillName" was flagged as potentially risky.');
 
         risks.add(
@@ -122,7 +157,8 @@ class BotScanner {
             id: 'riskSkillSecurityIssue',
             args: {
               'skillName': skillName,
-              'issueCount': issueCount,
+              'skillHash': skill['skill_hash'] as String? ?? '',
+              'issueCount': normalizedIssueCount,
               'issues': issues.join('; '),
               if ((skill['skill_path'] as String? ?? '').isNotEmpty)
                 'skillPath': skill['skill_path'] as String,
@@ -133,13 +169,58 @@ class BotScanner {
             icon: LucideIcons.alertTriangle,
           ),
         );
-        _log('Found risky skill: $skillName ($issueCount issues)');
+        _log('Found risky skill: $skillName ($normalizedIssueCount issues)');
       }
     } catch (e) {
       _log('Failed to check risky skills: $e');
     }
 
     return risks;
+  }
+
+  /// 按 skill_path 去重并合并问题，避免风险技能重复展示。
+  List<Map<String, dynamic>> _mergeRiskySkillsByPath(
+    List<Map<String, dynamic>> riskySkills,
+  ) {
+    final merged = <String, Map<String, dynamic>>{};
+    for (final skill in riskySkills) {
+      final skillName = (skill['skill_name'] as String? ?? '').trim();
+      final skillHash = (skill['skill_hash'] as String? ?? '').trim();
+      final skillPath = (skill['skill_path'] as String? ?? '').trim();
+      final key = skillPath.isNotEmpty
+          ? 'path:${skillPath.toLowerCase()}'
+          : 'fallback:${skillName.toLowerCase()}|${skillHash.toLowerCase()}';
+      final issues = (skill['issues'] as List<String>? ?? const <String>[])
+          .where((issue) => issue.trim().isNotEmpty)
+          .toList();
+      final rawIssueCount = (skill['issue_count'] as num?)?.toInt() ?? 0;
+      final normalizedIssueCount = rawIssueCount > 0
+          ? rawIssueCount
+          : issues.length;
+
+      final existed = merged[key];
+      if (existed == null) {
+        final newSkill = Map<String, dynamic>.from(skill);
+        newSkill['issues'] = issues.toSet().toList();
+        newSkill['issue_count'] = normalizedIssueCount;
+        merged[key] = newSkill;
+        continue;
+      }
+
+      final existedIssues =
+          (existed['issues'] as List<String>? ?? const <String>[]).toSet();
+      existedIssues.addAll(issues);
+      existed['issues'] = existedIssues.toList();
+      final mergedIssueCount = (existed['issue_count'] as num?)?.toInt() ?? 0;
+      final dedupIssueCount = existedIssues.length;
+      final nextIssueCount = [
+        mergedIssueCount,
+        normalizedIssueCount,
+        dedupIssueCount,
+      ].reduce((a, b) => a > b ? a : b);
+      existed['issue_count'] = nextIssueCount;
+    }
+    return merged.values.toList();
   }
 
   RiskLevel _parseSkillRiskLevel(String? level) {

@@ -6,6 +6,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../models/skill_scan_result_model.dart';
 import '../services/skill_security_analyzer_service.dart';
 import '../l10n/app_localizations.dart';
+import '../utils/app_logger.dart';
 
 class SkillScanDialog extends StatefulWidget {
   const SkillScanDialog({super.key});
@@ -36,6 +37,8 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
   final Map<String, String> _failedSkills = {};
   // Record skill paths for delete operation
   final Map<String, String> _skillPaths = {};
+  // Record skill hashes for trust/delete operation
+  final Map<String, String> _skillHashes = {};
   // Track which skill cards have expanded issues
   final Set<String> _expandedSkills = {};
 
@@ -139,8 +142,13 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
           _skillPaths[skillName] = skillPath;
 
           if (data['success'] == true && data['result'] != null) {
+            final resultMap = data['result'] as Map<String, dynamic>;
+            final skillHash = resultMap['skill_hash'] as String? ?? '';
+            if (skillHash.isNotEmpty) {
+              _skillHashes[skillName] = skillHash;
+            }
             final analysisResult = SkillAnalysisResult.fromJson(
-              data['result'] as Map<String, dynamic>,
+              resultMap,
             );
             _results[skillName] = analysisResult;
           } else if (data['error'] != null) {
@@ -174,17 +182,53 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
 
   Future<void> _deleteSkill(String skillName) async {
     final skillPath = _skillPaths[skillName];
-    if (skillPath == null || skillPath.isEmpty) return;
-    final success = await _service.deleteSkill(skillPath);
-    if (success) {
+    final skillHash = _skillHashes[skillName];
+    if (skillPath == null ||
+        skillPath.isEmpty ||
+        skillHash == null ||
+        skillHash.isEmpty) {
+      appLogger.warning(
+        '[SkillScanDialog] Missing skillPath/skillHash for delete: skill=$skillName, hasPath=${(skillPath ?? '').isNotEmpty}, hasHash=${(skillHash ?? '').isNotEmpty}',
+      );
+      if (mounted) {
+        final l10n = AppLocalizations.of(context)!;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l10n.deleteRiskSkillUnavailable)));
+      }
+      return;
+    }
+    final deleteResult = await _service.deleteSkill(
+      skillPath: skillPath,
+      skillHash: skillHash,
+    );
+    if (deleteResult.success) {
       setState(() {
         _deleteConfirmed[skillName] = true;
       });
+      if (mounted && deleteResult.alreadyMissing) {
+        final l10n = AppLocalizations.of(context)!;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(
+          SnackBar(content: Text(l10n.deleteRiskSkillAlreadyMissing)),
+        );
+      }
+      return;
+    }
+
+    if (mounted) {
+      final l10n = AppLocalizations.of(context)!;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.skillScanFailed)));
     }
   }
 
   Future<void> _trustSkill(String skillName) async {
-    final success = await _service.trustSkill(skillName);
+    final skillHash = _skillHashes[skillName];
+    if (skillHash == null || skillHash.isEmpty) return;
+    final success = await _service.trustSkill(skillHash);
     if (success) {
       setState(() {
         _trustConfirmed[skillName] = true;

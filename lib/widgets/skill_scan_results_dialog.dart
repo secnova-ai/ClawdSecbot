@@ -135,6 +135,7 @@ class _SkillScanResultsDialogState extends State<SkillScanResultsDialog> {
     final skillName = record['skill_name'] as String? ?? '';
     final safe = record['safe'] as bool? ?? false;
     final trusted = record['trusted'] as bool? ?? false;
+    final deleted = record['deleted'] as bool? ?? false;
     final riskLevel = record['risk_level'] as String? ?? '';
     final scannedAt = record['scanned_at'] as String? ?? '';
     final issues = record['issues'] as List<String>? ?? [];
@@ -149,7 +150,11 @@ class _SkillScanResultsDialogState extends State<SkillScanResultsDialog> {
     IconData statusIcon;
     String statusText;
 
-    if (trusted) {
+    if (deleted) {
+      statusColor = const Color(0xFF9CA3AF);
+      statusIcon = LucideIcons.trash2;
+      statusText = l10n.localeName.startsWith('zh') ? '已删除' : 'Deleted';
+    } else if (trusted) {
       statusColor = const Color(0xFF3B82F6);
       statusIcon = LucideIcons.shieldCheck;
       statusText = l10n.skillScanTrusted;

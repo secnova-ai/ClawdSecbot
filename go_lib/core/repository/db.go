@@ -464,7 +464,8 @@ func createAssetTables(db *sql.DB) error {
 			safe INTEGER NOT NULL,
 			issues TEXT,
 			trusted INTEGER NOT NULL DEFAULT 0,
-			risk_level TEXT
+			risk_level TEXT,
+			deleted_at TEXT NOT NULL DEFAULT ''
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create skill_scans table: %w", err)
@@ -476,6 +477,7 @@ func createAssetTables(db *sql.DB) error {
 	addColumnSafe(db, "skill_scans", "skill_path", "TEXT NOT NULL DEFAULT ''")
 	addColumnSafe(db, "skill_scans", "source_plugin", "TEXT NOT NULL DEFAULT ''")
 	addColumnSafe(db, "skill_scans", "asset_id", "TEXT NOT NULL DEFAULT ''")
+	addColumnSafe(db, "skill_scans", "deleted_at", "TEXT NOT NULL DEFAULT ''")
 
 	logging.Info("Asset tables created/verified successfully")
 	return nil
