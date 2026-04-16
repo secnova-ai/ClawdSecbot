@@ -586,6 +586,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get modelConfigTesting => '测试连接中...';
 
   @override
+  String get modelConfigValidateConnection => '验证连通性';
+
+  @override
+  String get modelConfigTestSuccess => '连通性验证通过';
+
+  @override
   String get modelConfigSaving => '保存中...';
 
   @override

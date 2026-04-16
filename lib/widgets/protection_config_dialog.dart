@@ -210,6 +210,16 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     return BuildConfig.isAppStore ? 2 : 3;
   }
 
+  /// 绑定 TabController 监听，确保底部按钮区随标签切换刷新。
+  void _attachTabControllerListener() {
+    _tabController.addListener(() {
+      if (!mounted || _tabController.indexIsChanging) {
+        return;
+      }
+      setState(() {});
+    });
+  }
+
   void _updateTabControllerForRequirement(bool requiresBotModelConfig) {
     final expectedLength = _tabCountFor(requiresBotModelConfig);
     if (_requiresBotModelConfig == requiresBotModelConfig &&
@@ -234,6 +244,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       vsync: this,
       initialIndex: nextIndex,
     );
+    _attachTabControllerListener();
 
     // Delay old controller disposal until widgets have switched to the new
     // controller, otherwise TabBar/TabBarView may still hold dependents.
@@ -247,6 +258,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     super.initState();
     // 默认按“需要 bot 模型配置”初始化，加载配置后再按插件能力动态调整。
     _tabController = TabController(length: _tabCount, vsync: this);
+    _attachTabControllerListener();
     _loadConfig();
   }
 
@@ -450,6 +462,22 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                 child: Text(
                   AppLocalizations.of(dialogContext)!.cancel,
                   style: AppFonts.inter(color: Colors.white54),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: reuseBotConfig
+                    ? null
+                    : () async {
+                        await formKey.currentState?.validateConnection();
+                      },
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
+                  foregroundColor: Colors.white70,
+                ),
+                child: Text(
+                  AppLocalizations.of(dialogContext)!.modelConfigValidateConnection,
+                  style: AppFonts.inter(color: Colors.white70),
                 ),
               ),
               ElevatedButton(
@@ -2604,6 +2632,8 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
   }
 
   Widget _buildFooter(AppLocalizations l10n) {
+    final bool isBotTabSelected =
+        _requiresBotModelConfig && _tabController.index == (_botTabIndex ?? -1);
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
@@ -2617,6 +2647,28 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           ),
         ),
         const SizedBox(width: 12),
+        if (isBotTabSelected) ...[
+          OutlinedButton(
+            onPressed: _isSaving
+                ? null
+                : () async {
+                    await _botModelFormKey.currentState?.validateConnection();
+                  },
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
+              foregroundColor: _isSaving ? Colors.white24 : Colors.white70,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
+            child: Text(
+              l10n.modelConfigValidateConnection,
+              style: AppFonts.inter(
+                fontWeight: FontWeight.w500,
+                color: _isSaving ? Colors.white24 : Colors.white70,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+        ],
         ElevatedButton(
           onPressed: _isSaving ? null : _saveConfig,
           style: ElevatedButton.styleFrom(

@@ -28,7 +28,7 @@ class SecurityModelConfigService {
       provider: 'ollama',
       endpoint: 'http://localhost:11434',
       apiKey: '',
-      model: 'llama3',
+      model: '',
     );
   }
 
