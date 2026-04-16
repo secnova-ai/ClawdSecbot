@@ -290,8 +290,8 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       _dailyDisplayController.text = dailyText;
       _dailyUnit = dailyUnit;
 
-      // 路径权限
-      _pathMode = _config.pathPermission.mode;
+      // 路径权限：前端仅保留黑名单模式
+      _pathMode = PermissionMode.blacklist;
       _pathList.clear();
       _pathList.addAll(_config.pathPermission.paths);
 
@@ -304,8 +304,8 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       _networkInboundList.clear();
       _networkInboundList.addAll(_config.networkPermission.inbound.addresses);
 
-      // Shell权限
-      _shellMode = _config.shellPermission.mode;
+      // Shell权限：前端仅保留黑名单模式
+      _shellMode = PermissionMode.blacklist;
       _shellList.clear();
       _shellList.addAll(_config.shellPermission.commands);
 
@@ -591,7 +591,8 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           _dailyUnit,
         ),
         pathPermission: PathPermissionConfig(
-          mode: _pathMode,
+          // 路径权限前端固定黑名单，避免继续保存白名单配置。
+          mode: PermissionMode.blacklist,
           paths: List.from(_pathList),
         ),
         networkPermission: NetworkPermissionConfig(
@@ -605,7 +606,8 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           ),
         ),
         shellPermission: ShellPermissionConfig(
-          mode: _shellMode,
+          // Shell 权限前端固定黑名单，避免继续保存白名单配置。
+          mode: PermissionMode.blacklist,
           commands: List.from(_shellList),
         ),
       );
@@ -1555,10 +1557,11 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                     desc: l10n.pathPermissionDesc,
                     icon: LucideIcons.folder,
                     mode: _pathMode,
-                    onModeChanged: (mode) => setState(() => _pathMode = mode),
+                    onModeChanged: (_) {},
                     items: _pathList,
                     inputController: _pathInputController,
                     inputHint: l10n.pathPermissionPlaceholder,
+                    enableWhitelistMode: false,
                     onAdd: () {
                       final path = _pathInputController.text.trim();
                       if (path.isNotEmpty && !_pathList.contains(path)) {
@@ -1582,10 +1585,11 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                     desc: l10n.shellPermissionDesc,
                     icon: LucideIcons.terminal,
                     mode: _shellMode,
-                    onModeChanged: (mode) => setState(() => _shellMode = mode),
+                    onModeChanged: (_) {},
                     items: _shellList,
                     inputController: _shellInputController,
                     inputHint: l10n.shellPermissionPlaceholder,
+                    enableWhitelistMode: false,
                     onAdd: () {
                       final cmd = _shellInputController.text.trim();
                       if (cmd.isNotEmpty && !_shellList.contains(cmd)) {
@@ -1702,6 +1706,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     required VoidCallback onAdd,
     required Function(int) onRemove,
     VoidCallback? onBrowse,
+    bool enableWhitelistMode = true,
   }) {
     final l10n = AppLocalizations.of(context)!;
 
@@ -1745,23 +1750,32 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           ),
           const SizedBox(height: 12),
 
-          // 黑白名单切换
-          Row(
-            children: [
-              _buildModeButton(
-                label: l10n.blacklistMode,
-                isSelected: mode == PermissionMode.blacklist,
-                onTap: () => onModeChanged(PermissionMode.blacklist),
-              ),
-              const SizedBox(width: 8),
-              _buildModeButton(
-                label: l10n.whitelistMode,
-                isSelected: mode == PermissionMode.whitelist,
-                onTap: () => onModeChanged(PermissionMode.whitelist),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
+          // 路径和 Shell 权限暂时仅支持黑名单模式。
+          if (enableWhitelistMode) ...[
+            Row(
+              children: [
+                _buildModeButton(
+                  label: l10n.blacklistMode,
+                  isSelected: mode == PermissionMode.blacklist,
+                  onTap: () => onModeChanged(PermissionMode.blacklist),
+                ),
+                const SizedBox(width: 8),
+                _buildModeButton(
+                  label: l10n.whitelistMode,
+                  isSelected: mode == PermissionMode.whitelist,
+                  onTap: () => onModeChanged(PermissionMode.whitelist),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ] else ...[
+            _buildModeButton(
+              label: l10n.blacklistMode,
+              isSelected: true,
+              onTap: () => onModeChanged(PermissionMode.blacklist),
+            ),
+            const SizedBox(height: 12),
+          ],
 
           // 输入框
           Row(
