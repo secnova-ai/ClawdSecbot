@@ -100,6 +100,8 @@ func TestGetScannedSkillHashes(t *testing.T) {
 	SaveSkillScanResult(`{
 		"skill_name": "test-skill",
 		"skill_hash": "hash123",
+		"skill_path": "/tmp/test-skill",
+		"source_plugin": "openclaw",
 		"safe": true,
 		"issues": []
 	}`)

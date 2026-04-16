@@ -114,9 +114,28 @@ func TestSkillSecurityScanRepository_GetScannedHashes(t *testing.T) {
 
 	// 保存多条记录
 	skills := []SkillScanRecord{
-		{SkillName: "skill-1", SkillHash: "hash1", Safe: true},
-		{SkillName: "skill-2", SkillHash: "hash2", Safe: false, Issues: []string{"issue"}},
-		{SkillName: "skill-3", SkillHash: "hash3", Safe: true},
+		{
+			SkillName:    "skill-1",
+			SkillHash:    "hash1",
+			SkillPath:    "/tmp/skill-1",
+			SourcePlugin: "openclaw",
+			Safe:         true,
+		},
+		{
+			SkillName:    "skill-2",
+			SkillHash:    "hash2",
+			SkillPath:    "/tmp/skill-2",
+			SourcePlugin: "openclaw",
+			Safe:         false,
+			Issues:       []string{"issue"},
+		},
+		{
+			SkillName:    "skill-3",
+			SkillHash:    "hash3",
+			SkillPath:    "/tmp/skill-3",
+			SourcePlugin: "openclaw",
+			Safe:         true,
+		},
 	}
 	for _, s := range skills {
 		if err := repo.SaveSkillScanResult(&s); err != nil {
@@ -278,9 +297,11 @@ func TestSkillSecurityScanRepository_UpsertOnConflict(t *testing.T) {
 
 	// 首次保存 - 安全
 	err := repo.SaveSkillScanResult(&SkillScanRecord{
-		SkillName: "skill-v1",
-		SkillHash: "same-hash",
-		Safe:      true,
+		SkillName:    "skill-v1",
+		SkillHash:    "same-hash",
+		SkillPath:    "/tmp/same-hash",
+		SourcePlugin: "openclaw",
+		Safe:         true,
 	})
 	if err != nil {
 		t.Fatalf("First save failed: %v", err)
@@ -288,10 +309,12 @@ func TestSkillSecurityScanRepository_UpsertOnConflict(t *testing.T) {
 
 	// 再次保存相同哈希 - 有风险
 	err = repo.SaveSkillScanResult(&SkillScanRecord{
-		SkillName: "skill-v1",
-		SkillHash: "same-hash",
-		Safe:      false,
-		Issues:    []string{"new issue found"},
+		SkillName:    "skill-v1",
+		SkillHash:    "same-hash",
+		SkillPath:    "/tmp/same-hash",
+		SourcePlugin: "openclaw",
+		Safe:         false,
+		Issues:       []string{"new issue found"},
 	})
 	if err != nil {
 		t.Fatalf("Upsert failed: %v", err)
