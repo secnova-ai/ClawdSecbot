@@ -10,14 +10,22 @@ NC='\033[0m'
 
 PACKAGE_NAME="clawdsecbot"
 APP_DISPLAY_NAME="ClawdSecbot"
+DESKTOP_TARGET="desktop"
+WEB_TARGET="web"
+WEB_PACKAGE_NAME="${PACKAGE_NAME}-web"
+WEB_EXECUTABLE_NAME="botsec_webd"
+WEB_LAUNCHER_NAME="${PACKAGE_NAME}-web"
 DEFAULT_VERSION="1.0.0"
 DEFAULT_BUILD_NUMBER="$(date +"%Y%m%d%H%M")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 WORK_DIR="$PROJECT_ROOT/build/linux_packaging"
 ROOTFS_DIR="$WORK_DIR/rootfs"
+WEB_ROOTFS_DIR="$WORK_DIR/rootfs_web"
+WEB_BUILD_DIR="$WORK_DIR/web_build"
 SOURCE_ICON="$PROJECT_ROOT/scripts/icon_1024.png"
 TRAY_ICON="$PROJECT_ROOT/images/tray_icon.png"
+WEB_BINARY_ARTIFACT=""
 
 BUILD_DEB=false
 BUILD_RPM=false
@@ -36,8 +44,8 @@ show_help() {
     cat << 'EOF'
 Usage: ./scripts/build_linux_release.sh [OPTIONS]
 
-Build Linux release packages for ClawdSecbot.
-Default behavior builds both DEB and RPM in one run.
+Build Linux release artifacts for ClawdSecbot.
+Default behavior builds desktop+web DEB/RPM in one run.
 
 Options:
   -v,  --version <X.Y.Z>     Semantic version (default: 1.0.0)
@@ -132,15 +140,29 @@ artifact_brand_segment() {
 }
 
 build_artifact_name() {
-    local extension="$1"
-    printf '%s-%s-%s-%s-%s%s.%s' \
+    local target="$1"
+    local extension="$2"
+    printf '%s-%s-%s-%s-%s-%s%s.%s' \
         "$APP_DISPLAY_NAME" \
+        "$target" \
         "$VERSION" \
         "$BUILD_NUMBER" \
         "$BUILD_ARCH" \
         "$(artifact_type_segment)" \
         "$(artifact_brand_segment)" \
         "$extension"
+}
+
+build_binary_artifact_name() {
+    local target="$1"
+    printf '%s-%s-%s-%s-%s-%s%s' \
+        "$APP_DISPLAY_NAME" \
+        "$target" \
+        "$VERSION" \
+        "$BUILD_NUMBER" \
+        "$BUILD_ARCH" \
+        "$(artifact_type_segment)" \
+        "$(artifact_brand_segment)"
 }
 
 # 校验依赖命令是否可用。
@@ -288,7 +310,34 @@ build_release_bundle() {
 
     log_info "Building flutter linux release bundle"
     flutter build linux --release --no-tree-shake-icons
-    ok "Linux release bundle built"
+
+    log_info "Building flutter web release bundle"
+    flutter build web \
+        --target lib/main_web.dart \
+        --no-tree-shake-icons \
+        --no-wasm-dry-run
+
+    log_info "Building botsec_webd binary"
+    rm -rf "$WEB_BUILD_DIR"
+    mkdir -p "$WEB_BUILD_DIR/bin"
+    (
+        cd "$PROJECT_ROOT/go_lib"
+        go build -buildvcs=false -o "$WEB_BUILD_DIR/bin/$WEB_EXECUTABLE_NAME" ./cmd/botsec_webd
+    )
+
+    ok "Desktop + Web release bundles built"
+}
+
+build_web_binary_artifact() {
+    local src_binary="$WEB_BUILD_DIR/bin/$WEB_EXECUTABLE_NAME"
+    local output_file="$PROJECT_ROOT/build/$(build_binary_artifact_name "$WEB_TARGET")"
+    [[ -f "$src_binary" ]] || fail "Web executable not found: $src_binary"
+
+    rm -f "$output_file"
+    cp "$src_binary" "$output_file"
+    chmod +x "$output_file"
+    WEB_BINARY_ARTIFACT="$output_file"
+    ok "Web executable created: $output_file"
 }
 
 # 初始化 rootfs 目录结构。
@@ -373,10 +422,152 @@ StartupWMClass=com.clawdsecbot.guard
 EOF
 }
 
+prepare_web_rootfs_layout() {
+    rm -rf "$WEB_ROOTFS_DIR"
+    mkdir -p "$WEB_ROOTFS_DIR/usr/bin"
+    mkdir -p "$WEB_ROOTFS_DIR/usr/lib/$WEB_PACKAGE_NAME"
+    mkdir -p "$WEB_ROOTFS_DIR/usr/lib/$WEB_PACKAGE_NAME/web"
+    mkdir -p "$WEB_ROOTFS_DIR/usr/lib"
+}
+
+copy_web_application_files() {
+    local web_bundle_dir="$PROJECT_ROOT/build/web"
+    local web_binary="$WEB_BUILD_DIR/bin/$WEB_EXECUTABLE_NAME"
+    local plugins_dir="$PROJECT_ROOT/plugins"
+    local preload_so="$PROJECT_ROOT/go_lib/core/sandbox/linux_hook/build/libsandbox_preload.so"
+
+    [[ -d "$web_bundle_dir" ]] || fail "Flutter web bundle not found: $web_bundle_dir"
+    [[ -f "$web_binary" ]] || fail "Web binary not found: $web_binary"
+
+    cp "$web_binary" "$WEB_ROOTFS_DIR/usr/lib/$WEB_PACKAGE_NAME/$WEB_EXECUTABLE_NAME"
+    chmod +x "$WEB_ROOTFS_DIR/usr/lib/$WEB_PACKAGE_NAME/$WEB_EXECUTABLE_NAME"
+    cp -a "$web_bundle_dir"/. "$WEB_ROOTFS_DIR/usr/lib/$WEB_PACKAGE_NAME/web/"
+
+    if [[ -d "$plugins_dir" ]]; then
+        mkdir -p "$WEB_ROOTFS_DIR/usr/lib/$WEB_PACKAGE_NAME/plugins"
+        cp -a "$plugins_dir"/. "$WEB_ROOTFS_DIR/usr/lib/$WEB_PACKAGE_NAME/plugins/"
+    fi
+
+    if [[ -f "$preload_so" ]]; then
+        cp "$preload_so" "$WEB_ROOTFS_DIR/usr/lib/libsandbox_preload.so"
+        ok "Web package includes libsandbox_preload.so at /usr/lib/libsandbox_preload.so"
+    else
+        warn "libsandbox_preload.so not found, web package will skip preload sandbox library"
+    fi
+
+    cat > "$WEB_ROOTFS_DIR/usr/bin/$WEB_LAUNCHER_NAME" << EOF
+#!/bin/bash
+if [[ -z "\${BOTSEC_WEB_STATIC_DIR:-}" ]]; then
+    export BOTSEC_WEB_STATIC_DIR="/usr/lib/$WEB_PACKAGE_NAME/web"
+fi
+exec /usr/lib/$WEB_PACKAGE_NAME/$WEB_EXECUTABLE_NAME "\$@"
+EOF
+    chmod +x "$WEB_ROOTFS_DIR/usr/bin/$WEB_LAUNCHER_NAME"
+}
+
+build_web_deb_package() {
+    local deb_work="$WORK_DIR/deb_web/${WEB_PACKAGE_NAME}_${VERSION}_${DEB_ARCH}"
+    local deb_file="$PROJECT_ROOT/build/$(build_artifact_name "$WEB_TARGET" "deb")"
+    local installed_size
+
+    log_info "Building Web DEB package"
+    rm -rf "$deb_work"
+    mkdir -p "$deb_work/DEBIAN"
+    cp -a "$WEB_ROOTFS_DIR"/. "$deb_work/"
+
+    installed_size="$(du -sk "$WEB_ROOTFS_DIR/usr" | cut -f1)"
+    cat > "$deb_work/DEBIAN/control" << EOF
+Package: $WEB_PACKAGE_NAME
+Version: $VERSION
+Section: utils
+Priority: optional
+Architecture: $DEB_ARCH
+Installed-Size: $installed_size
+Depends: libc6
+Maintainer: ClawdSecbot Team <support@clawdsecbot.com>
+Description: ClawdSecbot Web Bridge
+ ClawdSecbot Web package includes the web bridge executable and Flutter Web static assets.
+Homepage: https://github.com/clawdsecbot/bot_sec_manager
+EOF
+
+    rm -f "$deb_file"
+    dpkg-deb --build --root-owner-group "$deb_work" "$deb_file"
+    ok "Web DEB created: $deb_file"
+}
+
+build_web_rpm_package() {
+    local rpm_root="$WORK_DIR/rpm_web/rpmbuild"
+    local source_root="$WORK_DIR/rpm_web/${WEB_PACKAGE_NAME}-${VERSION}"
+    local source_tar="$rpm_root/SOURCES/${WEB_PACKAGE_NAME}-${VERSION}.tar.gz"
+    local spec_file="$rpm_root/SPECS/${WEB_PACKAGE_NAME}.spec"
+    local rpm_out_dir="$rpm_root/RPMS/$RPM_ARCH"
+    local rpm_candidates=()
+    local rpm_input
+    local rpm_file="$PROJECT_ROOT/build/$(build_artifact_name "$WEB_TARGET" "rpm")"
+
+    log_info "Building Web RPM package"
+    rm -rf "$WORK_DIR/rpm_web"
+    mkdir -p "$rpm_root/BUILD" "$rpm_root/BUILDROOT" "$rpm_root/RPMS" "$rpm_root/SOURCES" "$rpm_root/SPECS" "$rpm_root/SRPMS"
+    mkdir -p "$source_root"
+    cp -a "$WEB_ROOTFS_DIR"/. "$source_root/"
+
+    tar -czf "$source_tar" -C "$WORK_DIR/rpm_web" "${WEB_PACKAGE_NAME}-${VERSION}"
+
+    cat > "$spec_file" << EOF
+%global debug_package %{nil}
+%global _debugsource_packages 0
+
+Name:           $WEB_PACKAGE_NAME
+Version:        $VERSION
+Release:        $BUILD_NUMBER%{?dist}
+Summary:        ClawdSecbot Web Bridge
+License:        Proprietary
+URL:            https://github.com/clawdsecbot/bot_sec_manager
+BuildArch:      $RPM_ARCH
+Source0:        %{name}-%{version}.tar.gz
+
+%description
+ClawdSecbot Web package includes botsec_webd and Flutter Web static files.
+
+%prep
+%setup -q
+
+%build
+
+%install
+rm -rf %{buildroot}
+mkdir -p %{buildroot}
+cp -a * %{buildroot}/
+
+%files
+%defattr(-,root,root,-)
+/usr/bin/$WEB_LAUNCHER_NAME
+/usr/lib/$WEB_PACKAGE_NAME
+EOF
+
+    if [[ -f "$WEB_ROOTFS_DIR/usr/lib/libsandbox_preload.so" ]]; then
+        cat >> "$spec_file" << EOF
+/usr/lib/libsandbox_preload.so
+EOF
+    fi
+
+    rpmbuild -bb --target "$RPM_ARCH" --define "_topdir $rpm_root" "$spec_file"
+
+    shopt -s nullglob
+    rpm_candidates=("$rpm_out_dir"/*.rpm)
+    shopt -u nullglob
+    [[ ${#rpm_candidates[@]} -gt 0 ]] || fail "Web RPM build finished but no rpm output found in $rpm_out_dir"
+    rpm_input="${rpm_candidates[0]}"
+
+    rm -f "$rpm_file"
+    cp "$rpm_input" "$rpm_file"
+    ok "Web RPM created: $rpm_file"
+}
+
 # 生成 DEB 控制文件并打包产出 deb 文件。
 build_deb_package() {
     local deb_work="$WORK_DIR/deb/${PACKAGE_NAME}_${VERSION}_${DEB_ARCH}"
-    local deb_file="$PROJECT_ROOT/build/$(build_artifact_name "deb")"
+    local deb_file="$PROJECT_ROOT/build/$(build_artifact_name "$DESKTOP_TARGET" "deb")"
     local installed_size
 
     log_info "Building DEB package"
@@ -459,7 +650,7 @@ build_rpm_package() {
     local rpm_out_dir="$rpm_root/RPMS/$RPM_ARCH"
     local rpm_candidates=()
     local rpm_input
-    local rpm_file="$PROJECT_ROOT/build/$(build_artifact_name "rpm")"
+    local rpm_file="$PROJECT_ROOT/build/$(build_artifact_name "$DESKTOP_TARGET" "rpm")"
 
     log_info "Building RPM package"
     rm -rf "$WORK_DIR/rpm"
@@ -547,11 +738,16 @@ print_summary() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     ok "Linux release build completed"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [[ -n "$WEB_BINARY_ARTIFACT" ]]; then
+        echo "WEB BIN: $WEB_BINARY_ARTIFACT"
+    fi
     if [[ "$BUILD_DEB" == true ]]; then
-        echo "DEB: $PROJECT_ROOT/build/$(build_artifact_name "deb")"
+        echo "Desktop DEB: $PROJECT_ROOT/build/$(build_artifact_name "$DESKTOP_TARGET" "deb")"
+        echo "Web DEB:     $PROJECT_ROOT/build/$(build_artifact_name "$WEB_TARGET" "deb")"
     fi
     if [[ "$BUILD_RPM" == true ]]; then
-        echo "RPM: $PROJECT_ROOT/build/$(build_artifact_name "rpm")"
+        echo "Desktop RPM: $PROJECT_ROOT/build/$(build_artifact_name "$DESKTOP_TARGET" "rpm")"
+        echo "Web RPM:     $PROJECT_ROOT/build/$(build_artifact_name "$WEB_TARGET" "rpm")"
     fi
 }
 
@@ -563,6 +759,7 @@ main() {
     require_command flutter
     require_command cmake
     require_command sed
+    require_command go
     if [[ "$BUILD_DEB" == true ]]; then
         if command -v dpkg-deb >/dev/null 2>&1; then
             :
@@ -588,19 +785,26 @@ main() {
     echo "Architecture: deb=$DEB_ARCH rpm=$RPM_ARCH flutter=$FLUTTER_ARCH"
     echo "Build DEB: $BUILD_DEB"
     echo "Build RPM: $BUILD_RPM"
+    echo "Targets: desktop + web"
     echo ""
 
     update_pubspec_version
     build_release_bundle
+    build_web_binary_artifact
+
     prepare_rootfs_layout
     copy_application_files
     prepare_desktop_assets
+    prepare_web_rootfs_layout
+    copy_web_application_files
 
     if [[ "$BUILD_DEB" == true ]]; then
         build_deb_package
+        build_web_deb_package
     fi
     if [[ "$BUILD_RPM" == true ]]; then
         build_rpm_package
+        build_web_rpm_package
     fi
 
     print_summary
