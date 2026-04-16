@@ -1893,7 +1893,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get exitRestoreConfirm => 'Restore and Exit';
 
   @override
-  String get exitWithoutRestoreConfirm => 'Exit Without Restoring';
+  String get exitRestoreExitOnly => 'Exit Only';
 
   @override
   String get exitRestoreInProgress =>
