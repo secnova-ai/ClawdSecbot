@@ -1,0 +1,24 @@
+[
+  {
+    "code": "hermes_gateway_process_active",
+    "name": "Hermes Gateway Process Detection",
+    "life_cycle": 1,
+    "os": ["darwin", "linux", "windows"],
+    "desc": "Detects active Hermes gateway process",
+    "expression": {
+      "lang": "json_match",
+      "expr": "{\"process_keywords\": [\"hermes gateway\", \"hermes-agent\", \"hermes\"]}"
+    }
+  },
+  {
+    "code": "hermes_config_exist",
+    "name": "Hermes Config Detection",
+    "life_cycle": 2,
+    "os": ["darwin", "linux", "windows"],
+    "desc": "Detects Hermes installation via config file",
+    "expression": {
+      "lang": "json_match",
+      "expr": "{\"file_paths\": [\"~/.hermes/config.yaml\", \"~/.hermes/config.yml\", \"~/.hermes\"]}"
+    }
+  }
+]
