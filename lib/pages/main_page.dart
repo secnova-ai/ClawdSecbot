@@ -53,6 +53,13 @@ import 'mixins/main_page_version_mixin.dart';
 import 'mixins/main_page_window_mixin.dart';
 import 'mixins/main_page_data_mixin.dart';
 
+/// 退出时恢复配置弹窗的用户选择。
+enum _ExitRestoreAction {
+  cancel,
+  exitOnly,
+  restoreAndExit,
+}
+
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
 
@@ -1047,19 +1054,19 @@ class _MainPageState extends State<MainPage>
 
   Future<void> _requestAppExit() async {
     final enabledConfigs = await _loadExitTargets();
+    var restoreConfig = false;
     if (enabledConfigs.isNotEmpty) {
       await showWindow();
-      final restoreConfig = await _showExitRestoreDialog(enabledConfigs.length);
-      if (restoreConfig == null) {
+      final action = await _showExitRestoreDialog(enabledConfigs.length);
+      if (action == null || action == _ExitRestoreAction.cancel) {
         return;
       }
-      await _requestAppExitWithOptions(
-        interactive: true,
-        restoreConfig: restoreConfig,
-      );
-      return;
+      restoreConfig = action == _ExitRestoreAction.restoreAndExit;
     }
-    await _requestAppExitWithOptions(interactive: true, restoreConfig: false);
+    await _requestAppExitWithOptions(
+      interactive: true,
+      restoreConfig: restoreConfig,
+    );
   }
 
   Future<void> _requestAppExitWithOptions({
@@ -1259,9 +1266,10 @@ class _MainPageState extends State<MainPage>
     }
   }
 
-  Future<bool?> _showExitRestoreDialog(int protectedCount) {
+  /// 显示退出前恢复确认弹窗，支持仅退出不恢复。
+  Future<_ExitRestoreAction?> _showExitRestoreDialog(int protectedCount) {
     final l10n = AppLocalizations.of(context)!;
-    return showDialog<bool>(
+    return showDialog<_ExitRestoreAction>(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
@@ -1300,21 +1308,34 @@ class _MainPageState extends State<MainPage>
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () =>
+                Navigator.of(context).pop(_ExitRestoreAction.cancel),
             child: Text(
               l10n.cancel,
               style: AppFonts.inter(color: Colors.white54),
             ),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+          OutlinedButton(
+            onPressed: () =>
+                Navigator.of(context).pop(_ExitRestoreAction.exitOnly),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
+              foregroundColor: Colors.white70,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
             child: Text(
-              l10n.exitWithoutRestoreConfirm,
-              style: AppFonts.inter(color: const Color(0xFFFCA5A5)),
+              l10n.exitRestoreExitOnly,
+              style: AppFonts.inter(
+                fontWeight: FontWeight.w500,
+                color: Colors.white70,
+              ),
             ),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () =>
+                Navigator.of(context).pop(_ExitRestoreAction.restoreAndExit),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFF59E0B),
               shape: RoundedRectangleBorder(
