@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ffi' as ffi;
-import 'dart:io';
-import 'package:ffi/ffi.dart';
+import '../core_transport/transport_registry.dart';
 
 import '../models/audit_log_model.dart';
 import '../models/protection_analysis_model.dart';
@@ -11,11 +9,10 @@ import '../models/security_event_model.dart';
 import 'audit_log_database_service.dart';
 import 'message_bridge_service.dart' hide FreeStringC, FreeStringDart;
 import 'metrics_database_service.dart';
-import 'native_library_service.dart' hide FreeStringDart;
 import 'protection_database_service.dart';
-import 'protection_proxy_ffi.dart';
 import 'security_event_database_service.dart';
 import '../utils/app_logger.dart';
+import '../utils/runtime_env.dart';
 
 /// 防护监控服务：负责日志/指标/事件流、轮询、MessageBridge、统计与审计日志。
 ///
@@ -238,14 +235,8 @@ class ProtectionMonitorService {
     _dbSyncTimer = null;
   }
 
-  ffi.DynamicLibrary _getDylib() {
-    final dylib = NativeLibraryService().dylib;
-    if (dylib == null) throw Exception('Plugin library not loaded');
-    return dylib;
-  }
-
   Future<bool> enableCallbackBridge() async {
-    if (Platform.environment['BOTSEC_FORCE_FFI_POLLING'] == '1') {
+    if (getRuntimeEnv('BOTSEC_FORCE_FFI_POLLING') == '1') {
       appLogger.info('[ProtectionMonitor] Force FFI polling mode');
       return false;
     }
@@ -608,14 +599,14 @@ class ProtectionMonitorService {
         messageCount: record.messageCount,
       );
       unawaited(
-        AuditLogDatabaseService()
-            .saveAuditLogsBatch([log])
-            .catchError((Object e) {
-              appLogger.error(
-                '[ProtectionMonitor] Failed to persist completed record',
-                e,
-              );
-            }),
+        AuditLogDatabaseService().saveAuditLogsBatch([log]).catchError((
+          Object e,
+        ) {
+          appLogger.error(
+            '[ProtectionMonitor] Failed to persist completed record',
+            e,
+          );
+        }),
       );
     } catch (e) {
       appLogger.error(
@@ -648,19 +639,12 @@ class ProtectionMonitorService {
 
   Future<void> resetProxyStatistics() async {
     try {
-      final dylib = _getDylib();
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) {
+        return;
+      }
       try {
-        final resetStats = dylib
-            .lookupFunction<
-              ResetProtectionStatisticsC,
-              ResetProtectionStatisticsDart
-            >('ResetProtectionStatistics');
-        final resultPtr = resetStats();
-        final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-          'FreeString',
-        );
-        final resultStr = resultPtr.toDartString();
-        freeString(resultPtr);
+        final resultStr = transport.callRawNoArg('ResetProtectionStatistics');
         appLogger.info(
           '[ProtectionMonitor] Proxy statistics reset: $resultStr',
         );
@@ -758,22 +742,12 @@ class ProtectionMonitorService {
   void _pollProxyLogs(String sessionID) {
     if (sessionID != _proxySessionID || !_isProxyRunning) return;
     try {
-      final dylib = _getDylib();
-      final getLogs = dylib
-          .lookupFunction<GetProtectionProxyLogsC, GetProtectionProxyLogsDart>(
-            'GetProtectionProxyLogs',
-          );
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) return;
+      final resultStr = transport.callRawOneArg(
+        'GetProtectionProxyLogs',
+        sessionID,
       );
-
-      final sessionIDPtr = sessionID.toNativeUtf8();
-      final resultPtr = getLogs(sessionIDPtr);
-      malloc.free(sessionIDPtr);
-
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
-
       final result = jsonDecode(resultStr);
       if (sessionID != _proxySessionID || !_isProxyRunning) return;
 
@@ -926,17 +900,9 @@ class ProtectionMonitorService {
   /// 用于 catch-up 补漏：当回调桥偶发丢失快照时同步最新状态。
   List<TruthRecordModel> fetchAllTruthRecordSnapshots() {
     try {
-      final dylib = _getDylib();
-      final getSnapshots = dylib.lookupFunction<
-        GetAllTruthRecordSnapshotsC,
-        GetAllTruthRecordSnapshotsDart
-      >('GetAllTruthRecordSnapshots');
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-      final resultPtr = getSnapshots();
-      final resultJson = resultPtr.toDartString();
-      freeString(resultPtr);
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) return [];
+      final resultJson = transport.callRawNoArg('GetAllTruthRecordSnapshots');
 
       final decoded = jsonDecode(resultJson);
       if (decoded is! List) return [];
@@ -946,7 +912,10 @@ class ProtectionMonitorService {
           .where(_matchesTruthRecordAsset)
           .toList();
     } catch (e) {
-      appLogger.error('[ProtectionMonitor] Fetch truth record snapshots failed', e);
+      appLogger.error(
+        '[ProtectionMonitor] Fetch truth record snapshots failed',
+        e,
+      );
       return [];
     }
   }
@@ -957,15 +926,16 @@ class ProtectionMonitorService {
     bool riskOnly = false,
   }) {
     try {
-      final dylib = _getDylib();
-      final getAuditLogs = dylib
-          .lookupFunction<GetAuditLogsC, GetAuditLogsDart>('GetAuditLogs');
-      final resultPtr = getAuditLogs(limit, offset, riskOnly ? 1 : 0);
-      final resultJson = resultPtr.toDartString();
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) {
+        return AuditLogQueryResult(logs: [], total: 0);
+      }
+      final resultJson = transport.callRawThreeInts(
+        'GetAuditLogs',
+        limit,
+        offset,
+        riskOnly ? 1 : 0,
       );
-      freeString(resultPtr);
       final result = jsonDecode(resultJson) as Map<String, dynamic>;
       return AuditLogQueryResult.fromJson(result);
     } catch (e) {
@@ -976,17 +946,9 @@ class ProtectionMonitorService {
 
   Future<int> syncPendingAuditLogs() async {
     try {
-      final dylib = _getDylib();
-      final getPendingLogs = dylib
-          .lookupFunction<GetPendingAuditLogsC, GetPendingAuditLogsDart>(
-            'GetPendingAuditLogs',
-          );
-      final resultPtr = getPendingLogs();
-      final resultJson = resultPtr.toDartString();
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-      freeString(resultPtr);
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) return 0;
+      final resultJson = transport.callRawNoArg('GetPendingAuditLogs');
 
       final logsJson = jsonDecode(resultJson) as List<dynamic>;
       if (logsJson.isEmpty) return 0;
@@ -1003,16 +965,9 @@ class ProtectionMonitorService {
 
   void clearAuditLogsBuffer() {
     try {
-      final dylib = _getDylib();
-      final clearLogs = dylib
-          .lookupFunction<ClearAuditLogsC, ClearAuditLogsDart>(
-            'ClearAuditLogs',
-          );
-      final resultPtr = clearLogs();
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-      freeString(resultPtr);
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) return;
+      transport.callNoArg('ClearAuditLogs');
     } catch (e) {
       appLogger.error('[ProtectionMonitor] Clear audit logs buffer failed', e);
     }
@@ -1028,22 +983,16 @@ class ProtectionMonitorService {
     }
 
     try {
-      final dylib = _getDylib();
-      final clearLogs = dylib
-          .lookupFunction<
-            ClearAuditLogsWithFilterC,
-            ClearAuditLogsWithFilterDart
-          >('ClearAuditLogsWithFilter');
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) return;
+      transport.callOneArg(
+        'ClearAuditLogsWithFilter',
+        jsonEncode({
+          if (assetName != null && assetName.isNotEmpty)
+            'asset_name': assetName,
+          if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
+        }),
       );
-      final argPtr = jsonEncode({
-        if (assetName != null && assetName.isNotEmpty) 'asset_name': assetName,
-        if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
-      }).toNativeUtf8();
-      final resultPtr = clearLogs(argPtr);
-      freeString(resultPtr);
-      malloc.free(argPtr);
     } catch (e) {
       appLogger.error(
         '[ProtectionMonitor] Clear filtered audit logs buffer failed',
@@ -1142,18 +1091,9 @@ class ProtectionMonitorService {
   /// 从 Go 缓冲拉取待持久化的安全事件，写入 SQLite 并通知 UI 流。
   Future<int> syncPendingSecurityEvents() async {
     try {
-      final dylib = _getDylib();
-      final getPendingEvents = dylib
-          .lookupFunction<
-            GetPendingSecurityEventsC,
-            GetPendingSecurityEventsDart
-          >('GetPendingSecurityEvents');
-      final resultPtr = getPendingEvents();
-      final resultJson = resultPtr.toDartString();
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-      freeString(resultPtr);
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) return 0;
+      final resultJson = transport.callRawNoArg('GetPendingSecurityEvents');
 
       final eventsJson = jsonDecode(resultJson) as List<dynamic>;
       if (eventsJson.isEmpty) return 0;

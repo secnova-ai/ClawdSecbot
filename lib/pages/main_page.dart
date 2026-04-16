@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ffi' as ffi;
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
-import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -21,6 +19,7 @@ import '../models/asset_model.dart';
 import '../models/protection_config_model.dart';
 import '../models/risk_model.dart';
 import '../providers/locale_provider.dart';
+import '../core_transport/transport_registry.dart';
 import '../services/app_settings_database_service.dart';
 import '../services/scanner_service.dart';
 import '../services/protection_service.dart';
@@ -630,23 +629,14 @@ class _MainPageState extends State<MainPage>
     String? authorizedPath,
   }) async {
     try {
-      final dylib = NativeLibraryService().dylib;
-      final freeStr = NativeLibraryService().freeString;
-      if (dylib != null && freeStr != null) {
-        final func = dylib
-            .lookupFunction<
-              ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>),
-              ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>)
-            >('SaveHomeDirectoryPermissionFFI');
-        final jsonStr = jsonEncode({
-          'authorized': authorized,
-          'authorized_path': authorizedPath ?? '',
-        });
-        final argPtr = jsonStr.toNativeUtf8();
-        final resultPtr = func(argPtr);
-        freeStr(resultPtr);
-        malloc.free(argPtr);
-      }
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) return;
+
+      final jsonStr = jsonEncode({
+        'authorized': authorized,
+        'authorized_path': authorizedPath ?? '',
+      });
+      transport.callOneArg('SaveHomeDirectoryPermissionFFI', jsonStr);
     } catch (e) {
       appLogger.error('[MainPage] Save auth result failed', e);
     }

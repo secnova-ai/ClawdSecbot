@@ -1,42 +1,13 @@
 import 'dart:convert';
-import 'dart:ffi' as ffi;
-import 'package:ffi/ffi.dart';
+
 import 'package:flutter/material.dart';
+
+import '../core_transport/transport_registry.dart';
 import '../models/asset_model.dart';
 import '../models/risk_model.dart';
 import '../utils/app_logger.dart';
-import 'native_library_service.dart';
 
-// FFI type definitions for Go DB operations
-typedef _SaveScanResultC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef _SaveScanResultDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-
-typedef _GetLatestScanResultC = ffi.Pointer<Utf8> Function();
-typedef _GetLatestScanResultDart = ffi.Pointer<Utf8> Function();
-
-typedef _GetScannedSkillHashesC = ffi.Pointer<Utf8> Function();
-typedef _GetScannedSkillHashesDart = ffi.Pointer<Utf8> Function();
-
-typedef _SaveSkillScanResultC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef _SaveSkillScanResultDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-
-typedef _GetSkillScanByHashC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef _GetSkillScanByHashDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-
-typedef _DeleteSkillScanC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef _DeleteSkillScanDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-
-typedef _GetRiskySkillsC = ffi.Pointer<Utf8> Function();
-typedef _GetRiskySkillsDart = ffi.Pointer<Utf8> Function();
-
-typedef _GetAllSkillScansC = ffi.Pointer<Utf8> Function();
-typedef _GetAllSkillScansDart = ffi.Pointer<Utf8> Function();
-
-typedef _FreeStringDart = void Function(ffi.Pointer<Utf8>);
-
-/// 扫描结果 FFI 持久化门面：通过 FFI 委托 Go 层进行数据持久化，Flutter 不直接操作 DB。
-/// 所有操作通过 [NativeLibraryService] 获取 dylib 调用 Go 层。
+/// Scan DB facade delegated to Go layer through transport.
 class ScanDatabaseService {
   static final ScanDatabaseService _instance = ScanDatabaseService._internal();
 
@@ -44,336 +15,206 @@ class ScanDatabaseService {
 
   ScanDatabaseService._internal();
 
-  /// 从NativeLibraryService获取dylib
-  ffi.DynamicLibrary? get _dylib => NativeLibraryService().dylib;
-
-  /// 从NativeLibraryService获取FreeString函数
-  _FreeStringDart? get _freeString => NativeLibraryService().freeString;
-
-  // --- Scan Result methods ---
-
   Future<void> saveScanResult(ScanResult result) async {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) {
-      throw Exception('Native library not initialized');
+    final payload = jsonEncode({
+      'config_found': result.configFound,
+      'config_path': result.configPath,
+      'config_json': result.config != null ? jsonEncode(result.config) : null,
+      'assets': result.assets.map((a) => a.toJson()).toList(),
+      'risks': result.risks.map((r) => r.toJson()).toList(),
+      'created_at': result.scannedAt?.toUtc().toIso8601String(),
+    });
+
+    final response = _callOneArg('SaveScanResult', payload);
+    if (response['success'] == true) {
+      appLogger.info(
+        '[ScanDB] Scan result saved via Go layer, id=${response['scan_id']}',
+      );
+      return;
     }
-
-    try {
-      final saveFn = dylib
-          .lookupFunction<_SaveScanResultC, _SaveScanResultDart>(
-            'SaveScanResult',
-          );
-
-      final payload = jsonEncode({
-        'config_found': result.configFound,
-        'config_path': result.configPath,
-        'config_json': result.config != null ? jsonEncode(result.config) : null,
-        'assets': result.assets.map((a) => a.toJson()).toList(),
-        'risks': result.risks.map((r) => r.toJson()).toList(),
-        'created_at': result.scannedAt?.toUtc().toIso8601String(),
-      });
-
-      final payloadPtr = payload.toNativeUtf8();
-      final resultPtr = saveFn(payloadPtr);
-      final resultStr = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(payloadPtr);
-
-      final response = jsonDecode(resultStr);
-      if (response['success'] == true) {
-        appLogger.info(
-          '[ScanDB] Scan result saved via Go layer, id=${response['scan_id']}',
-        );
-        return;
-      }
-      throw Exception('Go save failed: ${response['error']}');
-    } catch (e) {
-      appLogger.error('[ScanDB] Failed to save scan result', e);
-      rethrow;
-    }
+    throw Exception('Go save failed: ${response['error']}');
   }
 
   Future<ScanResult?> getLatestScanResult() async {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) {
-      appLogger.warning('[ScanDB] Native library not initialized');
+    final response = _callNoArg('GetLatestScanResult');
+    if (response['success'] != true) {
+      return null;
+    }
+    if (response['data'] == null) {
       return null;
     }
 
     try {
-      final getFn = dylib
-          .lookupFunction<_GetLatestScanResultC, _GetLatestScanResultDart>(
-            'GetLatestScanResult',
-          );
+      final data = response['data'] as Map<String, dynamic>;
+      final configFound = data['config_found'] as bool? ?? false;
+      final configPath = data['config_path'] as String?;
+      final configJSON = data['config_json'] as String?;
+      final scannedAtRaw = data['created_at'] as String?;
 
-      final resultPtr = getFn();
-      final resultStr = resultPtr.toDartString();
-      _freeString!(resultPtr);
+      final assets =
+          (data['assets'] as List?)
+              ?.map((a) => Asset.fromJson(a as Map<String, dynamic>))
+              .toList() ??
+          [];
 
-      final response = jsonDecode(resultStr);
-      if (response['success'] == true) {
-        if (response['data'] == null) return null;
-
-        final data = response['data'] as Map<String, dynamic>;
-        final configFound = data['config_found'] as bool? ?? false;
-        final configPath = data['config_path'] as String?;
-        final configJSON = data['config_json'] as String?;
-        final scannedAtRaw = data['created_at'] as String?;
-
-        final assets =
-            (data['assets'] as List?)
-                ?.map((a) => Asset.fromJson(a as Map<String, dynamic>))
-                .toList() ??
-            [];
-
-        final risks = <RiskInfo>[];
-        for (final r in (data['risks'] as List?) ?? []) {
-          final riskMap = r as Map<String, dynamic>;
-          risks.add(
-            RiskInfo(
-              id: riskMap['id'] ?? 'unknown',
-              title: riskMap['title'] ?? 'Unknown Risk',
-              description: riskMap['description'] ?? '',
-              level: _parseRiskLevel(riskMap['level']),
-              icon: _getIconForRisk(riskMap['level']),
-              args: riskMap['args'] != null
-                  ? Map<String, Object>.from(riskMap['args'])
-                  : null,
-              mitigation: riskMap['mitigation'] != null
-                  ? Mitigation.fromJson(riskMap['mitigation'])
-                  : null,
-            ),
-          );
-        }
-
-        appLogger.info(
-          '[ScanDB] Loaded latest scan via Go layer: ${assets.length} assets, ${risks.length} risks',
-        );
-        return ScanResult(
-          config: configJSON != null
-              ? jsonDecode(configJSON) as Map<String, dynamic>
-              : null,
-          risks: risks,
-          configFound: configFound,
-          configPath: configPath,
-          assets: assets,
-          scannedAt: scannedAtRaw != null
-              ? DateTime.tryParse(scannedAtRaw)
-              : null,
+      final risks = <RiskInfo>[];
+      for (final r in (data['risks'] as List?) ?? const []) {
+        final riskMap = r as Map<String, dynamic>;
+        risks.add(
+          RiskInfo(
+            id: riskMap['id'] ?? 'unknown',
+            title: riskMap['title'] ?? 'Unknown Risk',
+            description: riskMap['description'] ?? '',
+            level: _parseRiskLevel(riskMap['level']),
+            icon: _getIconForRisk(riskMap['level']),
+            args: riskMap['args'] != null
+                ? Map<String, Object>.from(riskMap['args'])
+                : null,
+            mitigation: riskMap['mitigation'] != null
+                ? Mitigation.fromJson(riskMap['mitigation'])
+                : null,
+          ),
         );
       }
-      return null;
+
+      appLogger.info(
+        '[ScanDB] Loaded latest scan via Go layer: ${assets.length} assets, ${risks.length} risks',
+      );
+      return ScanResult(
+        config: configJSON != null
+            ? jsonDecode(configJSON) as Map<String, dynamic>
+            : null,
+        risks: risks,
+        configFound: configFound,
+        configPath: configPath,
+        assets: assets,
+        scannedAt: scannedAtRaw != null ? DateTime.tryParse(scannedAtRaw) : null,
+      );
     } catch (e) {
-      appLogger.error('[ScanDB] Failed to load latest scan result', e);
+      appLogger.error('[ScanDB] Failed to parse latest scan result', e);
       return null;
     }
   }
 
-  // --- Skill Scan methods ---
-
-  /// Get all scanned skill hashes
   Future<Set<String>> getScannedSkillHashes() async {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) return {};
-
-    try {
-      final getFn = dylib
-          .lookupFunction<_GetScannedSkillHashesC, _GetScannedSkillHashesDart>(
-            'GetScannedSkillHashes',
-          );
-
-      final resultPtr = getFn();
-      final resultStr = resultPtr.toDartString();
-      _freeString!(resultPtr);
-
-      final response = jsonDecode(resultStr);
-      if (response['success'] == true && response['data'] != null) {
-        return (response['data'] as List).cast<String>().toSet();
-      }
-      return {};
-    } catch (e) {
-      appLogger.error('[ScanDB] Failed to get scanned skill hashes', e);
-      return {};
+    final response = _callNoArg('GetScannedSkillHashes');
+    if (response['success'] == true && response['data'] is List) {
+      return (response['data'] as List).map((e) => e.toString()).toSet();
     }
+    return {};
   }
 
-  /// Save a skill scan result
   Future<void> saveSkillScanResult({
     required String skillName,
     required String skillHash,
     required bool safe,
     List<String>? issues,
   }) async {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) {
-      throw Exception('Native library not initialized');
-    }
-
-    try {
-      final saveFn = dylib
-          .lookupFunction<_SaveSkillScanResultC, _SaveSkillScanResultDart>(
-            'SaveSkillScanResult',
-          );
-
-      final payload = jsonEncode({
+    final response = _callOneArg(
+      'SaveSkillScanResult',
+      jsonEncode({
         'skill_name': skillName,
         'skill_hash': skillHash,
         'safe': safe,
         'issues': issues,
-      });
+      }),
+    );
 
-      final payloadPtr = payload.toNativeUtf8();
-      final resultPtr = saveFn(payloadPtr);
-      final resultStr = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(payloadPtr);
-
-      final response = jsonDecode(resultStr);
-      if (response['success'] == true) {
-        appLogger.info('[ScanDB] Skill scan saved via Go layer: $skillName');
-        return;
-      }
-      throw Exception('Failed to save skill scan: ${response['error']}');
-    } catch (e) {
-      appLogger.error('[ScanDB] Failed to save skill scan result', e);
-      rethrow;
+    if (response['success'] == true) {
+      appLogger.info('[ScanDB] Skill scan saved via Go layer: $skillName');
+      return;
     }
+    throw Exception('Failed to save skill scan: ${response['error']}');
   }
 
-  /// Get skill scan result by hash
   Future<Map<String, dynamic>?> getSkillScanByHash(String hash) async {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) return null;
-
-    try {
-      final getFn = dylib
-          .lookupFunction<_GetSkillScanByHashC, _GetSkillScanByHashDart>(
-            'GetSkillScanByHash',
-          );
-
-      final hashPtr = hash.toNativeUtf8();
-      final resultPtr = getFn(hashPtr);
-      final resultStr = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(hashPtr);
-
-      final response = jsonDecode(resultStr);
-      if (response['success'] == true) {
-        if (response['data'] == null) return null;
-        final data = response['data'] as Map<String, dynamic>;
-        return {
-          'skill_name': data['skill_name'],
-          'skill_hash': data['skill_hash'],
-          'scanned_at': data['scanned_at'],
-          'safe': data['safe'] as bool? ?? false,
-          'issues': (data['issues'] as List?)?.cast<String>() ?? <String>[],
-        };
-      }
-      return null;
-    } catch (e) {
-      appLogger.error('[ScanDB] Failed to get skill scan by hash', e);
+    final response = _callOneArg('GetSkillScanByHash', hash);
+    if (response['success'] != true || response['data'] == null) {
       return null;
     }
+    final data = response['data'] as Map<String, dynamic>;
+    return {
+      'skill_name': data['skill_name'],
+      'skill_hash': data['skill_hash'],
+      'scanned_at': data['scanned_at'],
+      'safe': data['safe'] as bool? ?? false,
+      'issues': (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
+          <String>[],
+    };
   }
 
-  /// Delete skill scan record by skill name
   Future<void> deleteSkillScan(String skillName) async {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) return;
-
-    try {
-      final deleteFn = dylib
-          .lookupFunction<_DeleteSkillScanC, _DeleteSkillScanDart>(
-            'DeleteSkillScanFFI',
-          );
-
-      final namePtr = skillName.toNativeUtf8();
-      final resultPtr = deleteFn(namePtr);
-      final resultStr = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(namePtr);
-
-      final response = jsonDecode(resultStr);
-      if (response['success'] == true) {
-        appLogger.info('[ScanDB] Skill scan deleted via Go layer: $skillName');
-      }
-    } catch (e) {
-      appLogger.error('[ScanDB] Failed to delete skill scan', e);
+    final response = _callOneArg('DeleteSkillScanFFI', skillName);
+    if (response['success'] == true) {
+      appLogger.info('[ScanDB] Skill scan deleted via Go layer: $skillName');
     }
   }
 
-  /// Get all risky (unsafe) skill scan records
   Future<List<Map<String, dynamic>>> getRiskySkills() async {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) return [];
-
-    try {
-      final getFn = dylib.lookupFunction<_GetRiskySkillsC, _GetRiskySkillsDart>(
-        'GetRiskySkills',
-      );
-
-      final resultPtr = getFn();
-      final resultStr = resultPtr.toDartString();
-      _freeString!(resultPtr);
-
-      final response = jsonDecode(resultStr);
-      if (response['success'] == true && response['data'] != null) {
-        return (response['data'] as List).map((item) {
-          final data = item as Map<String, dynamic>;
-          return {
-            'skill_name': data['skill_name'],
-            'skill_hash': data['skill_hash'],
-            'scanned_at': data['scanned_at'],
-            'safe': data['safe'] as bool? ?? false,
-            'issues': (data['issues'] as List?)?.cast<String>() ?? <String>[],
-          };
-        }).toList();
-      }
-      return [];
-    } catch (e) {
-      appLogger.error('[ScanDB] Failed to get risky skills', e);
+    final response = _callNoArg('GetRiskySkills');
+    if (response['success'] != true || response['data'] is! List) {
       return [];
     }
+
+    return (response['data'] as List).map((item) {
+      final data = item as Map<String, dynamic>;
+      return {
+        'skill_name': data['skill_name'],
+        'skill_hash': data['skill_hash'],
+        'scanned_at': data['scanned_at'],
+        'safe': data['safe'] as bool? ?? false,
+        'issues': (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
+            <String>[],
+      };
+    }).toList();
   }
 
-  /// Get all skill scan records (safe, risky, trusted)
   Future<List<Map<String, dynamic>>> getAllSkillScans() async {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) return [];
+    final response = _callNoArg('GetAllSkillScansFFI');
+    if (response['success'] != true || response['data'] is! List) {
+      return [];
+    }
 
+    return (response['data'] as List).map((item) {
+      final data = item as Map<String, dynamic>;
+      return {
+        'skill_name': data['skill_name'],
+        'skill_hash': data['skill_hash'],
+        'scanned_at': data['scanned_at'],
+        'safe': data['safe'] as bool? ?? false,
+        'risk_level': data['risk_level'] as String? ?? '',
+        'trusted': data['trusted'] as bool? ?? false,
+        'issues': (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
+            <String>[],
+      };
+    }).toList();
+  }
+
+  Map<String, dynamic> _callNoArg(String funcName) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
+      return {'success': false, 'error': 'Transport not initialized'};
+    }
     try {
-      final getFn = dylib
-          .lookupFunction<_GetAllSkillScansC, _GetAllSkillScansDart>(
-            'GetAllSkillScansFFI',
-          );
-
-      final resultPtr = getFn();
-      final resultStr = resultPtr.toDartString();
-      _freeString!(resultPtr);
-
-      final response = jsonDecode(resultStr);
-      if (response['success'] == true && response['data'] != null) {
-        return (response['data'] as List).map((item) {
-          final data = item as Map<String, dynamic>;
-          return {
-            'skill_name': data['skill_name'],
-            'skill_hash': data['skill_hash'],
-            'scanned_at': data['scanned_at'],
-            'safe': data['safe'] as bool? ?? false,
-            'risk_level': data['risk_level'] as String? ?? '',
-            'trusted': data['trusted'] as bool? ?? false,
-            'issues': (data['issues'] as List?)?.cast<String>() ?? <String>[],
-          };
-        }).toList();
-      }
-      return [];
+      return transport.callNoArg(funcName);
     } catch (e) {
-      appLogger.error('[ScanDB] Failed to get all skill scans', e);
-      return [];
+      appLogger.error('[ScanDB] $funcName failed', e);
+      return {'success': false, 'error': '$funcName failed: $e'};
     }
   }
 
-  // --- Helper methods ---
+  Map<String, dynamic> _callOneArg(String funcName, String arg) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
+      return {'success': false, 'error': 'Transport not initialized'};
+    }
+    try {
+      return transport.callOneArg(funcName, arg);
+    } catch (e) {
+      appLogger.error('[ScanDB] $funcName failed', e);
+      return {'success': false, 'error': '$funcName failed: $e'};
+    }
+  }
 
   RiskLevel _parseRiskLevel(dynamic level) {
     if (level is String) {

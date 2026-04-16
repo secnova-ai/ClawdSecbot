@@ -1,15 +1,7 @@
 import 'dart:convert';
-import 'dart:ffi' as ffi;
-import 'package:ffi/ffi.dart';
+import '../core_transport/transport_registry.dart';
 import '../utils/app_logger.dart';
 import '../utils/locale_utils.dart';
-import 'native_library_service.dart';
-
-// FFI 类型定义
-typedef _OneArgC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef _OneArgDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef _NoArgC = ffi.Pointer<Utf8> Function();
-typedef _NoArgDart = ffi.Pointer<Utf8> Function();
 
 /// 应用设置 FFI 持久化服务：通过 FFI 委托 Go 层进行数据持久化
 ///
@@ -24,31 +16,20 @@ class AppSettingsDatabaseService {
 
   AppSettingsDatabaseService._internal();
 
-  ffi.DynamicLibrary? get _dylib => NativeLibraryService().dylib;
-  FreeStringDart? get _freeString => NativeLibraryService().freeString;
-
   /// 保存设置项
   ///
   /// [key] 设置键名
   /// [value] 设置值
   Future<bool> saveSetting(String key, String value) async {
-    if (_dylib == null || _freeString == null) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
       appLogger.error('[AppSettingsDB] Native library not initialized');
       return false;
     }
 
     try {
-      final func = _dylib!.lookupFunction<_OneArgC, _OneArgDart>(
-        'SaveAppSettingFFI',
-      );
       final jsonStr = jsonEncode({'key': key, 'value': value});
-      final argPtr = jsonStr.toNativeUtf8();
-      final resultPtr = func(argPtr);
-      final result = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(argPtr);
-
-      final response = jsonDecode(result) as Map<String, dynamic>;
+      final response = transport.callOneArg('SaveAppSettingFFI', jsonStr);
       if (response['success'] == true) {
         appLogger.info('[AppSettingsDB] Setting saved: key=$key');
         return true;
@@ -68,22 +49,14 @@ class AppSettingsDatabaseService {
   /// [key] 设置键名
   /// 返回设置值，如果不存在返回空字符串
   Future<String> getSetting(String key) async {
-    if (_dylib == null || _freeString == null) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
       appLogger.error('[AppSettingsDB] Native library not initialized');
       return '';
     }
 
     try {
-      final func = _dylib!.lookupFunction<_OneArgC, _OneArgDart>(
-        'GetAppSettingFFI',
-      );
-      final argPtr = key.toNativeUtf8();
-      final resultPtr = func(argPtr);
-      final result = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(argPtr);
-
-      final response = jsonDecode(result) as Map<String, dynamic>;
+      final response = transport.callOneArg('GetAppSettingFFI', key);
       if (response['success'] == true) {
         return (response['data'] as String?) ?? '';
       }
@@ -101,23 +74,15 @@ class AppSettingsDatabaseService {
 
   /// 设置应用语言，并同步到 Go 运行时。
   Future<bool> setLanguage(String language) async {
-    if (_dylib == null || _freeString == null) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
       appLogger.error('[AppSettingsDB] Native library not initialized');
       return false;
     }
 
     try {
       final normalizedLanguage = LocaleUtils.normalizeLanguageCode(language);
-      final func = _dylib!.lookupFunction<_OneArgC, _OneArgDart>(
-        'SetLanguageFFI',
-      );
-      final argPtr = normalizedLanguage.toNativeUtf8();
-      final resultPtr = func(argPtr);
-      final result = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(argPtr);
-
-      final response = jsonDecode(result) as Map<String, dynamic>;
+      final response = transport.callOneArg('SetLanguageFFI', normalizedLanguage);
       if (response['success'] == true) {
         appLogger.info('[AppSettingsDB] Language updated: $normalizedLanguage');
         return true;
@@ -134,20 +99,14 @@ class AppSettingsDatabaseService {
 
   /// 获取应用语言设置。
   Future<String> getLanguage() async {
-    if (_dylib == null || _freeString == null) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
       appLogger.error('[AppSettingsDB] Native library not initialized');
       return '';
     }
 
     try {
-      final func = _dylib!.lookupFunction<_NoArgC, _NoArgDart>(
-        'GetLanguageFFI',
-      );
-      final resultPtr = func();
-      final result = resultPtr.toDartString();
-      _freeString!(resultPtr);
-
-      final response = jsonDecode(result) as Map<String, dynamic>;
+      final response = transport.callNoArg('GetLanguageFFI');
       if (response['success'] != true) {
         appLogger.error(
           '[AppSettingsDB] Failed to get language: ${response['error']}',

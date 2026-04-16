@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +12,7 @@ import '../services/model_config_service.dart';
 import '../services/protection_service.dart';
 import '../services/protection_database_service.dart';
 import '../utils/app_logger.dart';
+import '../utils/runtime_platform.dart';
 import 'bot_model_config_form.dart';
 import 'security_model_config_form.dart';
 import '../services/plugin_service.dart';
@@ -1359,9 +1359,9 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
   Widget _buildPermissionTab(AppLocalizations l10n) {
     // 检查是否支持沙箱（macOS 个人版 + Linux）
     final isSandboxSupported =
-        (Platform.isMacOS && BuildConfig.isPersonal) ||
-        Platform.isLinux ||
-        Platform.isWindows;
+        (isRuntimeMacOS && BuildConfig.isPersonal) ||
+        isRuntimeLinux ||
+        isRuntimeWindows;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
@@ -2021,7 +2021,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
 
   /// 构建网络权限设置区块（出栈 + 入栈）
   Widget _buildNetworkPermissionSection(AppLocalizations l10n) {
-    final isMacSandbox = Platform.isMacOS && _sandboxEnabled;
+    final isMacSandbox = isRuntimeMacOS && _sandboxEnabled;
     final placeholder = isMacSandbox
         ? l10n.networkPermissionPlaceholderSandbox
         : l10n.networkPermissionPlaceholder;
@@ -2123,7 +2123,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     if (addr.isEmpty) return;
     if (list.contains(addr)) return;
     // 当 macOS 沙箱启用时，校验地址是否符合 sandbox-exec 限制
-    if (Platform.isMacOS &&
+    if (isRuntimeMacOS &&
         _sandboxEnabled &&
         !NetworkPermissionConfig.isValidSandboxAddress(addr)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2160,7 +2160,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     String errorMessage,
   ) async {
     final controller = TextEditingController(text: _pathInputController.text);
-    final fallbackMessage = Platform.isLinux
+    final fallbackMessage = isRuntimeLinux
         ? 'Linux 缺少可用的目录选择器，请手动输入路径，或安装 zenity、qarma、kdialog 后重试。\n$errorMessage'
         : '无法打开目录选择器，请手动输入路径后重试。\n$errorMessage';
 

@@ -1,12 +1,10 @@
-import 'dart:ffi' as ffi;
-import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
 import '../../constants.dart';
+import '../../core_transport/transport_registry.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/bookmark_service.dart';
-import '../../services/native_library_service.dart';
 import '../../services/protection_database_service.dart';
 import '../../services/protection_service.dart';
 import '../../utils/app_fonts.dart';
@@ -121,16 +119,9 @@ mixin MainPageDataMixin on State<MainPage> {
       } catch (_) {}
       // 通过 Go FFI 清空所有运行数据
       try {
-        final dylib = NativeLibraryService().dylib;
-        final freeStr = NativeLibraryService().freeString;
-        if (dylib != null && freeStr != null) {
-          final func = dylib
-              .lookupFunction<
-                ffi.Pointer<Utf8> Function(),
-                ffi.Pointer<Utf8> Function()
-              >('ClearAllDataFFI');
-          final resultPtr = func();
-          freeStr(resultPtr);
+        final transport = TransportRegistry.transport;
+        if (transport.isReady) {
+          transport.callNoArg('ClearAllDataFFI');
         }
       } catch (e) {
         appLogger.error('[MainPage] ClearAllData FFI failed', e);
