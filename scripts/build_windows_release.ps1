@@ -356,13 +356,64 @@ function New-ZipPayloadArchive {
     if (Test-Path -LiteralPath $OutputZipPath) {
         Remove-Item -Force -LiteralPath $OutputZipPath
     }
+    # 使用 ZipArchive 手工逐文件写入，避免 Compress-Archive 产物在部分 7-Zip 环境下的兼容性问题。
+    $sourceRoot = (Resolve-Path -LiteralPath $SourceDirectory).Path
+    $files = Get-ChildItem -LiteralPath $sourceRoot -Recurse -File
 
-    [System.IO.Compression.ZipFile]::CreateFromDirectory(
-        $SourceDirectory,
-        $OutputZipPath,
-        [System.IO.Compression.CompressionLevel]::Optimal,
-        $false
+    $zip = [System.IO.Compression.ZipFile]::Open($OutputZipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($file in $files) {
+            $relativePath = $file.FullName.Substring($sourceRoot.Length).TrimStart('\', '/')
+            $entryPath = $relativePath -replace '\\', '/'
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip,
+                $file.FullName,
+                $entryPath,
+                [System.IO.Compression.CompressionLevel]::Optimal
+            ) | Out-Null
+        }
+    } finally {
+        $zip.Dispose()
+    }
+}
+
+function New-ZipPayloadArchiveSafe {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceDirectory,
+        [Parameter(Mandatory = $true)][string]$OutputZipPath
     )
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    if (Test-Path -LiteralPath $OutputZipPath) {
+        Remove-Item -Force -LiteralPath $OutputZipPath
+    }
+
+    # Use ZipArchive directly to avoid archive compatibility issues in some environments.
+    $sourceRoot = (Resolve-Path -LiteralPath $SourceDirectory).Path
+    $files = Get-ChildItem -LiteralPath $sourceRoot -Recurse -File
+
+    $outputZipDir = Split-Path -Parent $OutputZipPath
+    if (-not [string]::IsNullOrWhiteSpace($outputZipDir) -and -not (Test-Path -LiteralPath $outputZipDir)) {
+        New-Item -ItemType Directory -Path $outputZipDir -Force | Out-Null
+    }
+
+    $zip = [System.IO.Compression.ZipFile]::Open($OutputZipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($file in $files) {
+            $relativePath = $file.FullName.Substring($sourceRoot.Length).TrimStart('\', '/')
+            $entryPath = $relativePath -replace '\\', '/'
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip,
+                $file.FullName,
+                $entryPath,
+                [System.IO.Compression.CompressionLevel]::Optimal
+            ) | Out-Null
+        }
+    } finally {
+        $zip.Dispose()
+    }
 }
 
 function New-CustomInstallerExe {
@@ -874,7 +925,7 @@ $outputDir = Join-Path $ProjectRoot "build\windows_release"
 $buildStagingDir = Join-Path $ProjectRoot "build"
 $installerExeFile = Join-Path $ProjectRoot ("build\" + (Get-ArtifactFileName "exe"))
 $releaseZipFile = Join-Path $ProjectRoot ("build\" + (Get-ArtifactFileName "zip"))
-$payloadZipFile = Join-Path $buildStagingDir "clawdsecbot_windows_release_payload.zip"
+$installerPayloadZipFile = Join-Path $buildStagingDir "clawdsecbot_windows_release_payload.zip"
 $bootstrapExeFile = Join-Path $buildStagingDir "clawdsecbot_installer_bootstrap.exe"
 $bootstrapSourceFile = Join-Path $ProjectRoot "scripts\windows_installer\CustomInstallerBootstrap.cs"
 $bundleExeName = "bot_sec_manager.exe"
@@ -946,25 +997,28 @@ if ($PackageFormat -eq "zip") {
     if (Test-Path -LiteralPath $releaseZipFile) {
         Remove-Item -Force -LiteralPath $releaseZipFile
     }
-    Write-Step "Creating ZIP release package"
-    Compress-Archive -Path "$outputDir\*" -DestinationPath $releaseZipFile
+    Write-Step "Creating ZIP release package with .NET ZipArchive"
+    New-ZipPayloadArchiveSafe -SourceDirectory $outputDir -OutputZipPath $releaseZipFile
     Write-Ok "Release packaged: $releaseZipFile"
 } else {
     if (-not (Test-Path -LiteralPath $bootstrapSourceFile)) {
         Stop-WithError "Installer bootstrap source not found: $bootstrapSourceFile"
     }
+    if ([string]::IsNullOrWhiteSpace($installerPayloadZipFile)) {
+        Stop-WithError "Installer payload ZIP path is empty"
+    }
     Write-Step "Creating installer payload ZIP"
-    New-ZipPayloadArchive -SourceDirectory $outputDir -OutputZipPath $payloadZipFile
+    New-ZipPayloadArchiveSafe -SourceDirectory $outputDir -OutputZipPath $installerPayloadZipFile
 
     Write-Step "Compiling custom Windows installer"
     New-CustomInstallerExe `
         -CSharpCompiler $CSharpCompilerPath `
         -BootstrapSourcePath $bootstrapSourceFile `
-        -PayloadZipPath $payloadZipFile `
+        -PayloadZipPath $installerPayloadZipFile `
         -OutputExePath $installerExeFile `
         -IconPath $appIco `
         -IntermediateExePath $bootstrapExeFile
-    Remove-Item -Force -ErrorAction SilentlyContinue $payloadZipFile, $bootstrapExeFile
+    Remove-Item -Force -ErrorAction SilentlyContinue $installerPayloadZipFile, $bootstrapExeFile
     Write-Ok "Release packaged: $installerExeFile"
 }
 

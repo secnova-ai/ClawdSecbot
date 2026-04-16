@@ -331,7 +331,8 @@ copy_application_files() {
 
     cat > "$ROOTFS_DIR/usr/bin/$PACKAGE_NAME" << 'EOF'
 #!/bin/bash
-exec /usr/lib/clawdsecbot/bot_sec_manager "$@"
+cd "$(eval echo ~$(whoami))"
+exec /usr/lib/clawdsecbot/bot_sec_manager "$@" & > /dev/null
 EOF
     chmod +x "$ROOTFS_DIR/usr/bin/$PACKAGE_NAME"
 }
