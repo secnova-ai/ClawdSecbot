@@ -602,6 +602,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get modelConfigTesting => 'Testing...';
 
   @override
+  String get modelConfigValidateConnection => 'Validate Connectivity';
+
+  @override
+  String get modelConfigTestSuccess => 'Connectivity validation succeeded';
+
+  @override
   String get modelConfigSaving => 'Saving...';
 
   @override

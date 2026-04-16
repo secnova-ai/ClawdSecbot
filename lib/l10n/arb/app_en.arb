@@ -269,6 +269,8 @@
   "modelConfigSaveFailed": "Failed to save configuration",
   "modelConfigRequired": "Please configure AI model to continue",
   "modelConfigTesting": "Testing...",
+  "modelConfigValidateConnection": "Validate Connectivity",
+  "modelConfigTestSuccess": "Connectivity validation succeeded",
   "modelConfigSaving": "Saving...",
   "modelConfigTestFailed": "Connection test failed: {error}",
   "@modelConfigTestFailed": {

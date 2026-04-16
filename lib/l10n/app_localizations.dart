@@ -1148,6 +1148,18 @@ abstract class AppLocalizations {
   /// **'测试连接中...'**
   String get modelConfigTesting;
 
+  /// No description provided for @modelConfigValidateConnection.
+  ///
+  /// In zh, this message translates to:
+  /// **'验证连通性'**
+  String get modelConfigValidateConnection;
+
+  /// No description provided for @modelConfigTestSuccess.
+  ///
+  /// In zh, this message translates to:
+  /// **'连通性验证通过'**
+  String get modelConfigTestSuccess;
+
   /// No description provided for @modelConfigSaving.
   ///
   /// In zh, this message translates to:
