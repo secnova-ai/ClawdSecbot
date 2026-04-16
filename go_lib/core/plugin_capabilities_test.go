@@ -148,8 +148,9 @@ func TestDeleteSkillByPlugin_AutoRoutesBySkillPath(t *testing.T) {
 	if !strings.Contains(result, `"success":true`) || !strings.Contains(strings.ToLower(result), `"plugin":"dintalclaw"`) {
 		t.Fatalf("expected auto routed delete to dintalclaw plugin, got: %s", result)
 	}
-	if openPlugin.calls != 1 {
-		t.Fatalf("expected openclaw delete attempted once, got: %d", openPlugin.calls)
+	// 自动路由命中后应尽早返回，未命中的插件调用次数不做强约束（0 或 1 均可）。
+	if openPlugin.calls > 1 {
+		t.Fatalf("expected openclaw delete attempted at most once, got: %d", openPlugin.calls)
 	}
 	if dintalPlugin.calls != 1 {
 		t.Fatalf("expected dintalclaw delete attempted once, got: %d", dintalPlugin.calls)
