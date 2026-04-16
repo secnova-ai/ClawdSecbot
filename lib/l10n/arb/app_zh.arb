@@ -1103,8 +1103,21 @@
   "copyEventInfo": "复制事件信息",
   "refresh": "刷新",
   "clearAll": "清空",
-  "viewSkillScanResults": "技能检测结果",
-  "viewSkillScanResultsTitle": "技能检测结果",
+  "viewSkillScanResults": "技能检测历史",
+  "viewSkillScanResultsTitle": "技能检测历史",
+  "rescanSecurityDiscovery": "安全发现",
+  "rescanAll": "所有信息",
+  "deleteRiskSkill": "删除技能",
+  "deleteRiskSkillConfirm": "确认删除技能 \"{skill}\" 吗？",
+  "@deleteRiskSkillConfirm": {
+    "placeholders": {
+      "skill": {"type": "String"}
+    }
+  },
+  "deleteRiskSkillSuccess": "技能删除成功",
+  "deleteRiskSkillAlreadyMissing": "技能目录已不存在，按已删除处理",
+  "deleteRiskSkillFailed": "技能删除失败",
+  "deleteRiskSkillUnavailable": "缺少技能路径或哈希，无法删除",
   "noSkillScanResults": "暂无技能扫描记录",
   "skillScanResultScannedAt": "扫描时间: {time}",
   "@skillScanResultScannedAt": {

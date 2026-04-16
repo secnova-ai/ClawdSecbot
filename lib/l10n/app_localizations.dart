@@ -3487,14 +3487,62 @@ abstract class AppLocalizations {
   /// No description provided for @viewSkillScanResults.
   ///
   /// In zh, this message translates to:
-  /// **'技能检测结果'**
+  /// **'技能检测历史'**
   String get viewSkillScanResults;
 
   /// No description provided for @viewSkillScanResultsTitle.
   ///
   /// In zh, this message translates to:
-  /// **'技能检测结果'**
+  /// **'技能检测历史'**
   String get viewSkillScanResultsTitle;
+
+  /// No description provided for @rescanSecurityDiscovery.
+  ///
+  /// In zh, this message translates to:
+  /// **'安全发现'**
+  String get rescanSecurityDiscovery;
+
+  /// No description provided for @rescanAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'所有信息'**
+  String get rescanAll;
+
+  /// No description provided for @deleteRiskSkill.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除技能'**
+  String get deleteRiskSkill;
+
+  /// No description provided for @deleteRiskSkillConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认删除技能 \"{skill}\" 吗？'**
+  String deleteRiskSkillConfirm(String skill);
+
+  /// No description provided for @deleteRiskSkillSuccess.
+  ///
+  /// In zh, this message translates to:
+  /// **'技能删除成功'**
+  String get deleteRiskSkillSuccess;
+
+  /// No description provided for @deleteRiskSkillAlreadyMissing.
+  ///
+  /// In zh, this message translates to:
+  /// **'技能目录已不存在，按已删除处理'**
+  String get deleteRiskSkillAlreadyMissing;
+
+  /// No description provided for @deleteRiskSkillFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'技能删除失败'**
+  String get deleteRiskSkillFailed;
+
+  /// No description provided for @deleteRiskSkillUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'缺少技能路径或哈希，无法删除'**
+  String get deleteRiskSkillUnavailable;
 
   /// No description provided for @noSkillScanResults.
   ///

@@ -31,6 +31,7 @@ import '../services/metrics_database_service.dart';
 import '../services/model_config_database_service.dart';
 import '../services/protection_database_service.dart';
 import '../services/scan_database_service.dart';
+import '../services/skill_security_analyzer_service.dart';
 import '../services/bookmark_service.dart';
 import '../services/native_library_service.dart';
 import '../services/plugin_service.dart';
@@ -73,6 +74,7 @@ class _MainPageState extends State<MainPage>
   ScanResult? _result;
   final BotScanner _scanner = BotScanner();
   StreamSubscription<String>? _logSubscription;
+  RescanAction _selectedRescanAction = RescanAction.securityDiscovery;
 
   // ============ 防护状态 ============
   final Set<String> _protectedAssetIDs = {};
@@ -1901,7 +1903,7 @@ class _MainPageState extends State<MainPage>
     return false;
   }
 
-  void _resetScan() async {
+  Future<bool> _prepareForFullRescan() async {
     final l10n = AppLocalizations.of(context)!;
 
     showDialog(
@@ -1945,7 +1947,7 @@ class _MainPageState extends State<MainPage>
       }
 
       if (activeCount > 0) {
-        if (!mounted) return;
+        if (!mounted) return false;
 
         final confirmed = await showDialog<bool>(
           context: context,
@@ -2013,7 +2015,7 @@ class _MainPageState extends State<MainPage>
         );
 
         if (confirmed != true) {
-          return;
+          return false;
         }
 
         try {
@@ -2042,11 +2044,171 @@ class _MainPageState extends State<MainPage>
         });
         await windowManager.setSize(AppConstants.windowSize);
       }
+      return true;
     } catch (e) {
       appLogger.error('[MainPage] Failed to check protection status', e);
       if (mounted) {
         Navigator.of(context).pop();
       }
+      return false;
+    }
+  }
+
+  Future<void> _rescanAll() async {
+    final canContinue = await _prepareForFullRescan();
+    if (!canContinue) {
+      return;
+    }
+    await _startScan();
+  }
+
+  Future<void> _handleRescan() async {
+    switch (_selectedRescanAction) {
+      case RescanAction.securityDiscovery:
+        await _rescanSecurityDiscovery();
+        break;
+      case RescanAction.fullScan:
+        await _rescanAll();
+        break;
+    }
+  }
+
+  Future<void> _rescanSecurityDiscovery() async {
+    final existingResult = _result;
+    if (existingResult == null) {
+      await _startScan();
+      return;
+    }
+    if (_scanState == ScanState.scanning) {
+      return;
+    }
+
+    final l10n = AppLocalizations.of(context)!;
+    if (mounted) {
+      setState(() {
+        _scanState = ScanState.scanning;
+        _logs.clear();
+      });
+    }
+
+    await _logSubscription?.cancel();
+    _logSubscription = _scanner.logStream.listen((log) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _logs.add(log);
+      });
+    });
+
+    _scanner.setLocalization(l10n);
+
+    try {
+      final refreshedResult = await _scanner.rediscoverSecurityFindings(
+        assets: existingResult.assets,
+        configFound: existingResult.configFound,
+        configPath: existingResult.configPath,
+        config: existingResult.config,
+      );
+      await ScanDatabaseService().saveScanResult(refreshedResult);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _scanState = ScanState.completed;
+        _result = refreshedResult;
+      });
+    } catch (e) {
+      appLogger.error('[MainPage] Security discovery refresh failed', e);
+      if (mounted) {
+        setState(() {
+          _scanState = ScanState.completed;
+        });
+      }
+    } finally {
+      await _logSubscription?.cancel();
+      _logSubscription = null;
+      await windowManager.setSize(AppConstants.windowSize);
+    }
+  }
+
+  Future<void> _deleteRiskSkillFromFinding(RiskInfo risk) async {
+    final skillPath = risk.args?['skillPath']?.toString() ?? '';
+    final skillHash = risk.args?['skillHash']?.toString() ?? '';
+    final skillName = risk.args?['skillName']?.toString() ?? '';
+    final l10n = AppLocalizations.of(context)!;
+
+    if (skillPath.isEmpty || skillHash.isEmpty) {
+      appLogger.warning(
+        '[MainPage] Missing skillPath/skillHash for risk skill deletion',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.deleteRiskSkillUnavailable)),
+        );
+      }
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text(
+          l10n.deleteRiskSkill,
+          style: AppFonts.inter(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        content: Text(
+          l10n.deleteRiskSkillConfirm(skillName.isNotEmpty ? skillName : skillHash),
+          style: AppFonts.inter(fontSize: 14, color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l10n.cancel, style: AppFonts.inter(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+            ),
+            child: Text(l10n.deleteRiskSkill),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    final deleteResult = await SkillSecurityAnalyzerService().deleteSkill(
+      skillPath: skillPath,
+      skillHash: skillHash,
+    );
+
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          deleteResult.success
+              ? (deleteResult.alreadyMissing
+                    ? l10n.deleteRiskSkillAlreadyMissing
+                    : l10n.deleteRiskSkillSuccess)
+              : l10n.deleteRiskSkillFailed,
+        ),
+      ),
+    );
+    if (deleteResult.success) {
+      await _rescanSecurityDiscovery();
     }
   }
 
@@ -2755,11 +2917,19 @@ class _MainPageState extends State<MainPage>
       result: result,
       protectedAssets: _protectedAssetIDs,
       isRestoringProtection: _isRestoringProtection,
-      onRescan: _resetScan,
+      selectedRescanAction: _selectedRescanAction,
+      onRescanActionChanged: (action) {
+        if (!mounted) return;
+        setState(() {
+          _selectedRescanAction = action;
+        });
+      },
+      onRescan: _handleRescan,
       onViewSkillScanResults: _showSkillScanResultsDialog,
       onShowProtectionConfig: _showProtectionConfigDialog,
       onShowProtectionMonitor: (asset) => _showProtectionMonitorResolved(asset),
       onShowMitigation: (risk) => _showMitigationDialog(context, risk),
+      onDeleteRiskSkill: _deleteRiskSkillFromFinding,
     );
   }
 }

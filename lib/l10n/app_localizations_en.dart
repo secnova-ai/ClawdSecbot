@@ -1985,10 +1985,38 @@ class AppLocalizationsEn extends AppLocalizations {
   String get clearAll => 'Clear All';
 
   @override
-  String get viewSkillScanResults => 'Skill Scan Results';
+  String get viewSkillScanResults => 'Skill Scan History';
 
   @override
-  String get viewSkillScanResultsTitle => 'Skill Scan Results';
+  String get viewSkillScanResultsTitle => 'Skill Scan History';
+
+  @override
+  String get rescanSecurityDiscovery => 'Re-run security discovery';
+
+  @override
+  String get rescanAll => 'All information';
+
+  @override
+  String get deleteRiskSkill => 'Delete Skill';
+
+  @override
+  String deleteRiskSkillConfirm(String skill) {
+    return 'Delete skill \"$skill\"?';
+  }
+
+  @override
+  String get deleteRiskSkillSuccess => 'Skill deleted successfully';
+
+  @override
+  String get deleteRiskSkillAlreadyMissing =>
+      'Skill directory already missing, treated as deleted';
+
+  @override
+  String get deleteRiskSkillFailed => 'Failed to delete skill';
+
+  @override
+  String get deleteRiskSkillUnavailable =>
+      'Missing skill path or hash, cannot delete';
 
   @override
   String get noSkillScanResults => 'No skill scan results yet';

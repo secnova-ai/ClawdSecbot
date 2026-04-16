@@ -503,6 +503,59 @@ class PluginService {
     }
   }
 
+  Future<List<RiskInfo>> assessRisksOnly() async {
+    final lib = dylib;
+    if (lib == null) {
+      appLogger.warning('[Plugin] Plugin not initialized, cannot assess risks');
+      return const [];
+    }
+
+    final freeStr = freeString!;
+    final allRisks = <RiskInfo>[];
+
+    try {
+      final assessRisks = lib.lookupFunction<AssessRisksFFIC, AssessRisksFFIDart>(
+        'AssessRisksFFI',
+      );
+
+      String scannedHashesJson = '[]';
+      try {
+        final getHashes = lib
+            .lookupFunction<GetScannedSkillHashesC, GetScannedSkillHashesDart>(
+              'GetScannedSkillHashes',
+            );
+        final hashesResultPtr = getHashes();
+        final hashesResult = hashesResultPtr.toDartString();
+        freeStr(hashesResultPtr);
+        final hashesResponse = jsonDecode(hashesResult);
+        if (hashesResponse['success'] == true && hashesResponse['data'] != null) {
+          scannedHashesJson = jsonEncode(hashesResponse['data']);
+        }
+      } catch (e) {
+        appLogger.debug('[Plugin] GetScannedSkillHashes not available: $e');
+      }
+
+      final hashesPtr = scannedHashesJson.toNativeUtf8();
+      final riskPtr = assessRisks(hashesPtr);
+      malloc.free(hashesPtr);
+
+      final riskJsonString = riskPtr.toDartString();
+      freeStr(riskPtr);
+
+      final riskResponse = jsonDecode(riskJsonString) as Map<String, dynamic>;
+      if (riskResponse['success'] == true && riskResponse['data'] != null) {
+        final List<dynamic> jsonList = riskResponse['data'] as List<dynamic>;
+        for (var item in jsonList) {
+          allRisks.add(_parseRisk(item as Map<String, dynamic>));
+        }
+      }
+    } catch (e) {
+      appLogger.error('[Plugin] AssessRisksFFI failed: $e');
+    }
+
+    return allRisks;
+  }
+
   Future<ScanResult> scan() async {
     List<Asset> allAssets = [];
     List<RiskInfo> allRisks = [];

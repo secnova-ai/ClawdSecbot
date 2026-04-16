@@ -22,6 +22,7 @@ type SkillScanRecord struct {
 	RiskLevel    string   `json:"risk_level,omitempty"`
 	Issues       []string `json:"issues,omitempty"`
 	Trusted      bool     `json:"trusted"`
+	DeletedAt    string   `json:"deleted_at,omitempty"`
 }
 
 // SkillSecurityScanRepository 技能安全扫描仓库
@@ -39,14 +40,22 @@ func NewSkillSecurityScanRepository(db *sql.DB) *SkillSecurityScanRepository {
 	return &SkillSecurityScanRepository{db: db}
 }
 
-// GetScannedSkillHashes 获取所有已成功扫描技能的哈希值集合
+// GetScannedSkillHashes 获取所有已成功扫描且具备删除所需元数据的技能哈希
 // Excludes scans that failed with risk_level='error' so they can be retried.
+// Excludes records with empty skill_path/source_plugin so legacy data can be rescanned and backfilled.
 func (r *SkillSecurityScanRepository) GetScannedSkillHashes() ([]string, error) {
 	if r.db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
 
-	rows, err := r.db.Query(`SELECT skill_hash FROM skill_scans WHERE risk_level IS NULL OR risk_level != 'error'`)
+	rows, err := r.db.Query(`
+		SELECT skill_hash
+		FROM skill_scans
+		WHERE (risk_level IS NULL OR risk_level != 'error')
+		  AND COALESCE(TRIM(skill_path), '') != ''
+		  AND COALESCE(TRIM(source_plugin), '') != ''
+		  AND COALESCE(TRIM(deleted_at), '') = ''
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query skill hashes: %w", err)
 	}
@@ -100,8 +109,8 @@ func (r *SkillSecurityScanRepository) SaveSkillScanResult(record *SkillScanRecor
 
 	_, err := r.db.Exec(`
 		INSERT OR REPLACE INTO skill_scans
-			(skill_name, skill_hash, skill_path, source_plugin, asset_id, scanned_at, safe, issues, risk_level, trusted)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT trusted FROM skill_scans WHERE skill_hash = ?), 0))
+			(skill_name, skill_hash, skill_path, source_plugin, asset_id, scanned_at, safe, issues, risk_level, trusted, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT trusted FROM skill_scans WHERE skill_hash = ?), 0), '')
 	`, record.SkillName, record.SkillHash, record.SkillPath, record.SourcePlugin, record.AssetID, record.ScannedAt, safe, issuesJSON, riskLevel, record.SkillHash)
 	if err != nil {
 		return fmt.Errorf("failed to save skill scan result: %w", err)
@@ -120,7 +129,7 @@ func (r *SkillSecurityScanRepository) GetSkillScanByHash(hash string) (*SkillSca
 	}
 
 	row := r.db.QueryRow(`
-		SELECT id, skill_name, skill_hash, skill_path, source_plugin, asset_id, scanned_at, safe, issues, risk_level, COALESCE(trusted, 0)
+		SELECT id, skill_name, skill_hash, skill_path, source_plugin, asset_id, scanned_at, safe, issues, risk_level, COALESCE(trusted, 0), COALESCE(deleted_at, '')
 		FROM skill_scans WHERE skill_hash = ?
 	`, hash)
 
@@ -131,7 +140,7 @@ func (r *SkillSecurityScanRepository) GetSkillScanByHash(hash string) (*SkillSca
 	var trusted int
 
 	err := row.Scan(&record.ID, &record.SkillName, &record.SkillHash, &record.SkillPath,
-		&record.SourcePlugin, &record.AssetID, &record.ScannedAt, &safe, &issuesJSON, &riskLevel, &trusted)
+		&record.SourcePlugin, &record.AssetID, &record.ScannedAt, &safe, &issuesJSON, &riskLevel, &trusted, &record.DeletedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -156,18 +165,22 @@ func (r *SkillSecurityScanRepository) GetSkillScanByHash(hash string) (*SkillSca
 	return &record, nil
 }
 
-// DeleteSkillScan 根据技能名称删除扫描记录
-func (r *SkillSecurityScanRepository) DeleteSkillScan(skillName string) error {
+// DeleteSkillScan 根据技能哈希删除扫描记录
+func (r *SkillSecurityScanRepository) DeleteSkillScan(skillHash string) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
 
-	_, err := r.db.Exec(`DELETE FROM skill_scans WHERE skill_name = ?`, skillName)
+	_, err := r.db.Exec(`
+		UPDATE skill_scans
+		SET deleted_at = ?
+		WHERE skill_hash = ?
+	`, time.Now().UTC().Format(time.RFC3339), skillHash)
 	if err != nil {
 		return fmt.Errorf("failed to delete skill scan: %w", err)
 	}
 
-	logging.Info("Skill scan deleted: name=%s", skillName)
+	logging.Info("Skill scan soft deleted: hash=%s", skillHash)
 	return nil
 }
 
@@ -178,8 +191,11 @@ func (r *SkillSecurityScanRepository) GetRiskySkills() ([]SkillScanRecord, error
 	}
 
 	rows, err := r.db.Query(`
-		SELECT id, skill_name, skill_hash, skill_path, source_plugin, asset_id, scanned_at, safe, issues, risk_level, COALESCE(trusted, 0)
-		FROM skill_scans WHERE safe = 0 AND (trusted IS NULL OR trusted = 0)
+		SELECT id, skill_name, skill_hash, skill_path, source_plugin, asset_id, scanned_at, safe, issues, risk_level, COALESCE(trusted, 0), COALESCE(deleted_at, '')
+		FROM skill_scans
+		WHERE safe = 0
+		  AND (trusted IS NULL OR trusted = 0)
+		  AND COALESCE(TRIM(deleted_at), '') = ''
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query risky skills: %w", err)
@@ -195,7 +211,7 @@ func (r *SkillSecurityScanRepository) GetRiskySkills() ([]SkillScanRecord, error
 		var trusted int
 
 		if err := rows.Scan(&record.ID, &record.SkillName, &record.SkillHash, &record.SkillPath,
-			&record.SourcePlugin, &record.AssetID, &record.ScannedAt, &safe, &issuesJSON, &riskLevel, &trusted); err != nil {
+			&record.SourcePlugin, &record.AssetID, &record.ScannedAt, &safe, &issuesJSON, &riskLevel, &trusted, &record.DeletedAt); err != nil {
 			logging.Warning("Failed to scan risky skill row: %v", err)
 			continue
 		}
@@ -229,7 +245,7 @@ func (r *SkillSecurityScanRepository) GetAllSkillScans() ([]SkillScanRecord, err
 	}
 
 	rows, err := r.db.Query(`
-		SELECT id, skill_name, skill_hash, skill_path, source_plugin, asset_id, scanned_at, safe, issues, risk_level, COALESCE(trusted, 0)
+		SELECT id, skill_name, skill_hash, skill_path, source_plugin, asset_id, scanned_at, safe, issues, risk_level, COALESCE(trusted, 0), COALESCE(deleted_at, '')
 		FROM skill_scans ORDER BY scanned_at DESC
 	`)
 	if err != nil {
@@ -246,7 +262,7 @@ func (r *SkillSecurityScanRepository) GetAllSkillScans() ([]SkillScanRecord, err
 		var trusted int
 
 		if err := rows.Scan(&record.ID, &record.SkillName, &record.SkillHash, &record.SkillPath,
-			&record.SourcePlugin, &record.AssetID, &record.ScannedAt, &safe, &issuesJSON, &riskLevel, &trusted); err != nil {
+			&record.SourcePlugin, &record.AssetID, &record.ScannedAt, &safe, &issuesJSON, &riskLevel, &trusted, &record.DeletedAt); err != nil {
 			logging.Warning("Failed to scan skill scan row: %v", err)
 			continue
 		}
@@ -273,15 +289,15 @@ func (r *SkillSecurityScanRepository) GetAllSkillScans() ([]SkillScanRecord, err
 	return records, nil
 }
 
-// TrustSkill marks a skill scan record as trusted by skill name
-func (r *SkillSecurityScanRepository) TrustSkill(skillName string) error {
+// TrustSkill marks a skill scan record as trusted by skill hash
+func (r *SkillSecurityScanRepository) TrustSkill(skillHash string) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	_, err := r.db.Exec(`UPDATE skill_scans SET trusted = 1 WHERE skill_name = ?`, skillName)
+	_, err := r.db.Exec(`UPDATE skill_scans SET trusted = 1 WHERE skill_hash = ?`, skillHash)
 	if err != nil {
 		return fmt.Errorf("failed to trust skill: %w", err)
 	}
-	logging.Info("Skill trusted: name=%s", skillName)
+	logging.Info("Skill trusted: hash=%s", skillHash)
 	return nil
 }
