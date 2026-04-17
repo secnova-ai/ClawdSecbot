@@ -45,6 +45,7 @@ Cleanup scope:
   [Common]
     - ~/.botsec
     - ~/Documents/.botsec
+    - Custom paths loaded from app_config.json (sandbox_dir/install_dir/log_dir)
     - /tmp/botsec, ${TMPDIR}/botsec
     - ${TMPDIR}/clawdsecbot.lock, ${TMPDIR}/clawdsecbot.sock
     - Known runtime directories (no full recursive scan)
@@ -145,6 +146,26 @@ add_target() {
     fi
 }
 
+# 校验路径是否可安全删除（拒绝根路径）。
+is_safe_cleanup_path() {
+    local target_path="$1"
+    [[ -n "${target_path// }" ]] || return 1
+
+    local normalized="$target_path"
+    while [[ "$normalized" == */ && "$normalized" != "/" ]]; do
+        normalized="${normalized%/}"
+    done
+
+    case "$normalized" in
+        "/"|"."|"~"|"")
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
 # 收集跨平台通用清理目标。
 collect_common_targets() {
     add_target "$HOME/.botsec"
@@ -156,6 +177,71 @@ collect_common_targets() {
 
     for custom_path in "${CUSTOM_INSTALL_PATHS[@]}"; do
         add_target "$custom_path"
+    done
+}
+
+# 从 app_config.json 中收集自定义清理路径。
+collect_config_targets() {
+    local config_candidates=()
+    if [[ "$TARGET_PLATFORM" == "macos" ]]; then
+        config_candidates+=(
+            "$HOME/Library/Application Support/secnova.ai/bot_sec_manager/app_config.json"
+            "$HOME/Library/Application Support/com.bot.secnova.clawdsecbot/app_config.json"
+            "$HOME/Library/Application Support/com.clawdsecbot.guard/app_config.json"
+            "$HOME/Library/Application Support/ClawdSecbot/app_config.json"
+        )
+    else
+        config_candidates+=(
+            "$HOME/.local/share/secnova.ai/bot_sec_manager/app_config.json"
+            "$HOME/.local/share/com.bot.secnova.clawdsecbot/app_config.json"
+            "$HOME/.local/share/com.clawdsecbot.guard/app_config.json"
+            "$HOME/.local/share/ClawdSecbot/app_config.json"
+            "$HOME/.config/secnova.ai/bot_sec_manager/app_config.json"
+            "$HOME/.config/com.bot.secnova.clawdsecbot/app_config.json"
+            "$HOME/.config/com.clawdsecbot.guard/app_config.json"
+            "$HOME/.config/ClawdSecbot/app_config.json"
+        )
+    fi
+
+    for config_path in "${config_candidates[@]}"; do
+        [[ -f "$config_path" ]] || continue
+        add_target "$config_path"
+        log_info "Detected app config: $config_path"
+
+        if ! command -v python3 >/dev/null 2>&1; then
+            log_warn "python3 not found, skip parsing app config custom paths"
+            continue
+        fi
+
+        while IFS= read -r parsed_path; do
+            [[ -n "${parsed_path// }" ]] || continue
+            if ! is_safe_cleanup_path "$parsed_path"; then
+                log_warn "Skip unsafe path from app_config: $parsed_path"
+                continue
+            fi
+            add_target "$parsed_path"
+            log_info "Loaded path from app_config: $parsed_path"
+        done < <(python3 - "$config_path" <<'PY'
+import json
+import sys
+
+config_path = sys.argv[1]
+keys = ("sandbox_dir", "install_dir", "log_dir")
+try:
+    with open(config_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+except Exception:
+    sys.exit(0)
+
+if not isinstance(data, dict):
+    sys.exit(0)
+
+for key in keys:
+    value = data.get(key)
+    if isinstance(value, str) and value.strip():
+        print(value.strip())
+PY
+)
     done
 }
 
@@ -275,6 +361,7 @@ main() {
     validate_permissions
 
     collect_common_targets
+    collect_config_targets
     if [[ "$TARGET_PLATFORM" == "macos" ]]; then
         collect_macos_targets
     else
