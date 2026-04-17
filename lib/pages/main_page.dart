@@ -43,6 +43,7 @@ import '../widgets/settings_dialog.dart';
 import '../widgets/onboarding_dialog.dart';
 import '../widgets/skill_scan_dialog.dart';
 import '../widgets/skill_scan_results_dialog.dart';
+import '../widgets/processing_notice_card.dart';
 import '../widgets/protection_config_dialog.dart';
 import '../widgets/scan_result_view.dart';
 import '../widgets/welcome_overlay.dart';
@@ -60,6 +61,83 @@ enum _ExitRestoreAction {
   restoreAndExit,
 }
 
+/// 标题栏以下生效的弹窗路由。
+/// 用于保留主窗口标题栏拖拽能力，同时在内容区展示模态对话框。
+class _TitlebarBypassDialogRoute<T> extends PopupRoute<T> {
+  _TitlebarBypassDialogRoute({
+    required this.builder,
+    required this.topInset,
+    Color? barrierColor,
+    bool barrierDismissible = true,
+    String? barrierLabel,
+  }) : _barrierColor = barrierColor ?? Colors.black54,
+       _barrierDismissible = barrierDismissible,
+       _barrierLabel = barrierLabel;
+
+  /// 对话框内容构建器。
+  final WidgetBuilder builder;
+
+  /// 标题栏高度，遮罩从该位置以下开始生效。
+  final double topInset;
+
+  final Color _barrierColor;
+  final bool _barrierDismissible;
+  final String? _barrierLabel;
+
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 180);
+
+  @override
+  bool get barrierDismissible => _barrierDismissible;
+
+  @override
+  Color? get barrierColor => _barrierColor;
+
+  @override
+  String? get barrierLabel => _barrierLabel;
+
+  @override
+  Widget buildPage(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+  ) {
+    return builder(context);
+  }
+
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return FadeTransition(
+      opacity: CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+      child: child,
+    );
+  }
+
+  @override
+  Widget buildModalBarrier() {
+    return Stack(
+      children: [
+        Positioned(
+          top: topInset,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: ModalBarrier(
+            dismissible: barrierDismissible,
+            color: barrierColor,
+            semanticsLabel: barrierLabel,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
 
@@ -75,6 +153,9 @@ class _MainPageState extends State<MainPage>
         MainPageVersionMixin,
         MainPageWindowMixin,
         MainPageDataMixin {
+  /// 主窗口标题栏高度。
+  double get _mainTitleBarHeight => Platform.isLinux ? 40 : 48;
+
   // ============ 扫描状态 ============
   ScanState _scanState = ScanState.idle;
   final List<String> _logs = [];
@@ -100,6 +181,7 @@ class _MainPageState extends State<MainPage>
   Timer? _onboardingCompletionTimer;
   AppLifecycleListener? _appExitListener;
   bool _isExitFlowInProgress = false;
+  bool _showExitCleanupProgressOverlay = false;
   static const MethodChannel _appExitChannel = MethodChannel(
     'com.clawdbot.guard/app_exit',
   );
@@ -1223,34 +1305,7 @@ class _MainPageState extends State<MainPage>
 
   Future<T> _runExitCleanupWithProgress<T>(Future<T> Function() action) async {
     if (mounted) {
-      unawaited(
-        showDialog<void>(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            backgroundColor: const Color(0xFF1E1E2E),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            content: Row(
-              children: [
-                const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2.5),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(
-                    AppLocalizations.of(context)!.exitRestoreInProgress,
-                    style: AppFonts.inter(fontSize: 14, color: Colors.white70),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
+      setState(() => _showExitCleanupProgressOverlay = true);
       await Future.delayed(const Duration(milliseconds: 50));
     }
 
@@ -1258,10 +1313,7 @@ class _MainPageState extends State<MainPage>
       return await action();
     } finally {
       if (mounted) {
-        final navigator = Navigator.of(context, rootNavigator: true);
-        if (navigator.canPop()) {
-          navigator.pop();
-        }
+        setState(() => _showExitCleanupProgressOverlay = false);
       }
     }
   }
@@ -2270,12 +2322,21 @@ class _MainPageState extends State<MainPage>
     Asset asset, {
     required bool isEditMode,
   }) async {
-    final result = await showDialog<ProtectionConfig>(
-      context: context,
-      builder: (context) => ProtectionConfigDialog(
-        assetName: asset.name,
-        assetID: asset.id,
-        isEditMode: isEditMode,
+    final barrierLabel = MaterialLocalizations.of(context).modalBarrierDismissLabel;
+    final result = await Navigator.of(context).push<ProtectionConfig>(
+      _TitlebarBypassDialogRoute<ProtectionConfig>(
+        topInset: _mainTitleBarHeight,
+        barrierDismissible: true,
+        barrierLabel: barrierLabel,
+        barrierColor: Colors.black.withValues(alpha: 0.45),
+        builder: (dialogContext) => Padding(
+          padding: EdgeInsets.only(top: _mainTitleBarHeight),
+          child: ProtectionConfigDialog(
+            assetName: asset.name,
+            assetID: asset.id,
+            isEditMode: isEditMode,
+          ),
+        ),
       ),
     );
 
@@ -2455,6 +2516,22 @@ class _MainPageState extends State<MainPage>
                       visible: _showOnboardingCompletionOverlay,
                     ),
                   ),
+                  if (_showExitCleanupProgressOverlay)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        ignoring: true,
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: const ProcessingNoticeCard(
+                              title: '正在恢复Openclaw配置',
+                              message:
+                                  '在此期间Openclaw Dashboard页面会提示断开连接, 稍后将恢复正常',
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   if (isRestoringConfig)
                     Positioned.fill(
                       child: Container(
