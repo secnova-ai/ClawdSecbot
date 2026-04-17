@@ -929,6 +929,7 @@ $installerPayloadZipFile = Join-Path $buildStagingDir "clawdsecbot_windows_relea
 $bootstrapExeFile = Join-Path $buildStagingDir "clawdsecbot_installer_bootstrap.exe"
 $bootstrapSourceFile = Join-Path $ProjectRoot "scripts\windows_installer\CustomInstallerBootstrap.cs"
 $bundleExeName = "bot_sec_manager.exe"
+$uninstallScriptSource = Join-Path $ProjectRoot "scripts\uninstall\uninstall_windows.ps1"
 
 if (-not (Test-Path $bundleDir)) {
     # Try alternative path for older Flutter versions
@@ -985,6 +986,15 @@ if (Test-Path $imagesSrc) {
 $mainExePath = Join-Path $outputDir $bundleExeName
 if (-not (Test-Path -LiteralPath $mainExePath)) {
     Stop-WithError "Main executable not found after packaging: $mainExePath"
+}
+
+if (Test-Path -LiteralPath $uninstallScriptSource) {
+    $uninstallScriptDest = Join-Path $outputDir "uninstall_windows.ps1"
+    Copy-Item -LiteralPath $uninstallScriptSource -Destination $uninstallScriptDest -Force
+    Write-Ok "Uninstall script copied beside executable: $uninstallScriptDest"
+}
+else {
+    Write-Warn "Uninstall script not found: $uninstallScriptSource"
 }
 
 $runtimeFiles = Resolve-AppLocalRuntimeFiles
