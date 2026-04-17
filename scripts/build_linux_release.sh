@@ -406,6 +406,7 @@ copy_application_files() {
     local bundle_dir="$PROJECT_ROOT/build/linux/$FLUTTER_ARCH/release/bundle"
     local plugins_dir="$PROJECT_ROOT/plugins"
     local preload_so="$PROJECT_ROOT/go_lib/core/sandbox/linux_hook/build/libsandbox_preload.so"
+    local uninstall_script="$PROJECT_ROOT/scripts/uninstall/uninstall_unix.sh"
 
     [[ -d "$bundle_dir" ]] || fail "Flutter bundle not found: $bundle_dir"
     cp -a "$bundle_dir"/. "$ROOTFS_DIR/usr/lib/$PACKAGE_NAME/"
@@ -431,6 +432,15 @@ cd "$(eval echo ~$(whoami))"
 exec /usr/lib/clawdsecbot/bot_sec_manager "$@" & > /dev/null
 EOF
     chmod +x "$ROOTFS_DIR/usr/bin/$PACKAGE_NAME"
+
+    # 将卸载脚本放到 bot_sec_manager 同级目录，便于用户直接执行。
+    if [[ -f "$uninstall_script" ]]; then
+        cp "$uninstall_script" "$ROOTFS_DIR/usr/lib/$PACKAGE_NAME/uninstall.sh"
+        chmod +x "$ROOTFS_DIR/usr/lib/$PACKAGE_NAME/uninstall.sh"
+        ok "Uninstall script copied to /usr/lib/$PACKAGE_NAME/uninstall.sh"
+    else
+        warn "uninstall script not found, skip copy: $uninstall_script"
+    fi
 }
 
 # 生成多尺寸图标与桌面入口文件。

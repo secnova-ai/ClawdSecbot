@@ -228,6 +228,23 @@ sudo dpkg -i clawsecbot_*.deb
 >
 > ClawSecbot 运行时会修改 `openclaw.json` 配置文件。卸载前还原配置可确保你的 Openclaw 在没有 ClawSecbot 的情况下仍能正常运行。
 
+项目提供了跨平台清理脚本，可清理安装目录、数据库、日志、沙箱策略、缓存与快捷方式：
+
+- **macOS/Linux**
+  ```bash
+  chmod +x ./scripts/uninstall/uninstall_unix.sh
+  ./scripts/uninstall/uninstall_unix.sh --dry-run
+  ./scripts/uninstall/uninstall_unix.sh --force
+  ```
+
+- **Windows**
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\scripts\uninstall\uninstall_windows.ps1 -DryRun
+  powershell -ExecutionPolicy Bypass -File .\scripts\uninstall\uninstall_windows.ps1 -Force
+  ```
+
+完整参数与清理范围见：[`mds/uninstall_guide_zh-CN.md`](mds/uninstall_guide_zh-CN.md)。
+
 ## 模块说明
 
 ### 核心模块 (`go_lib/core/`)
