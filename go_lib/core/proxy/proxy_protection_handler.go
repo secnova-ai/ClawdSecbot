@@ -93,69 +93,6 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 		}
 	}
 
-	// ==================== 单会话 Token 配额检查 ====================
-	if sessionLimit > 0 {
-		pp.metricsMu.Lock()
-		sessionTotal := pp.totalTokens - pp.baselineTotalTokens
-		if sessionTotal < 0 {
-			sessionTotal = 0
-		}
-		pp.metricsMu.Unlock()
-
-		pp.sendTerminalLog(fmt.Sprintf("📊 单会话 Token 用量: %d / %d", sessionTotal, sessionLimit))
-
-		if sessionTotal >= sessionLimit {
-			reason := fmt.Sprintf("单会话 Token 配额已用尽 (%d/%d)", sessionTotal, sessionLimit)
-			pp.sendTerminalLog(fmt.Sprintf(">>> %s,已拦截请求 <<<", reason))
-
-			pp.auditMu.Lock()
-			pp.requestStartTime = time.Now()
-			pp.currentRequestID = fmt.Sprintf("req_%d_%d", time.Now().UnixNano(), pp.requestCount+1)
-			requestID := pp.currentRequestID
-			pp.auditMu.Unlock()
-			pp.auditLogSafe("start_from_request_quota_session", func(tracker *AuditChainTracker) {
-				tracker.StartFromRequest(requestID, pp.assetName, pp.assetID, modelName, req.Messages)
-			})
-
-			pp.sendLog("proxy_session_quota_exceeded", map[string]interface{}{
-				"current": sessionTotal,
-				"limit":   sessionLimit,
-				"model":   modelName,
-			})
-
-			mockMsg := formatQuotaExceededMessage("session", sessionTotal, sessionLimit)
-			pp.updateTruthRecord(requestID, func(r *TruthRecord) {
-				r.Model = modelName
-				r.MessageCount = len(req.Messages)
-				r.Phase = RecordPhaseStopped
-				r.CompletedAt = time.Now().Format(time.RFC3339Nano)
-				r.FinishReason = "quota_exceeded"
-				r.ConversationTokens = conversationUsage
-				r.DailyTokens = pp.currentDailyTokenUsage()
-				r.OutputContent = truncateToBytes(mockMsg, maxRecordOutputBytes)
-				appendRequestMessagesToTruthRecord(r, req)
-				appendAssistantMessageToTruthRecord(r, mockMsg)
-				r.Decision = &SecurityDecision{
-					Action:     "BLOCK",
-					RiskLevel:  "QUOTA",
-					Reason:     reason,
-					Confidence: 100,
-				}
-				applyRecordPrimaryContent(r, RecordContentSecurity, mockMsg, true)
-			})
-
-			pp.emitMonitorRequestCreated(req, rawBody, stream)
-			pp.emitMonitorSecurityDecision("QUOTA_EXCEEDED", reason, true, mockMsg)
-			pp.emitMonitorResponseReturned("QUOTA_EXCEEDED", mockMsg, mockMsg)
-			pp.auditLogSafe("set_decision_quota_session", func(tracker *AuditChainTracker) {
-				tracker.SetRequestDecision(requestID, "BLOCK", "QUOTA", reason, 100)
-				tracker.FinalizeRequestOutput(requestID, mockMsg)
-			})
-			pp.clearRequestContext(ctx)
-			return &chatmodelrouting.FilterRequestResult{MockContent: mockMsg}, false
-		}
-	}
-
 	// ==================== 每日 Token 配额检查 ====================
 	if dailyLimit > 0 {
 		pp.metricsMu.Lock()
