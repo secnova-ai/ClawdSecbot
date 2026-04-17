@@ -14,6 +14,7 @@ import '../services/protection_database_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/runtime_platform.dart';
 import 'bot_model_config_form.dart';
+import 'processing_notice_card.dart';
 import 'security_model_config_form.dart';
 import '../services/plugin_service.dart';
 
@@ -56,6 +57,12 @@ class ProtectionConfigDialog extends StatefulWidget {
 
 class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     with SingleTickerProviderStateMixin {
+  static const String _dashboardReconnectHint =
+      '在此期间Openclaw Dashboard页面会提示断开连接，稍后将恢复正常';
+  static const String _defaultSavingMessage = '正在保存配置，请稍候...';
+  static const String _botModelUpdatingMessage =
+      '正在更新Openclaw配置，$_dashboardReconnectHint';
+
   static const Map<String, String> _zhSensitiveActionLabels = {
     'delete': '删除',
     'remove': '移除',
@@ -184,6 +191,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
 
   // 防止重复点击保存
   bool _isSaving = false;
+  String _savingProgressMessage = _defaultSavingMessage;
 
   // Shepherd User Rules
   final List<String> _sensitiveActions = [];
@@ -542,7 +550,10 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
   Future<void> _saveConfig({bool closeOnSave = true}) async {
     // 防止重复点击
     if (_isSaving) return;
-    setState(() => _isSaving = true);
+    setState(() {
+      _isSaving = true;
+      _savingProgressMessage = _defaultSavingMessage;
+    });
 
     try {
       final l10n = AppLocalizations.of(context)!;
@@ -732,6 +743,13 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           // 4b. 沙箱配置变更时同步到网关（修改 systemd unit / sandbox-exec 并重启 gateway）
           // 当沙箱开关变化或沙箱开启时权限可能变化，统一同步（函数幂等，无变化不重启）
           if (newConfig.sandboxEnabled || oldSandboxEnabled) {
+            final sandboxAction = newConfig.sandboxEnabled ? '安装' : '卸载';
+            if (mounted) {
+              setState(() {
+                _savingProgressMessage =
+                    '正在$sandboxAction权限管控沙箱，$_dashboardReconnectHint';
+              });
+            }
             appLogger.info(
               '[ProtectionConfig] Sandbox config may have changed '
               '(enabled: $oldSandboxEnabled -> ${newConfig.sandboxEnabled}), '
@@ -749,6 +767,11 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           );
           if (protectionService.isProxyRunning) {
             try {
+              if (mounted) {
+                setState(() {
+                  _savingProgressMessage = _botModelUpdatingMessage;
+                });
+              }
               final result = await protectionService
                   .restartProtectionProxyForBotModelUpdate(
                     securityModelConfig,
@@ -846,46 +869,13 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
         if (_isSaving)
           Positioned.fill(
             child: Container(
-              color: Colors.black.withValues(alpha: 0.5),
+              color: Colors.black.withValues(alpha: 0.42),
               child: Center(
-                child: Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1A1A2E),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.1),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        blurRadius: 24,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(
-                        width: 32,
-                        height: 32,
-                        child: CircularProgressIndicator(
-                          color: Color(0xFF6366F1),
-                          strokeWidth: 3,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        l10n.modelConfigSaving,
-                        style: AppFonts.inter(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          decoration: TextDecoration.none,
-                        ),
-                      ),
-                    ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: ProcessingNoticeCard(
+                    title: '正在应用配置',
+                    message: _savingProgressMessage,
                   ),
                 ),
               ),

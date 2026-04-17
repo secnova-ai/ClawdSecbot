@@ -12,6 +12,7 @@ import '../services/protection_service.dart';
 import '../services/provider_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/locale_utils.dart';
+import 'processing_notice_card.dart';
 
 /// Bot 模型配置表单（纯表单组件）
 /// 用于代理转发的目标 LLM 配置，写入 openclaw.json
@@ -251,11 +252,12 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
                   .getSecurityModelConfig();
               if (securityModelConfig != null) {
                 // 需要从数据库获取运行时配置
-                final result = await protectionService
-                    .restartProtectionProxyForBotModelUpdate(
-                      securityModelConfig,
-                      ProtectionRuntimeConfig(),
-                    );
+                final result = await _runWithBotRestartNotice(
+                  () => protectionService.restartProtectionProxyForBotModelUpdate(
+                    securityModelConfig,
+                    ProtectionRuntimeConfig(),
+                  ),
+                );
                 if (result['success'] == true) {
                   appLogger.info(
                     '[BotModelConfigForm] Bot model update: proxy restarted',
@@ -320,7 +322,10 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
       if (testResult['success'] == true) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(l10n.modelConfigTestSuccess)),
+            SnackBar(
+              content: Text(l10n.modelConfigTestSuccess),
+              backgroundColor: Colors.green,
+            ),
           );
         }
         return true;
@@ -341,6 +346,41 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
         setState(() {
           _testing = false;
         });
+      }
+    }
+  }
+
+  /// 执行 Bot 重启动作并显示用户友好的页面提示。
+  Future<Map<String, dynamic>> _runWithBotRestartNotice(
+    Future<Map<String, dynamic>> Function() action,
+  ) async {
+    if (!mounted) {
+      return action();
+    }
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+          child: ProcessingNoticeCard(
+            title: '正在更新配置',
+            message: '在此期间Openclaw Dashboard页面会提示断开连接，稍后将恢复正常',
+          ),
+        ),
+      ),
+    );
+    await Future.delayed(const Duration(milliseconds: 50));
+    try {
+      return await action();
+    } finally {
+      if (mounted) {
+        final navigator = Navigator.of(context, rootNavigator: true);
+        if (navigator.canPop()) {
+          navigator.pop();
+        }
       }
     }
   }

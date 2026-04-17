@@ -240,7 +240,10 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
       if (testResult['success'] == true) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(l10n.modelConfigTestSuccess)),
+            SnackBar(
+              content: Text(l10n.modelConfigTestSuccess),
+              backgroundColor: Colors.green,
+            ),
           );
         }
         return true;

@@ -220,6 +220,42 @@ function Test-BotSecUserCanCreateSymlink {
     }
 }
 
+# 判断当前 PowerShell 会话是否为管理员权限。
+function Test-BotSecIsAdministrator {
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
+
+# 当 runner 清单要求 requireAdministrator 时，flutter run 需在管理员终端内启动。
+function Assert-FlutterRunElevationRequirement {
+    $manifestPath = Join-Path $ProjectRoot "windows\runner\runner.exe.manifest"
+    if (-not (Test-Path $manifestPath)) {
+        return
+    }
+
+    $manifest = Get-Content -Path $manifestPath -Raw -ErrorAction SilentlyContinue
+    if ($null -eq $manifest) {
+        return
+    }
+    if ($manifest -notmatch 'requestedExecutionLevel\s+level="requireAdministrator"') {
+        return
+    }
+    if (Test-BotSecIsAdministrator) {
+        return
+    }
+
+    Write-Host ""
+    Write-Host "[错误] 当前 Windows Runner 清单为 requireAdministrator，flutter run 必须在管理员终端执行。" -ForegroundColor Red
+    Write-Host "      处理方式: 以管理员身份重新打开 PowerShell 后再运行本脚本。" -ForegroundColor Yellow
+    Write-Host ""
+    throw "Runner manifest requires elevation: please run this script in an elevated terminal."
+}
+
 # 在调用 flutter 前校验 symlink 前提, 避免 pub get 长时间下载后才失败.
 function Assert-FlutterWindowsSymlinkSupport {
     if ($env:BOTSEC_SKIP_DEV_MODE_CHECK -eq "1") {
@@ -293,6 +329,7 @@ Write-Host ""
 Write-Host "============================================" -ForegroundColor White
 Write-Host ""
 
+Assert-FlutterRunElevationRequirement
 Assert-FlutterWindowsSymlinkSupport
 
 if (Test-NeedFlutterPubGet -ProjectRootPath $ProjectRoot) {
