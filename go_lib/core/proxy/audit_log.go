@@ -178,15 +178,14 @@ func (b *AuditLogBuffer) ClearAuditLogsWithFilter(assetName, assetID string) {
 		b.logs = make([]AuditLog, 0)
 		return
 	}
+	// Enforce instance isolation by asset_id only.
+	if assetID == "" {
+		return
+	}
 
 	filtered := make([]AuditLog, 0, len(b.logs))
 	for _, log := range b.logs {
-		matches := false
-		if assetID != "" {
-			matches = log.AssetID == assetID
-		} else {
-			matches = log.AssetName == assetName
-		}
+		matches := log.AssetID == assetID
 		if !matches {
 			filtered = append(filtered, log)
 		}

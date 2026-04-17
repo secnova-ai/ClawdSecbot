@@ -10,7 +10,8 @@ import (
 	"go_lib/core/repository"
 )
 
-// SaveBotModelConfig stores bot model config by asset name + asset ID.
+// SaveBotModelConfig stores bot model config by asset ID.
+// AssetName is optional display metadata; instance isolation is based on asset_id.
 // Internally it updates ProtectionConfig.BotModelConfig.
 func SaveBotModelConfig(jsonStr string) map[string]interface{} {
 	var input struct {
@@ -27,12 +28,11 @@ func SaveBotModelConfig(jsonStr string) map[string]interface{} {
 		return errorMessageResult("invalid JSON: " + err.Error())
 	}
 
-	if input.AssetName == "" {
-		return errorMessageResult("asset_name is required")
-	}
 	if strings.TrimSpace(input.AssetID) == "" {
 		return errorMessageResult("asset_id is required")
 	}
+	input.AssetID = strings.TrimSpace(input.AssetID)
+	input.AssetName = strings.TrimSpace(input.AssetName)
 
 	repo := repository.NewProtectionRepository(nil)
 
@@ -45,9 +45,19 @@ func SaveBotModelConfig(jsonStr string) map[string]interface{} {
 
 	// Create config row when absent.
 	if config == nil {
+		assetName := input.AssetName
+		if assetName == "" {
+			assetName = inferAssetNameFromAssetID(input.AssetID)
+		}
 		config = &repository.ProtectionConfig{
-			AssetName: input.AssetName,
+			AssetName: assetName,
 			AssetID:   input.AssetID,
+		}
+	} else {
+		if input.AssetName != "" {
+			config.AssetName = input.AssetName
+		} else if strings.TrimSpace(config.AssetName) == "" {
+			config.AssetName = inferAssetNameFromAssetID(input.AssetID)
 		}
 	}
 
@@ -66,8 +76,17 @@ func SaveBotModelConfig(jsonStr string) map[string]interface{} {
 		return errorResult(err)
 	}
 
-	logging.Info("Bot model config saved via protection config: asset=%s (id=%s)", input.AssetName, input.AssetID)
+	logging.Info("Bot model config saved via protection config: asset=%s (id=%s)", config.AssetName, input.AssetID)
 	return successResult()
+}
+
+func inferAssetNameFromAssetID(assetID string) string {
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return ""
+	}
+	parts := strings.SplitN(assetID, ":", 2)
+	return strings.TrimSpace(parts[0])
 }
 
 // GetBotModelConfig loads bot model config for a specific asset instance.

@@ -160,22 +160,10 @@ class ProtectionMonitorService {
     return metricAssetID == _assetID;
   }
 
-  /// 带兜底的 asset_id 匹配：精确优先，漂移时按 asset_name 兜底并记录诊断日志。
+  /// 按 asset_id 精确匹配，避免同名实例串数据。
   bool _matchesTruthRecordAsset(TruthRecordModel record) {
     if (_assetID.isEmpty) return false;
-    if (record.assetID == _assetID) return true;
-    if (_assetName != null &&
-        _assetName!.isNotEmpty &&
-        record.assetName == _assetName) {
-      appLogger.warning(
-        '[ProtectionMonitor] asset_id drift detected: '
-        'expected=$_assetID got=${record.assetID} '
-        'fallback matched by asset_name=$_assetName '
-        'request_id=${record.requestId}',
-      );
-      return true;
-    }
-    return false;
+    return record.assetID == _assetID;
   }
 
   int _deltaWithReset(int current, int previous) {
@@ -608,14 +596,14 @@ class ProtectionMonitorService {
         messageCount: record.messageCount,
       );
       unawaited(
-        AuditLogDatabaseService()
-            .saveAuditLogsBatch([log])
-            .catchError((Object e) {
-              appLogger.error(
-                '[ProtectionMonitor] Failed to persist completed record',
-                e,
-              );
-            }),
+        AuditLogDatabaseService().saveAuditLogsBatch([log]).catchError((
+          Object e,
+        ) {
+          appLogger.error(
+            '[ProtectionMonitor] Failed to persist completed record',
+            e,
+          );
+        }),
       );
     } catch (e) {
       appLogger.error(
@@ -927,10 +915,11 @@ class ProtectionMonitorService {
   List<TruthRecordModel> fetchAllTruthRecordSnapshots() {
     try {
       final dylib = _getDylib();
-      final getSnapshots = dylib.lookupFunction<
-        GetAllTruthRecordSnapshotsC,
-        GetAllTruthRecordSnapshotsDart
-      >('GetAllTruthRecordSnapshots');
+      final getSnapshots = dylib
+          .lookupFunction<
+            GetAllTruthRecordSnapshotsC,
+            GetAllTruthRecordSnapshotsDart
+          >('GetAllTruthRecordSnapshots');
       final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
         'FreeString',
       );
@@ -946,7 +935,10 @@ class ProtectionMonitorService {
           .where(_matchesTruthRecordAsset)
           .toList();
     } catch (e) {
-      appLogger.error('[ProtectionMonitor] Fetch truth record snapshots failed', e);
+      appLogger.error(
+        '[ProtectionMonitor] Fetch truth record snapshots failed',
+        e,
+      );
       return [];
     }
   }
@@ -1019,10 +1011,15 @@ class ProtectionMonitorService {
   }
 
   void clearAuditLogsBufferWithFilter({String? assetName, String? assetID}) {
-    final hasAssetFilter =
-        (assetName != null && assetName.isNotEmpty) ||
-        (assetID != null && assetID.isNotEmpty);
-    if (!hasAssetFilter) {
+    final normalizedAssetID = (assetID ?? '').trim();
+    final normalizedAssetName = (assetName ?? '').trim();
+    if (normalizedAssetID.isEmpty && normalizedAssetName.isNotEmpty) {
+      appLogger.warning(
+        '[ProtectionMonitor] Skip clear buffer by asset_name without asset_id',
+      );
+      return;
+    }
+    if (normalizedAssetID.isEmpty) {
       clearAuditLogsBuffer();
       return;
     }
@@ -1037,10 +1034,7 @@ class ProtectionMonitorService {
       final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
         'FreeString',
       );
-      final argPtr = jsonEncode({
-        if (assetName != null && assetName.isNotEmpty) 'asset_name': assetName,
-        if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
-      }).toNativeUtf8();
+      final argPtr = jsonEncode({'asset_id': normalizedAssetID}).toNativeUtf8();
       final resultPtr = clearLogs(argPtr);
       freeString(resultPtr);
       malloc.free(argPtr);
@@ -1065,16 +1059,12 @@ class ProtectionMonitorService {
     final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
         ? assetID.trim()
         : (_assetID.isNotEmpty ? _assetID : null);
-    final effectiveAssetName =
-        (assetName != null && assetName.trim().isNotEmpty)
-        ? assetName.trim()
-        : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
 
     return await AuditLogDatabaseService().getAuditLogs(
       limit: limit,
       offset: offset,
       riskOnly: riskOnly,
-      assetName: effectiveAssetName,
+      assetName: assetName?.trim(),
       assetID: effectiveAssetID,
       startTime: startTime,
       endTime: endTime,
@@ -1092,13 +1082,9 @@ class ProtectionMonitorService {
     final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
         ? assetID.trim()
         : (_assetID.isNotEmpty ? _assetID : null);
-    final effectiveAssetName =
-        (assetName != null && assetName.trim().isNotEmpty)
-        ? assetName.trim()
-        : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
     return await AuditLogDatabaseService().getAuditLogCount(
       riskOnly: riskOnly,
-      assetName: effectiveAssetName,
+      assetName: assetName?.trim(),
       assetID: effectiveAssetID,
       searchQuery: searchQuery,
     );
@@ -1111,12 +1097,8 @@ class ProtectionMonitorService {
     final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
         ? assetID.trim()
         : (_assetID.isNotEmpty ? _assetID : null);
-    final effectiveAssetName =
-        (assetName != null && assetName.trim().isNotEmpty)
-        ? assetName.trim()
-        : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
     return await AuditLogDatabaseService().getAuditLogStatistics(
-      assetName: effectiveAssetName,
+      assetName: assetName?.trim(),
       assetID: effectiveAssetID,
     );
   }
@@ -1129,12 +1111,8 @@ class ProtectionMonitorService {
     final effectiveAssetID = (assetID != null && assetID.trim().isNotEmpty)
         ? assetID.trim()
         : (_assetID.isNotEmpty ? _assetID : null);
-    final effectiveAssetName =
-        (assetName != null && assetName.trim().isNotEmpty)
-        ? assetName.trim()
-        : (((_assetName ?? '').isNotEmpty) ? _assetName : null);
     await AuditLogDatabaseService().clearAuditLogs(
-      assetName: effectiveAssetName,
+      assetName: assetName?.trim(),
       assetID: effectiveAssetID,
     );
   }

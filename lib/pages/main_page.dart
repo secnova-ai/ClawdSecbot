@@ -697,26 +697,6 @@ class _MainPageState extends State<MainPage>
     }
   }
 
-  String _resolveAssetIDFromScan(String assetName, [ScanResult? scanResult]) {
-    final assets =
-        scanResult?.assets ??
-        _pendingScanResult?.assets ??
-        _result?.assets ??
-        const <Asset>[];
-    final matches = assets
-        .where((asset) => asset.name == assetName && asset.id.isNotEmpty)
-        .toList();
-    if (matches.isEmpty) {
-      return '';
-    }
-    if (matches.length > 1) {
-      appLogger.warning(
-        '[MainPage] Multiple assets matched for empty assetID restore: $assetName, using first',
-      );
-    }
-    return matches.first.id;
-  }
-
   void _startExternalStateRefresh() {
     _externalStateRefreshTimer?.cancel();
     _externalStateRefreshTimer = Timer.periodic(const Duration(seconds: 3), (
@@ -741,43 +721,7 @@ class _MainPageState extends State<MainPage>
     final nextProtectedAssetNamesByID = <String, String>{};
 
     for (final config in enabledConfigs) {
-      var resolvedAssetID = config.assetID;
-      if (resolvedAssetID.isEmpty) {
-        resolvedAssetID = _resolveAssetIDFromScan(config.assetName, scanResult);
-        if (resolvedAssetID.isNotEmpty) {
-          try {
-            final modelService = ModelConfigDatabaseService();
-            final oldBotModelConfig = await modelService.getBotModelConfig(
-              config.assetName,
-              config.assetID,
-            );
-            if (oldBotModelConfig != null) {
-              await modelService.saveBotModelConfig(
-                oldBotModelConfig.copyWith(assetID: resolvedAssetID),
-              );
-              await modelService.deleteBotModelConfig(
-                config.assetName,
-                config.assetID,
-              );
-            }
-
-            await ProtectionDatabaseService().saveProtectionConfig(
-              config.copyWith(assetID: resolvedAssetID),
-            );
-            await ProtectionDatabaseService().deleteProtectionConfig(
-              config.assetName,
-              config.assetID,
-            );
-            appLogger.info(
-              '[MainPage] Migrated protection config assetID: ${config.assetName} -> $resolvedAssetID',
-            );
-          } catch (e) {
-            appLogger.warning(
-              '[MainPage] Failed to migrate empty assetID for ${config.assetName}: $e',
-            );
-          }
-        }
-      }
+      final resolvedAssetID = config.assetID.trim();
 
       if (resolvedAssetID.isEmpty) {
         appLogger.warning(
@@ -1723,8 +1667,8 @@ class _MainPageState extends State<MainPage>
     );
   }
 
-  /// 从 DB 重建 _protectedAssetIDs，按名字映射到扫描结果的最新 asset_id。
-  /// 解决 bot 重启导致 asset_id 临时变化时 UI 匹配不上的问题。
+  /// 从 DB 重建 _protectedAssetIDs。
+  /// 实例标识仅按 asset_id 处理，避免同名资产误匹配。
   Future<void> _syncProtectedAssetsWithScanResult(List<Asset> assets) async {
     final enabledConfigs = await ProtectionDatabaseService()
         .getEnabledProtectionConfigs();
@@ -1739,10 +1683,8 @@ class _MainPageState extends State<MainPage>
       return;
     }
 
-    final scanIdByName = <String, String>{};
     final scanIdSet = <String>{};
     for (final asset in assets) {
-      scanIdByName[asset.name] = asset.id;
       scanIdSet.add(asset.id);
     }
 
@@ -1754,18 +1696,8 @@ class _MainPageState extends State<MainPage>
         newIDs.add(config.assetID);
         newNames[config.assetID] = config.assetName;
       } else {
-        final scanID = scanIdByName[config.assetName];
-        if (scanID != null) {
-          appLogger.info(
-            '[MainPage] Sync: asset_id changed for ${config.assetName}: '
-            '${config.assetID} -> $scanID',
-          );
-          newIDs.add(scanID);
-          newNames[scanID] = config.assetName;
-        } else {
-          newIDs.add(config.assetID);
-          newNames[config.assetID] = config.assetName;
-        }
+        newIDs.add(config.assetID);
+        newNames[config.assetID] = config.assetName;
       }
     }
 
@@ -2164,13 +2096,18 @@ class _MainPageState extends State<MainPage>
           ),
         ),
         content: Text(
-          l10n.deleteRiskSkillConfirm(skillName.isNotEmpty ? skillName : skillHash),
+          l10n.deleteRiskSkillConfirm(
+            skillName.isNotEmpty ? skillName : skillHash,
+          ),
           style: AppFonts.inter(fontSize: 14, color: Colors.white70),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(l10n.cancel, style: AppFonts.inter(color: Colors.white54)),
+            child: Text(
+              l10n.cancel,
+              style: AppFonts.inter(color: Colors.white54),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
