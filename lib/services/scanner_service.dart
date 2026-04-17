@@ -5,7 +5,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../config/build_config.dart';
 import '../l10n/app_localizations.dart';
-import '../models/asset_model.dart';
 import '../models/risk_model.dart';
 import 'plugin_service.dart';
 import 'scan_database_service.dart';
@@ -66,7 +65,6 @@ class BotScanner {
   }
 
   Future<ScanResult> rediscoverSecurityFindings({
-    required List<Asset> assets,
     required bool configFound,
     String? configPath,
     Map<String, dynamic>? config,
@@ -74,19 +72,22 @@ class BotScanner {
     _log('Refreshing security findings...');
     await Future.delayed(const Duration(milliseconds: 150));
 
-    final baseRisks = await _pluginService.assessRisksOnly();
+    // Re-scan assets to avoid reusing stale asset snapshots during
+    // "security discovery" refresh.
+    final pluginResult = await _pluginService.scan();
+    final baseRisks = List<RiskInfo>.from(pluginResult.riskInfo);
     _log('Found ${baseRisks.length} potential issues.');
 
     _checkSystemRisks(baseRisks);
     final skillRisks = await _loadRiskySkills();
 
     return ScanResult(
-      config: config,
+      config: pluginResult.config ?? config,
       riskInfo: baseRisks,
       skillResult: skillRisks,
-      configFound: configFound,
-      configPath: configPath,
-      assets: assets,
+      configFound: pluginResult.configFound || configFound,
+      configPath: pluginResult.configPath ?? configPath,
+      assets: pluginResult.assets,
       scannedAt: DateTime.now(),
     );
   }
@@ -158,6 +159,8 @@ class BotScanner {
             args: {
               'skillName': skillName,
               'skillHash': skill['skill_hash'] as String? ?? '',
+              'asset_name': skill['source_plugin'] as String? ?? '',
+              'asset_id': skill['asset_id'] as String? ?? '',
               'issueCount': normalizedIssueCount,
               'issues': issues.join('; '),
               if ((skill['skill_path'] as String? ?? '').isNotEmpty)
@@ -167,6 +170,7 @@ class BotScanner {
             description: description,
             level: _parseSkillRiskLevel(skill['risk_level'] as String?),
             icon: LucideIcons.alertTriangle,
+            sourcePlugin: skill['source_plugin'] as String? ?? '',
           ),
         );
         _log('Found risky skill: $skillName ($normalizedIssueCount issues)');
@@ -187,9 +191,11 @@ class BotScanner {
       final skillName = (skill['skill_name'] as String? ?? '').trim();
       final skillHash = (skill['skill_hash'] as String? ?? '').trim();
       final skillPath = (skill['skill_path'] as String? ?? '').trim();
+      final sourcePlugin = (skill['source_plugin'] as String? ?? '').trim();
+      final assetID = (skill['asset_id'] as String? ?? '').trim();
       final key = skillPath.isNotEmpty
-          ? 'path:${skillPath.toLowerCase()}'
-          : 'fallback:${skillName.toLowerCase()}|${skillHash.toLowerCase()}';
+          ? 'path:${skillPath.toLowerCase()}|${sourcePlugin.toLowerCase()}|${assetID.toLowerCase()}'
+          : 'fallback:${skillName.toLowerCase()}|${skillHash.toLowerCase()}|${sourcePlugin.toLowerCase()}|${assetID.toLowerCase()}';
       final issues = (skill['issues'] as List<String>? ?? const <String>[])
           .where((issue) => issue.trim().isNotEmpty)
           .toList();

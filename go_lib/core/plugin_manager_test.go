@@ -64,11 +64,20 @@ type mitigationAwarePlugin struct {
 	handledRiskID string
 }
 
+type riskAssessPlugin struct {
+	testPlugin
+	risks []Risk
+}
+
 func (p *mitigationAwarePlugin) MitigateRisk(riskInfo string) string {
 	if strings.Contains(riskInfo, `"`+"id"+`":"`+p.handledRiskID+`"`) {
 		return `{"success":true}`
 	}
 	return `{"success":false,"error":"not implemented"}`
+}
+
+func (p *riskAssessPlugin) AssessRisks(scannedHashes map[string]bool) ([]Risk, error) {
+	return p.risks, nil
 }
 
 func newTestPlugin(assetName string) *testPlugin {
@@ -254,5 +263,49 @@ func TestPluginManager_GetAllPluginInfos_IncludesManifestAndSchema(t *testing.T)
 	infos2 := pm.GetAllPluginInfos()
 	if infos2[0].AssetUISchema == nil || infos2[0].AssetUISchema.ID != "openclaw.asset.v1" {
 		t.Fatalf("expected original schema to remain intact, got %#v", infos2[0].AssetUISchema)
+	}
+}
+
+func TestPluginManager_AssessAllRisks_IncludesAssetNameInArgs(t *testing.T) {
+	pm := &PluginManager{
+		registeredPlugins: make(map[string]BotPlugin),
+		instances:         make(map[string]*AssetPluginInstance),
+	}
+	p := &riskAssessPlugin{
+		testPlugin: *newTestPlugin("Openclaw"),
+		risks: []Risk{
+			{
+				ID:    "sample_risk",
+				Title: "Sample Risk",
+				Level: RiskLevelMedium,
+			},
+			{
+				ID:    "sample_risk_with_args",
+				Title: "Sample Risk with Args",
+				Level: RiskLevelHigh,
+				Args: map[string]interface{}{
+					"asset_name": "custom_asset",
+				},
+			},
+		},
+	}
+	pm.Register(p)
+
+	risks, err := pm.AssessAllRisks(nil)
+	if err != nil {
+		t.Fatalf("AssessAllRisks failed: %v", err)
+	}
+	if len(risks) != 2 {
+		t.Fatalf("expected 2 risks, got %d", len(risks))
+	}
+
+	if got := risks[0].SourcePlugin; got != "Openclaw" {
+		t.Fatalf("expected source plugin Openclaw, got %q", got)
+	}
+	if got := risks[0].Args["asset_name"]; got != "Openclaw" {
+		t.Fatalf("expected injected asset_name Openclaw, got %#v", got)
+	}
+	if got := risks[1].Args["asset_name"]; got != "custom_asset" {
+		t.Fatalf("expected existing asset_name to be kept, got %#v", got)
 	}
 }

@@ -100,6 +100,38 @@
   "riskLogDirPermUnsafeDesc": "Log directory permissions are unsafe, expected 700.",
   "riskPlaintextSecrets": "Plaintext Secrets Detected",
   "riskPlaintextSecretsDesc": "Potential plaintext secret found in config file (pattern: {pattern}). Use environment variables or a secrets manager.",
+  "riskGatewayAuthPasswordMode": "Gateway Password Mode Enabled",
+  "riskGatewayAuthPasswordModeDesc": "Gateway is in password mode. This mode is easier to brute-force than token mode. Switch to token mode.",
+  "riskGatewayWeakToken": "Weak Gateway Token",
+  "riskGatewayWeakTokenDesc": "Gateway token strength is insufficient. Regenerate a stronger token immediately.",
+  "riskAuditDisabled": "Audit Logging Disabled",
+  "riskAuditDisabledDesc": "Security audit logging is disabled. Important risky actions may not be traceable.",
+  "riskAutonomyWorkspaceUnrestricted": "Workspace Scope Is Not Restricted",
+  "riskAutonomyWorkspaceUnrestrictedDesc": "Agent workspace restriction is disabled. The agent may access files outside the intended workspace.",
+  "riskMemoryDirPermUnsafe": "Memory Directory Permission Unsafe",
+  "riskMemoryDirPermUnsafeDesc": "The memory directory permissions are too broad. Tighten directory access permissions.",
+  "riskProcessRunningAsRoot": "Process Running As Root",
+  "riskProcessRunningAsRootDesc": "The process is running as root. Use a restricted non-root account.",
+  "riskSkillAgentRisk": "High-Risk Skill Detected",
+  "riskSkillAgentRiskDesc": "A high-risk skill was detected. Delete or disable it if not trusted.",
+  "riskTerminalBackendLocal": "Terminal Backend Is Local",
+  "riskTerminalBackendLocalDesc": "terminal.backend is local, so agent operations execute directly on host without isolation.",
+  "riskApprovalsModeDisabled": "Approvals Mode Disabled",
+  "riskApprovalsModeDisabledDesc": "approvals.mode is '{mode}', so risky actions may run without interactive confirmation.",
+  "@riskApprovalsModeDisabledDesc": {
+    "placeholders": {
+      "mode": {"type": "String"}
+    }
+  },
+  "riskRedactSecretsDisabled": "Secret Redaction Disabled",
+  "riskRedactSecretsDisabledDesc": "security.redact_secrets is false. Sensitive tokens may leak into logs.",
+  "riskModelBaseUrlPublic": "Custom Model Endpoint Is Public",
+  "riskModelBaseUrlPublicDesc": "model.base_url points to a non-local endpoint: {baseUrl}. Restrict it to local or trusted private network.",
+  "@riskModelBaseUrlPublicDesc": {
+    "placeholders": {
+      "baseUrl": {"type": "String"}
+    }
+  },
 
   "riskOneClickRce": "1-click RCE Remote Code Execution Vulnerability",
   "riskOneClickRceDesc": "OpenClaw has a critical 1-click RCE vulnerability (CVSS 10.0). Attackers can execute arbitrary code by tricking users into visiting malicious websites. Affected versions: < 2026.1.24-1, current version: {version}. Upgrade to the latest version immediately.",

@@ -214,6 +214,12 @@ func (pm *PluginManager) AssessAllRisks(scannedHashes map[string]bool) ([]Risk, 
 
 		for i := range risks {
 			risks[i].SourcePlugin = assetName
+			if risks[i].Args == nil {
+				risks[i].Args = map[string]interface{}{}
+			}
+			if _, exists := risks[i].Args["asset_name"]; !exists {
+				risks[i].Args["asset_name"] = assetName
+			}
 		}
 		logging.Info("Plugin %s found %d risks", assetName, len(risks))
 		allRisks = append(allRisks, risks...)

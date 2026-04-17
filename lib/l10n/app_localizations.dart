@@ -512,6 +512,138 @@ abstract class AppLocalizations {
   /// **'在配置文件中发现潜在的明文密钥 (匹配模式: {pattern})。请使用环境变量或密钥管理工具。'**
   String riskPlaintextSecretsDesc(String pattern);
 
+  /// No description provided for @riskGatewayAuthPasswordMode.
+  ///
+  /// In zh, this message translates to:
+  /// **'网关启用了密码模式'**
+  String get riskGatewayAuthPasswordMode;
+
+  /// No description provided for @riskGatewayAuthPasswordModeDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'网关当前使用密码认证，相比 Token 模式更易被暴力破解。建议切换为 Token 模式。'**
+  String get riskGatewayAuthPasswordModeDesc;
+
+  /// No description provided for @riskGatewayWeakToken.
+  ///
+  /// In zh, this message translates to:
+  /// **'网关 Token 强度不足'**
+  String get riskGatewayWeakToken;
+
+  /// No description provided for @riskGatewayWeakTokenDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前网关 Token 强度不足，建议立即轮换为高强度 Token。'**
+  String get riskGatewayWeakTokenDesc;
+
+  /// No description provided for @riskAuditDisabled.
+  ///
+  /// In zh, this message translates to:
+  /// **'安全审计日志已禁用'**
+  String get riskAuditDisabled;
+
+  /// No description provided for @riskAuditDisabledDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'安全审计日志处于关闭状态，关键高风险操作可能无法追溯。'**
+  String get riskAuditDisabledDesc;
+
+  /// No description provided for @riskAutonomyWorkspaceUnrestricted.
+  ///
+  /// In zh, this message translates to:
+  /// **'工作区访问范围未限制'**
+  String get riskAutonomyWorkspaceUnrestricted;
+
+  /// No description provided for @riskAutonomyWorkspaceUnrestrictedDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'Agent 未限制在工作区内访问文件，可能越界读取或写入非预期路径。'**
+  String get riskAutonomyWorkspaceUnrestrictedDesc;
+
+  /// No description provided for @riskMemoryDirPermUnsafe.
+  ///
+  /// In zh, this message translates to:
+  /// **'memory 目录权限不安全'**
+  String get riskMemoryDirPermUnsafe;
+
+  /// No description provided for @riskMemoryDirPermUnsafeDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'memory 目录权限过宽，可能导致运行时记忆数据泄露。建议收紧目录权限。'**
+  String get riskMemoryDirPermUnsafeDesc;
+
+  /// No description provided for @riskProcessRunningAsRoot.
+  ///
+  /// In zh, this message translates to:
+  /// **'进程以 root 身份运行'**
+  String get riskProcessRunningAsRoot;
+
+  /// No description provided for @riskProcessRunningAsRootDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'检测到进程以 root 身份运行，建议改为普通用户以降低高权限风险。'**
+  String get riskProcessRunningAsRootDesc;
+
+  /// No description provided for @riskSkillAgentRisk.
+  ///
+  /// In zh, this message translates to:
+  /// **'检测到高风险 Skill'**
+  String get riskSkillAgentRisk;
+
+  /// No description provided for @riskSkillAgentRiskDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'检测到高风险 Skill。若不可信，建议立即删除或禁用。'**
+  String get riskSkillAgentRiskDesc;
+
+  /// No description provided for @riskTerminalBackendLocal.
+  ///
+  /// In zh, this message translates to:
+  /// **'终端后端为本地执行'**
+  String get riskTerminalBackendLocal;
+
+  /// No description provided for @riskTerminalBackendLocalDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'terminal.backend 为 local，Agent 操作将直接在宿主机执行，缺少远程隔离。'**
+  String get riskTerminalBackendLocalDesc;
+
+  /// No description provided for @riskApprovalsModeDisabled.
+  ///
+  /// In zh, this message translates to:
+  /// **'审批模式已禁用'**
+  String get riskApprovalsModeDisabled;
+
+  /// No description provided for @riskApprovalsModeDisabledDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'approvals.mode 为 \'{mode}\'，高风险操作可能无需交互确认即可执行。'**
+  String riskApprovalsModeDisabledDesc(String mode);
+
+  /// No description provided for @riskRedactSecretsDisabled.
+  ///
+  /// In zh, this message translates to:
+  /// **'密钥脱敏已禁用'**
+  String get riskRedactSecretsDisabled;
+
+  /// No description provided for @riskRedactSecretsDisabledDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'security.redact_secrets 为 false，敏感凭据可能泄露到日志。'**
+  String get riskRedactSecretsDisabledDesc;
+
+  /// No description provided for @riskModelBaseUrlPublic.
+  ///
+  /// In zh, this message translates to:
+  /// **'自定义模型地址暴露公网'**
+  String get riskModelBaseUrlPublic;
+
+  /// No description provided for @riskModelBaseUrlPublicDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'model.base_url 指向非本地地址：{baseUrl}。建议改为本地或受控私网地址。'**
+  String riskModelBaseUrlPublicDesc(String baseUrl);
+
   /// No description provided for @riskOneClickRce.
   ///
   /// In zh, this message translates to:

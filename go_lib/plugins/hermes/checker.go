@@ -73,6 +73,9 @@ func checkApprovalsMode(config *HermesConfig, risks *[]core.Risk) {
 			Title:       "Approvals Mode Disabled",
 			Description: fmt.Sprintf("approvals.mode is '%s'; risky actions may run without interactive confirmation", mode),
 			Level:       core.RiskLevelHigh,
+			Args: map[string]interface{}{
+				"mode": mode,
+			},
 		})
 	}
 }

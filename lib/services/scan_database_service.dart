@@ -464,6 +464,8 @@ class ScanDatabaseService {
           'skillName': skillName,
           if ((skill['skill_hash'] as String? ?? '').isNotEmpty)
             'skillHash': skill['skill_hash'] as String,
+          'asset_name': skill['source_plugin'] as String? ?? '',
+          'asset_id': skill['asset_id'] as String? ?? '',
           'issueCount': normalizedIssueCount,
           'issues': issues.join('; '),
           if ((skill['skill_path'] as String? ?? '').isNotEmpty)
@@ -475,6 +477,7 @@ class ScanDatabaseService {
             : 'Skill "$skillName" was flagged as potentially risky.',
         level: _parseRiskLevel(skill['risk_level']),
         icon: Icons.warning,
+        sourcePlugin: skill['source_plugin'] as String? ?? '',
       );
     }).toList();
   }
@@ -488,9 +491,11 @@ class ScanDatabaseService {
       final skillName = (skill['skill_name'] as String? ?? '').trim();
       final skillHash = (skill['skill_hash'] as String? ?? '').trim();
       final skillPath = (skill['skill_path'] as String? ?? '').trim();
+      final sourcePlugin = (skill['source_plugin'] as String? ?? '').trim();
+      final assetID = (skill['asset_id'] as String? ?? '').trim();
       final key = skillPath.isNotEmpty
-          ? 'path:${skillPath.toLowerCase()}'
-          : 'fallback:${skillName.toLowerCase()}|${skillHash.toLowerCase()}';
+          ? 'path:${skillPath.toLowerCase()}|${sourcePlugin.toLowerCase()}|${assetID.toLowerCase()}'
+          : 'fallback:${skillName.toLowerCase()}|${skillHash.toLowerCase()}|${sourcePlugin.toLowerCase()}|${assetID.toLowerCase()}';
 
       final issueList = (skill['issues'] as List<String>? ?? const <String>[])
           .where((issue) => issue.trim().isNotEmpty)
@@ -539,6 +544,8 @@ class ScanDatabaseService {
       skillMetaByName[skillName] = {
         'skillHash': skill['skill_hash'] as String? ?? '',
         'skillPath': skill['skill_path'] as String? ?? '',
+        'sourcePlugin': skill['source_plugin'] as String? ?? '',
+        'assetID': skill['asset_id'] as String? ?? '',
       };
     }
 
@@ -564,6 +571,14 @@ class ScanDatabaseService {
       if (riskSkillPath.isEmpty && (metadata['skillPath'] ?? '').isNotEmpty) {
         args['skillPath'] = metadata['skillPath']!;
       }
+      if ((args['asset_name']?.toString() ?? '').trim().isEmpty &&
+          (metadata['sourcePlugin'] ?? '').isNotEmpty) {
+        args['asset_name'] = metadata['sourcePlugin']!;
+      }
+      if ((args['asset_id']?.toString() ?? '').trim().isEmpty &&
+          (metadata['assetID'] ?? '').isNotEmpty) {
+        args['asset_id'] = metadata['assetID']!;
+      }
 
       return RiskInfo(
         id: risk.id,
@@ -573,7 +588,11 @@ class ScanDatabaseService {
         icon: risk.icon,
         args: args,
         mitigation: risk.mitigation,
-        sourcePlugin: risk.sourcePlugin,
+        sourcePlugin:
+            risk.sourcePlugin ??
+            (metadata['sourcePlugin']?.trim().isNotEmpty == true
+                ? metadata['sourcePlugin']
+                : null),
       );
     }).toList();
   }
