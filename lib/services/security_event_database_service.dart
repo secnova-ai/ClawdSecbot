@@ -1,16 +1,7 @@
 import 'dart:convert';
-import 'dart:ffi' as ffi;
-import 'package:ffi/ffi.dart';
+import '../core_transport/transport_registry.dart';
 import '../models/security_event_model.dart';
 import '../utils/app_logger.dart';
-import 'native_library_service.dart';
-
-// FFI type definitions
-typedef _OneArgC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef _OneArgDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-
-typedef _NoArgC = ffi.Pointer<Utf8> Function();
-typedef _NoArgDart = ffi.Pointer<Utf8> Function();
 
 /// 安全事件 FFI 持久化门面：通过 FFI 委托 Go 层进行数据持久化，Flutter 不直接操作 DB。
 class SecurityEventDatabaseService {
@@ -20,9 +11,6 @@ class SecurityEventDatabaseService {
   factory SecurityEventDatabaseService() => _instance;
 
   SecurityEventDatabaseService._internal();
-
-  ffi.DynamicLibrary? get _dylib => NativeLibraryService().dylib;
-  FreeStringDart? get _freeString => NativeLibraryService().freeString;
 
   /// 批量保存安全事件
   Future<void> saveSecurityEventsBatch(List<SecurityEvent> events) async {
@@ -95,17 +83,13 @@ class SecurityEventDatabaseService {
   // --- Helper methods ---
 
   Map<String, dynamic> _callFFINoArg(String funcName) {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
       return {'success': false, 'error': 'Native library not initialized'};
     }
 
     try {
-      final func = dylib.lookupFunction<_NoArgC, _NoArgDart>(funcName);
-      final resultPtr = func();
-      final result = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      return jsonDecode(result) as Map<String, dynamic>;
+      return transport.callNoArg(funcName);
     } catch (e) {
       appLogger.error('[SecurityEventDB] $funcName failed: $e');
       return {'success': false, 'error': '$funcName failed: $e'};
@@ -113,19 +97,13 @@ class SecurityEventDatabaseService {
   }
 
   Map<String, dynamic> _callFFI(String funcName, String jsonStr) {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
       return {'success': false, 'error': 'Native library not initialized'};
     }
 
     try {
-      final func = dylib.lookupFunction<_OneArgC, _OneArgDart>(funcName);
-      final argPtr = jsonStr.toNativeUtf8();
-      final resultPtr = func(argPtr);
-      final result = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(argPtr);
-      return jsonDecode(result) as Map<String, dynamic>;
+      return transport.callOneArg(funcName, jsonStr);
     } catch (e) {
       appLogger.error('[SecurityEventDB] $funcName failed: $e');
       return {'success': false, 'error': '$funcName failed: $e'};

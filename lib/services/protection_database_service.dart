@@ -1,17 +1,8 @@
 import 'dart:convert';
-import 'dart:ffi' as ffi;
-import 'package:ffi/ffi.dart';
 import '../models/protection_analysis_model.dart';
 import '../models/protection_config_model.dart';
+import '../core_transport/transport_registry.dart';
 import '../utils/app_logger.dart';
-import 'native_library_service.dart';
-
-// FFI type definitions
-typedef _OneArgC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef _OneArgDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-
-typedef _NoArgC = ffi.Pointer<Utf8> Function();
-typedef _NoArgDart = ffi.Pointer<Utf8> Function();
 
 /// 防护配置 FFI 持久化门面：通过 FFI 委托 Go 层进行数据持久化，Flutter 不直接操作 DB。
 /// 管理 protection_state, protection_config, protection_statistics 等持久化能力。
@@ -22,11 +13,6 @@ class ProtectionDatabaseService {
   factory ProtectionDatabaseService() => _instance;
 
   ProtectionDatabaseService._internal();
-
-  ffi.DynamicLibrary? get _dylib => NativeLibraryService().dylib;
-  FreeStringDart? get _freeString => NativeLibraryService().freeString;
-
-  String? _lastLoggedEnabledConfigsSummary;
 
   // --- Protection State methods ---
 
@@ -145,18 +131,9 @@ class ProtectionDatabaseService {
         appLogger.warning('[ProtectionDB] Failed to parse config: $e');
       }
     }
-    final enabledConfigsSummary = configs
-        .map(
-          (config) =>
-              '${config.assetName}|${config.assetID}|${config.enabled ? 1 : 0}',
-        )
-        .join(';');
-    if (_lastLoggedEnabledConfigsSummary != enabledConfigsSummary) {
-      _lastLoggedEnabledConfigsSummary = enabledConfigsSummary;
-      appLogger.info(
-        '[ProtectionDB] Enabled protection configs count: ${configs.length}',
-      );
-    }
+    appLogger.info(
+      '[ProtectionDB] Enabled protection configs count: ${configs.length}',
+    );
     return configs;
   }
 
@@ -296,13 +273,6 @@ class ProtectionDatabaseService {
     return data.cast<String>();
   }
 
-  Future<List<String>> getShepherdSensitiveActionsByAsset(
-    String assetName, [
-    String assetID = '',
-  ]) async {
-    return getShepherdSensitiveActions(assetName, assetID);
-  }
-
   Future<void> saveShepherdSensitiveActions(
     String assetName,
     String assetID,
@@ -326,17 +296,13 @@ class ProtectionDatabaseService {
 
   /// 调用无参数FFI函数
   Map<String, dynamic> _callFFINoArg(String funcName) {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
       return {'success': false, 'error': 'Native library not initialized'};
     }
 
     try {
-      final func = dylib.lookupFunction<_NoArgC, _NoArgDart>(funcName);
-      final resultPtr = func();
-      final result = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      return jsonDecode(result) as Map<String, dynamic>;
+      return transport.callNoArg(funcName);
     } catch (e) {
       appLogger.error('[ProtectionDB] $funcName failed: $e');
       return {'success': false, 'error': '$funcName failed: $e'};
@@ -345,19 +311,13 @@ class ProtectionDatabaseService {
 
   /// 调用接收单个字符串参数的FFI函数
   Map<String, dynamic> _callFFIOneArg(String funcName, String arg) {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
       return {'success': false, 'error': 'Native library not initialized'};
     }
 
     try {
-      final func = dylib.lookupFunction<_OneArgC, _OneArgDart>(funcName);
-      final argPtr = arg.toNativeUtf8();
-      final resultPtr = func(argPtr);
-      final result = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(argPtr);
-      return jsonDecode(result) as Map<String, dynamic>;
+      return transport.callOneArg(funcName, arg);
     } catch (e) {
       appLogger.error('[ProtectionDB] $funcName failed: $e');
       return {'success': false, 'error': '$funcName failed: $e'};

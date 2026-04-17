@@ -1,8 +1,6 @@
 import 'dart:convert';
-import 'dart:ffi' as ffi;
-import 'dart:isolate';
-import 'package:ffi/ffi.dart';
 
+import '../core_transport/transport_registry.dart';
 import '../models/llm_config_model.dart';
 import '../models/audit_log_model.dart';
 import '../models/protection_analysis_model.dart';
@@ -12,10 +10,8 @@ import '../models/security_event_model.dart';
 import '../utils/locale_utils.dart';
 import 'model_config_database_service.dart';
 import 'metrics_database_service.dart';
-import 'native_library_service.dart' hide FreeStringDart;
 import 'protection_database_service.dart';
 import 'protection_monitor_service.dart';
-import 'protection_proxy_ffi.dart';
 import '../utils/app_logger.dart';
 
 /// 防护服务：统一管理代理启停、配置热更新、环境同步与监控协调。
@@ -117,18 +113,6 @@ class ProtectionService {
   }
 
   bool get _hasAssetBinding => _assetID.isNotEmpty;
-
-  // === 内部工具 ===
-
-  ffi.DynamicLibrary _getDylib() {
-    final dylib = NativeLibraryService().dylib;
-    if (dylib == null) {
-      throw Exception('Plugin library not loaded');
-    }
-    return dylib;
-  }
-
-  String? _getLibraryPath() => NativeLibraryService().libraryPath;
 
   // ============================================================
   // 代理生命周期
@@ -347,20 +331,12 @@ class ProtectionService {
     };
 
     final configJSON = jsonEncode(configPayload);
-
-    final libPath = _getLibraryPath();
-    if (libPath == null) {
-      throw Exception('Plugin library not found');
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
+      throw Exception('Transport not initialized');
     }
 
-    final resultStr = await Isolate.run(() {
-      return ProtectionProxyFFI.startProtectionProxyInIsolate(
-        libPath,
-        configJSON,
-      );
-    });
-
-    final result = jsonDecode(resultStr);
+    final result = transport.callOneArg('StartProtectionProxy', configJSON);
     appLogger.info(
       '[Protection] Proxy start result: success=${result['success']}',
     );
@@ -410,25 +386,14 @@ class ProtectionService {
 
     appLogger.info('[Protection] Stopping proxy...');
     try {
-      final libPath = _getLibraryPath();
-      if (libPath == null) {
-        throw Exception('Plugin library not found');
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) {
+        throw Exception('Transport not initialized');
       }
 
-      final hasAssetBinding = _hasAssetBinding;
-      final assetID = _assetID;
-
-      final resultStr = await Isolate.run(() {
-        if (hasAssetBinding) {
-          return ProtectionProxyFFI.stopProtectionProxyByAssetInIsolate(
-            libPath,
-            assetID,
-          );
-        }
-        return ProtectionProxyFFI.stopProtectionProxyInIsolate(libPath);
-      });
-
-      final result = jsonDecode(resultStr);
+      final result = _hasAssetBinding
+          ? transport.callOneArg('StopProtectionProxyByAsset', _assetID)
+          : transport.callNoArg('StopProtectionProxy');
       appLogger.info('[Protection] Proxy stopped successfully');
       return result;
     } catch (e) {
@@ -490,32 +455,24 @@ class ProtectionService {
 
   Future<bool> setAuditOnly(bool auditOnly) async {
     try {
-      final dylib = _getDylib();
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-      ffi.Pointer<Utf8> resultPtr;
-      if (_hasAssetBinding) {
-        final setAuditOnlyFunc = dylib
-            .lookupFunction<
-              SetProtectionProxyAuditOnlyByAssetC,
-              SetProtectionProxyAuditOnlyByAssetDart
-            >('SetProtectionProxyAuditOnlyByAsset');
-        final assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = setAuditOnlyFunc(assetIDPtr, auditOnly ? 1 : 0);
-        malloc.free(assetIDPtr);
-      } else {
-        final setAuditOnlyFunc = dylib
-            .lookupFunction<
-              SetProtectionProxyAuditOnlyC,
-              SetProtectionProxyAuditOnlyDart
-            >('SetProtectionProxyAuditOnly');
-        resultPtr = setAuditOnlyFunc(auditOnly ? 1 : 0);
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) {
+        appLogger.error('[Protection] setAuditOnly failed: transport not ready');
+        return false;
       }
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
-
-      final result = jsonDecode(resultStr);
+      Map<String, dynamic> result;
+      if (_hasAssetBinding) {
+        result = transport.callOneArgOneInt(
+          'SetProtectionProxyAuditOnlyByAsset',
+          _assetID,
+          auditOnly ? 1 : 0,
+        );
+      } else {
+        result = transport.callOneInt(
+          'SetProtectionProxyAuditOnly',
+          auditOnly ? 1 : 0,
+        );
+      }
       if (result['success'] == true) {
         appLogger.info('[Protection] Audit-only mode set to: $auditOnly');
         return true;
@@ -574,10 +531,13 @@ class ProtectionService {
     required int dailyTokenLimit,
   }) async {
     try {
-      final dylib = _getDylib();
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) {
+        appLogger.error(
+          '[Protection] pushTokenLimitsToProxy failed: transport not ready',
+        );
+        return false;
+      }
 
       int initialDailyTokenUsage = 0;
       if (dailyTokenLimit > 0 && assetName.isNotEmpty) {
@@ -590,40 +550,22 @@ class ProtectionService {
         'daily_token_limit': dailyTokenLimit,
         'initial_daily_token_usage': initialDailyTokenUsage,
       });
-      final configPtr = configJson.toNativeUtf8();
-      ffi.Pointer<Utf8> resultPtr;
+      Map<String, dynamic> result;
       if (assetID.isNotEmpty) {
-        final updateConfig = dylib
-            .lookupFunction<
-              UpdateProtectionConfigByAssetC,
-              UpdateProtectionConfigByAssetDart
-            >('UpdateProtectionConfigByAsset');
-        final assetIDPtr = assetID.toNativeUtf8();
-        resultPtr = updateConfig(assetIDPtr, configPtr);
-        malloc.free(assetIDPtr);
+        result = transport.callTwoArgs(
+          'UpdateProtectionConfigByAsset',
+          assetID,
+          configJson,
+        );
       } else if (_hasAssetBinding) {
-        final updateConfig = dylib
-            .lookupFunction<
-              UpdateProtectionConfigByAssetC,
-              UpdateProtectionConfigByAssetDart
-            >('UpdateProtectionConfigByAsset');
-        final assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = updateConfig(assetIDPtr, configPtr);
-        malloc.free(assetIDPtr);
+        result = transport.callTwoArgs(
+          'UpdateProtectionConfigByAsset',
+          _assetID,
+          configJson,
+        );
       } else {
-        final updateConfig = dylib
-            .lookupFunction<
-              UpdateProtectionConfigC,
-              UpdateProtectionConfigDart
-            >('UpdateProtectionConfig');
-        resultPtr = updateConfig(configPtr);
+        result = transport.callOneArg('UpdateProtectionConfig', configJson);
       }
-      malloc.free(configPtr);
-
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
-
-      final result = jsonDecode(resultStr);
       if (result['success'] == true) {
         appLogger.info(
           '[Protection] Token limits pushed: singleSession=$singleSessionTokenLimit, daily=$dailyTokenLimit',
@@ -642,31 +584,19 @@ class ProtectionService {
 
   /// 同步网关沙箱配置（从数据库读取最新配置，完整重启网关以应用新策略）。
   /// 当用户在防护运行中修改沙箱开关或权限设置时调用。
-  /// 使用后台 Isolate 执行，避免阻塞 UI 线程。
   Future<bool> syncGatewaySandbox() async {
     try {
-      final libPath = _getLibraryPath();
-      if (libPath == null) {
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) {
         appLogger.error(
-          '[Protection] syncGatewaySandbox: library path not available',
+          '[Protection] syncGatewaySandbox: transport not initialized',
         );
         return false;
       }
 
-      final hasAssetBinding = _hasAssetBinding;
-      final assetID = _assetID;
-
-      final resultStr = await Isolate.run(() {
-        if (hasAssetBinding) {
-          return ProtectionProxyFFI.syncGatewaySandboxByAssetInIsolate(
-            libPath,
-            assetID,
-          );
-        }
-        return ProtectionProxyFFI.syncGatewaySandboxInIsolate(libPath);
-      });
-
-      final result = jsonDecode(resultStr);
+      final result = _hasAssetBinding
+          ? transport.callOneArg('SyncGatewaySandboxByAsset', _assetID)
+          : transport.callNoArg('SyncGatewaySandbox');
       if (result['success'] == true) {
         appLogger.info(
           '[Protection] Gateway sandbox synced: modified=${result['modified']}',
@@ -728,10 +658,13 @@ class ProtectionService {
     try {
       final effectiveLanguage = LocaleUtils.resolveLanguageCode();
 
-      final dylib = _getDylib();
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) {
+        appLogger.error(
+          '[Protection] updateRuntimeConfig failed: transport not ready',
+        );
+        return false;
+      }
 
       // 只传递运行时相关配置
       final configJSON = jsonEncode({
@@ -741,31 +674,16 @@ class ProtectionService {
         'daily_token_limit': runtimeConfig.dailyTokenLimit,
         'initial_daily_token_usage': runtimeConfig.initialDailyTokenUsage,
       });
-      final configPtr = configJSON.toNativeUtf8();
-      ffi.Pointer<Utf8> resultPtr;
+      Map<String, dynamic> result;
       if (_hasAssetBinding) {
-        final updateConfig = dylib
-            .lookupFunction<
-              UpdateProtectionConfigByAssetC,
-              UpdateProtectionConfigByAssetDart
-            >('UpdateProtectionConfigByAsset');
-        final assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = updateConfig(assetIDPtr, configPtr);
-        malloc.free(assetIDPtr);
+        result = transport.callTwoArgs(
+          'UpdateProtectionConfigByAsset',
+          _assetID,
+          configJSON,
+        );
       } else {
-        final updateConfig = dylib
-            .lookupFunction<
-              UpdateProtectionConfigC,
-              UpdateProtectionConfigDart
-            >('UpdateProtectionConfig');
-        resultPtr = updateConfig(configPtr);
+        result = transport.callOneArg('UpdateProtectionConfig', configJSON);
       }
-      malloc.free(configPtr);
-
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
-
-      final result = jsonDecode(resultStr);
       if (result['success'] == true) {
         appLogger.info('[Protection] Runtime config updated successfully');
         return true;
@@ -784,37 +702,25 @@ class ProtectionService {
   /// 用于更新 ShepherdGate 风险检测使用的 LLM 配置
   Future<bool> updateSecurityModelConfig(SecurityModelConfig config) async {
     try {
-      final dylib = _getDylib();
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) {
+        appLogger.error(
+          '[Protection] updateSecurityModelConfig failed: transport not ready',
+        );
+        return false;
+      }
 
       final configJSON = jsonEncode(config.toJson());
-      final configPtr = configJSON.toNativeUtf8();
-      ffi.Pointer<Utf8> resultPtr;
+      Map<String, dynamic> result;
       if (_hasAssetBinding) {
-        final updateSecModel = dylib
-            .lookupFunction<
-              UpdateSecurityModelConfigByAssetC,
-              UpdateSecurityModelConfigByAssetDart
-            >('UpdateSecurityModelConfigByAsset');
-        final assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = updateSecModel(assetIDPtr, configPtr);
-        malloc.free(assetIDPtr);
+        result = transport.callTwoArgs(
+          'UpdateSecurityModelConfigByAsset',
+          _assetID,
+          configJSON,
+        );
       } else {
-        final updateSecModel = dylib
-            .lookupFunction<
-              UpdateSecurityModelConfigC,
-              UpdateSecurityModelConfigDart
-            >('UpdateSecurityModelConfig');
-        resultPtr = updateSecModel(configPtr);
+        result = transport.callOneArg('UpdateSecurityModelConfig', configJSON);
       }
-      malloc.free(configPtr);
-
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
-
-      final result = jsonDecode(resultStr);
       if (result['success'] == true) {
         appLogger.info('[Protection] Security model config updated');
         return true;
@@ -831,32 +737,16 @@ class ProtectionService {
 
   Future<Map<String, dynamic>> getProtectionProxyStatus() async {
     try {
-      final dylib = _getDylib();
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-      ffi.Pointer<Utf8> resultPtr;
-      if (_hasAssetBinding) {
-        final getStatus = dylib
-            .lookupFunction<
-              GetProtectionProxyStatusByAssetC,
-              GetProtectionProxyStatusByAssetDart
-            >('GetProtectionProxyStatusByAsset');
-        final assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = getStatus(assetIDPtr);
-        malloc.free(assetIDPtr);
-      } else {
-        final getStatus = dylib
-            .lookupFunction<
-              GetProtectionProxyStatusC,
-              GetProtectionProxyStatusDart
-            >('GetProtectionProxyStatus');
-        resultPtr = getStatus();
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) {
+        return {'running': false, 'error': 'transport not ready'};
       }
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
-
-      final result = jsonDecode(resultStr);
+      Map<String, dynamic> result;
+      if (_hasAssetBinding) {
+        result = transport.callOneArg('GetProtectionProxyStatusByAsset', _assetID);
+      } else {
+        result = transport.callNoArg('GetProtectionProxyStatus');
+      }
       _isProxyRunning = result['running'] == true;
       if (_isProxyRunning) {
         _proxyPort = result['port'];
@@ -1012,40 +902,16 @@ class ProtectionService {
   /// 检查是否存在初始备份文件
   Future<bool> hasInitialBackup() async {
     try {
-      final dylib = _getDylib();
-      late final ffi.Pointer<Utf8> Function() hasBackupFunc;
-      ffi.Pointer<Utf8>? assetIDPtr;
-      ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>)? hasBackupByAssetFunc;
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) {
+        return false;
+      }
+      Map<String, dynamic> result;
       if (_hasAssetBinding) {
-        hasBackupByAssetFunc = dylib
-            .lookupFunction<
-              HasInitialBackupByAssetFFIC,
-              HasInitialBackupByAssetFFIDart
-            >('HasInitialBackupByAssetFFI');
+        result = transport.callOneArg('HasInitialBackupByAssetFFI', _assetID);
       } else {
-        hasBackupFunc = dylib
-            .lookupFunction<HasInitialBackupFFIC, HasInitialBackupFFIDart>(
-              'HasInitialBackupFFI',
-            );
+        result = transport.callNoArg('HasInitialBackupFFI');
       }
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
-      );
-
-      final ffi.Pointer<Utf8> resultPtr;
-      if (_hasAssetBinding) {
-        assetIDPtr = _assetID.toNativeUtf8();
-        resultPtr = hasBackupByAssetFunc!(assetIDPtr);
-      } else {
-        resultPtr = hasBackupFunc();
-      }
-      if (assetIDPtr != null) {
-        malloc.free(assetIDPtr);
-      }
-      final resultStr = resultPtr.toDartString();
-      freeString(resultPtr);
-
-      final result = jsonDecode(resultStr);
       if (result['success'] == true) {
         return result['exists'] == true;
       }
@@ -1068,26 +934,14 @@ class ProtectionService {
         _monitor.setProxySession(null, false);
       }
 
-      final libPath = _getLibraryPath();
-      if (libPath == null) {
-        throw Exception('Plugin library not found');
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) {
+        throw Exception('Transport not initialized');
       }
 
-      // 通过 Isolate 执行恢复操作，避免阻塞 UI 线程
-      final hasAssetBinding = _hasAssetBinding;
-      final assetID = _assetID;
-
-      final resultStr = await Isolate.run(() {
-        if (hasAssetBinding) {
-          return ProtectionProxyFFI.restoreToInitialConfigByAssetInIsolate(
-            libPath,
-            assetID,
-          );
-        }
-        return ProtectionProxyFFI.restoreToInitialConfigInIsolate(libPath);
-      });
-
-      final result = jsonDecode(resultStr) as Map<String, dynamic>;
+      final result = _hasAssetBinding
+          ? transport.callOneArg('RestoreToInitialConfigByAssetFFI', _assetID)
+          : transport.callNoArg('RestoreToInitialConfigFFI');
       appLogger.info(
         '[Protection] restoreToInitialConfig result: success=${result['success']}',
       );

@@ -1,15 +1,5 @@
 import 'dart:convert';
-import 'dart:ffi' as ffi;
-import 'package:ffi/ffi.dart';
-import 'native_library_service.dart' hide FreeStringDart;
-
-// C function signatures
-typedef GetSupportedProvidersC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef GetSupportedProvidersDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-
-typedef FreeStringC = ffi.Void Function(ffi.Pointer<Utf8>);
-typedef FreeStringDart = void Function(ffi.Pointer<Utf8>);
+import '../core_transport/transport_registry.dart';
 
 /// Provider scope for filtering.
 enum ProviderScope {
@@ -77,14 +67,6 @@ class ProviderService {
   List<ProviderInfo>? _cachedSecurityProviders;
   List<ProviderInfo>? _cachedBotProviders;
 
-  ffi.DynamicLibrary _loadLibrary() {
-    final dylib = NativeLibraryService().dylib;
-    if (dylib == null) {
-      throw Exception('Plugin library not loaded');
-    }
-    return dylib;
-  }
-
   /// Get supported providers for a given scope.
   List<ProviderInfo> getProviders(ProviderScope scope) {
     // Check cache first
@@ -96,22 +78,14 @@ class ProviderService {
     }
 
     try {
-      final dylib = _loadLibrary();
-
-      final getSupportedProviders = dylib
-          .lookupFunction<GetSupportedProvidersC, GetSupportedProvidersDart>(
-            'GetSupportedProviders',
-          );
-      final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
-        'FreeString',
+      final transport = TransportRegistry.transport;
+      if (!transport.isReady) {
+        return [];
+      }
+      final jsonStr = transport.callRawOneArg(
+        'GetSupportedProviders',
+        scope.value,
       );
-
-      final scopePtr = scope.value.toNativeUtf8();
-      final resultPtr = getSupportedProviders(scopePtr);
-      calloc.free(scopePtr);
-
-      final jsonStr = resultPtr.toDartString();
-      freeString(resultPtr);
 
       final List<dynamic> jsonList = jsonDecode(jsonStr);
       final providers = jsonList.map((e) => ProviderInfo.fromJson(e)).toList();
