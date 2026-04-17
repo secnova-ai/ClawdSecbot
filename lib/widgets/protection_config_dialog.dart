@@ -197,6 +197,8 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
   final List<String> _sensitiveActions = [];
   final TextEditingController _sensitiveActionsInputController =
       TextEditingController();
+  // 临时关闭用户自定义规则配置区，保留实现便于后续恢复。
+  static const bool _showUserCustomRulesSection = false;
 
   // 内置安全技能列表
   List<Map<String, dynamic>> _bundledSkills = [];
@@ -993,7 +995,8 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           const SizedBox(height: 16),
 
           // Shepherd User Rules（标题 + 敏感操作，整体框起来）
-          Container(
+          if (_showUserCustomRulesSection)
+            Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.03),
@@ -1181,7 +1184,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
             ),
           ),
 
-          const SizedBox(height: 16),
+          if (_showUserCustomRulesSection) const SizedBox(height: 16),
 
           // 安全技能展示区域
           _buildSecuritySkillsSection(l10n),

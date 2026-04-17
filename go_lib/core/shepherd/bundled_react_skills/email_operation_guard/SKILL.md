@@ -35,6 +35,8 @@ Only call extra tools when intent/scope/recipient/path is unclear.
 - Block critical patterns.
 - Block when effective scope exceeds explicit user request.
 - Allow only when purpose, scope, and recipients are explicit and aligned.
+- If risk is low and scope/recipient are compliant, return allow directly.
+- Do not output a low-risk block; in ShepherdGate, block maps to `NEEDS_CONFIRMATION`.
 
 ## Cross-skill coordination
 - If mailbox content/attachments are sent externally, load `data_exfiltration_guard`.

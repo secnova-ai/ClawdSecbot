@@ -37,6 +37,8 @@ Only call extra tools when context is insufficient.
 - Block critical patterns.
 - Block when change scope exceeds user request.
 - Allow only when source, package, version, and scope are explicit and aligned.
+- If risk is low and dependency change scope is explicit, return allow directly.
+- Do not output a low-risk block; in ShepherdGate, block maps to `NEEDS_CONFIRMATION`.
 
 ## Cross-skill coordination
 - If install operation is part of capability onboarding, load `skill_installation_guard`.

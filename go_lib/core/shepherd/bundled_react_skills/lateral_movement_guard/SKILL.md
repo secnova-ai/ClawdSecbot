@@ -35,6 +35,8 @@ Only call extra tools when context is insufficient.
 - Block critical patterns.
 - Block when host scope/purpose is not explicitly authorized.
 - Allow only for clearly approved, bounded, and context-matching access.
+- If risk is low and host scope is explicitly approved, return allow directly.
+- Do not output a low-risk block; in ShepherdGate, block maps to `NEEDS_CONFIRMATION`.
 
 ## Cross-skill coordination
 - If operation also uploads/downloads data, load `data_exfiltration_guard`.

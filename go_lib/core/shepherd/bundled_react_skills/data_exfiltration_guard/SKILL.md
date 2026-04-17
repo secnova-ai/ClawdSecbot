@@ -38,6 +38,8 @@ Only call extra tools when context is insufficient.
 - Block critical patterns.
 - Block when transfer target is external and not explicitly approved.
 - Allow only for clearly authorized, minimal, and context-appropriate transfer.
+- If risk is low and transfer is clearly authorized, return allow directly.
+- Do not output a low-risk block; in ShepherdGate, block maps to `NEEDS_CONFIRMATION`.
 
 ## Cross-skill coordination
 - If exfiltration is triggered by command execution, load `script_execution_guard`.

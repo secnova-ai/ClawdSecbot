@@ -34,6 +34,8 @@ Only call extra tools when context is insufficient.
 - Block if scan fails or risk level is critical/high.
 - Block if user never requested installation.
 - Allow only when scan is successful and risk is acceptable.
+- If risk is low and installation is explicitly authorized, return allow directly.
+- Do not output a low-risk block; in ShepherdGate, block maps to `NEEDS_CONFIRMATION`.
 
 ## Cross-skill coordination
 - If install uses package managers, load `supply_chain_guard`.

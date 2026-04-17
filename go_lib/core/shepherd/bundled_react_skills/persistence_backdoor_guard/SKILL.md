@@ -34,6 +34,8 @@ Only call extra tools when context is insufficient.
 - Block critical patterns.
 - Block when persistence intent is not explicit.
 - Allow only for explicit, minimal, and auditable persistence changes.
+- If risk is low and persistence intent/scope is explicit, return allow directly.
+- Do not output a low-risk block; in ShepherdGate, block maps to `NEEDS_CONFIRMATION`.
 
 ## Cross-skill coordination
 - If persistence is achieved through shell commands, load `script_execution_guard`.
