@@ -12,10 +12,24 @@ type gatewayCapabilityTestPlugin struct {
 	syncByAssetCalls []string
 }
 
+type lifecycleCapabilityTestPlugin struct {
+	*testPlugin
+	onAppExitCalls      []string
+	restoreDefaultCalls []string
+}
+
 func newGatewayCapabilityTestPlugin(assetName string) *gatewayCapabilityTestPlugin {
 	return &gatewayCapabilityTestPlugin{
 		testPlugin:       newTestPlugin(assetName),
 		syncByAssetCalls: make([]string, 0, 1),
+	}
+}
+
+func newLifecycleCapabilityTestPlugin(assetName string) *lifecycleCapabilityTestPlugin {
+	return &lifecycleCapabilityTestPlugin{
+		testPlugin:          newTestPlugin(assetName),
+		onAppExitCalls:      make([]string, 0, 1),
+		restoreDefaultCalls: make([]string, 0, 1),
 	}
 }
 
@@ -35,6 +49,16 @@ func (p *gatewayCapabilityTestPlugin) HasInitialBackup() string {
 
 func (p *gatewayCapabilityTestPlugin) RestoreToInitialConfig() string {
 	return `{"success":true}`
+}
+
+func (p *lifecycleCapabilityTestPlugin) OnAppExit(assetID string) string {
+	p.onAppExitCalls = append(p.onAppExitCalls, assetID)
+	return fmt.Sprintf(`{"success":true,"mode":"asset","plugin":"%s","asset_id":"%s"}`, strings.ToLower(p.GetAssetName()), assetID)
+}
+
+func (p *lifecycleCapabilityTestPlugin) RestoreBotDefaultState(assetID string) string {
+	p.restoreDefaultCalls = append(p.restoreDefaultCalls, assetID)
+	return fmt.Sprintf(`{"success":true,"mode":"asset","plugin":"%s","asset_id":"%s"}`, strings.ToLower(p.GetAssetName()), assetID)
 }
 
 func resetCapabilityTestPluginManager(t *testing.T) *PluginManager {
@@ -111,6 +135,94 @@ func TestSyncGatewaySandboxByAssetAndPlugin_AssetIDMissingBindingReturnsError(t 
 	result := SyncGatewaySandboxByAssetAndPlugin("Openclaw", "missing-asset-id")
 	if !strings.Contains(result, "no plugin found for asset_id: missing-asset-id") {
 		t.Fatalf("expected asset_id binding error, got: %s", result)
+	}
+}
+
+func TestNotifyAppExitByPlugin_PrioritizesAssetID(t *testing.T) {
+	pm := resetCapabilityTestPluginManager(t)
+
+	openPlugin := newLifecycleCapabilityTestPlugin("Openclaw")
+	nullPlugin := newLifecycleCapabilityTestPlugin("Nullclaw")
+	pm.Register(openPlugin)
+	pm.Register(nullPlugin)
+	pm.bindAssetInstance(nullPlugin, Asset{
+		ID:           "nullclaw:asset-1",
+		SourcePlugin: "Nullclaw",
+	})
+
+	result := NotifyAppExitByPlugin("Openclaw", "nullclaw:asset-1")
+
+	if !strings.Contains(result, `"plugin":"nullclaw"`) {
+		t.Fatalf("expected routing by asset_id to nullclaw plugin, got: %s", result)
+	}
+	if len(nullPlugin.onAppExitCalls) != 1 || nullPlugin.onAppExitCalls[0] != "nullclaw:asset-1" {
+		t.Fatalf("expected nullclaw OnAppExit called once with asset_id, got: %#v", nullPlugin.onAppExitCalls)
+	}
+	if len(openPlugin.onAppExitCalls) != 0 {
+		t.Fatalf("expected openclaw OnAppExit not called, got: %#v", openPlugin.onAppExitCalls)
+	}
+}
+
+func TestNotifyAppExitByPlugin_AssetIDMissingBindingFallsBackToAssetName(t *testing.T) {
+	pm := resetCapabilityTestPluginManager(t)
+	openPlugin := newLifecycleCapabilityTestPlugin("Openclaw")
+	pm.Register(openPlugin)
+
+	result := NotifyAppExitByPlugin("Openclaw", "openclaw:missing-binding")
+	if !strings.Contains(result, `"plugin":"openclaw"`) {
+		t.Fatalf("expected fallback routing by asset_name, got: %s", result)
+	}
+	if len(openPlugin.onAppExitCalls) != 1 || openPlugin.onAppExitCalls[0] != "openclaw:missing-binding" {
+		t.Fatalf("expected OnAppExit called once with original asset_id, got: %#v", openPlugin.onAppExitCalls)
+	}
+}
+
+func TestNotifyAppExitByPlugin_AssetIDMissingBindingWithoutAssetNameReturnsError(t *testing.T) {
+	pm := resetCapabilityTestPluginManager(t)
+	pm.Register(newLifecycleCapabilityTestPlugin("Openclaw"))
+
+	result := NotifyAppExitByPlugin("", "missing-asset-id")
+	if !strings.Contains(result, "no plugin found for asset_id: missing-asset-id") {
+		t.Fatalf("expected asset_id binding error, got: %s", result)
+	}
+}
+
+func TestRestoreBotDefaultStateByPlugin_PrioritizesAssetID(t *testing.T) {
+	pm := resetCapabilityTestPluginManager(t)
+
+	openPlugin := newLifecycleCapabilityTestPlugin("Openclaw")
+	nullPlugin := newLifecycleCapabilityTestPlugin("Nullclaw")
+	pm.Register(openPlugin)
+	pm.Register(nullPlugin)
+	pm.bindAssetInstance(nullPlugin, Asset{
+		ID:           "nullclaw:asset-1",
+		SourcePlugin: "Nullclaw",
+	})
+
+	result := RestoreBotDefaultStateByPlugin("Openclaw", "nullclaw:asset-1")
+
+	if !strings.Contains(result, `"plugin":"nullclaw"`) {
+		t.Fatalf("expected routing by asset_id to nullclaw plugin, got: %s", result)
+	}
+	if len(nullPlugin.restoreDefaultCalls) != 1 || nullPlugin.restoreDefaultCalls[0] != "nullclaw:asset-1" {
+		t.Fatalf("expected nullclaw RestoreBotDefaultState called once with asset_id, got: %#v", nullPlugin.restoreDefaultCalls)
+	}
+	if len(openPlugin.restoreDefaultCalls) != 0 {
+		t.Fatalf("expected openclaw RestoreBotDefaultState not called, got: %#v", openPlugin.restoreDefaultCalls)
+	}
+}
+
+func TestRestoreBotDefaultStateByPlugin_AssetIDMissingBindingFallsBackToAssetName(t *testing.T) {
+	pm := resetCapabilityTestPluginManager(t)
+	openPlugin := newLifecycleCapabilityTestPlugin("Openclaw")
+	pm.Register(openPlugin)
+
+	result := RestoreBotDefaultStateByPlugin("Openclaw", "openclaw:missing-binding")
+	if !strings.Contains(result, `"plugin":"openclaw"`) {
+		t.Fatalf("expected fallback routing by asset_name, got: %s", result)
+	}
+	if len(openPlugin.restoreDefaultCalls) != 1 || openPlugin.restoreDefaultCalls[0] != "openclaw:missing-binding" {
+		t.Fatalf("expected RestoreBotDefaultState called once with original asset_id, got: %#v", openPlugin.restoreDefaultCalls)
 	}
 }
 

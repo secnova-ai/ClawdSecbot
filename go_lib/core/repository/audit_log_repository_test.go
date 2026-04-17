@@ -289,3 +289,32 @@ func TestAuditLog_FilterByAssetID(t *testing.T) {
 		t.Fatalf("Expected count=1 for nullclaw:b1, got %d", count)
 	}
 }
+
+func TestAuditLog_ClearAuditLogs_NameOnlyRejected(t *testing.T) {
+	db := setupProtectionTestDB(t)
+	defer db.Close()
+
+	repo := NewAuditLogRepository(db)
+	now := time.Now().UTC().Format(time.RFC3339)
+	_ = repo.SaveAuditLog(&AuditLog{
+		ID:        "open-1",
+		Timestamp: now,
+		RequestID: "r-open-1",
+		AssetName: "openclaw",
+		AssetID:   "openclaw:a1",
+		Action:    "ALLOW",
+	})
+
+	err := repo.ClearAuditLogs("openclaw", "")
+	if err == nil {
+		t.Fatal("expected error when clearing by asset_name without asset_id")
+	}
+
+	count, countErr := repo.GetAuditLogCount(false, "", "", "")
+	if countErr != nil {
+		t.Fatalf("GetAuditLogCount failed: %v", countErr)
+	}
+	if count != 1 {
+		t.Fatalf("expected log to remain after rejected clear, got count=%d", count)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -298,6 +299,10 @@ func GetSandboxManager(assetName string, policyDir string) *SandboxManager {
 
 // GetSandboxManagerByKey gets or creates a sandbox manager for an explicit instance key.
 func GetSandboxManagerByKey(assetKey string, policyDir string) *SandboxManager {
+	assetKey = strings.TrimSpace(assetKey)
+	if assetKey == "" {
+		return nil
+	}
 	sandboxMu.Lock()
 	defer sandboxMu.Unlock()
 
@@ -310,6 +315,22 @@ func GetSandboxManagerByKey(assetKey string, policyDir string) *SandboxManager {
 	return manager
 }
 
+// GetExistingSandboxManager returns existing sandbox manager keyed by assetName.
+func GetExistingSandboxManager(assetName string) *SandboxManager {
+	return GetExistingSandboxManagerByKey(assetName)
+}
+
+// GetExistingSandboxManagerByKey returns an existing sandbox manager by explicit instance key.
+func GetExistingSandboxManagerByKey(assetKey string) *SandboxManager {
+	assetKey = strings.TrimSpace(assetKey)
+	if assetKey == "" {
+		return nil
+	}
+	sandboxMu.RLock()
+	defer sandboxMu.RUnlock()
+	return sandboxManagers[assetKey]
+}
+
 // RemoveSandboxManager removes a sandbox manager
 func RemoveSandboxManager(assetName string) {
 	RemoveSandboxManagerByKey(assetName)
@@ -317,6 +338,10 @@ func RemoveSandboxManager(assetName string) {
 
 // RemoveSandboxManagerByKey removes a sandbox manager by explicit instance key.
 func RemoveSandboxManagerByKey(assetKey string) {
+	assetKey = strings.TrimSpace(assetKey)
+	if assetKey == "" {
+		return
+	}
 	sandboxMu.Lock()
 	defer sandboxMu.Unlock()
 

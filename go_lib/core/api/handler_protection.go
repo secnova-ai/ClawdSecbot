@@ -582,28 +582,18 @@ func defaultPermissionConfig() *PermissionConfig {
 }
 
 func findProtectionConfigByBotID(repo *repository.ProtectionRepository, botID string) (*repository.ProtectionConfig, string, error) {
-	configs, err := repo.GetAllProtectionConfigs()
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
+		return nil, "", nil
+	}
+	c, err := repo.GetProtectionConfig(botID)
 	if err != nil {
 		return nil, "", err
 	}
-	for _, c := range configs {
-		if c.AssetID == botID {
-			return c, c.AssetName, nil
-		}
+	if c == nil {
+		return nil, "", nil
 	}
-
-	assetNames := []string{"openclaw", "Openclaw", "moltbot", "Moltbot"}
-	for _, assetName := range assetNames {
-		c, err := repo.GetProtectionConfig(botID)
-		if err != nil {
-			return nil, "", err
-		}
-		if c != nil {
-			return c, assetName, nil
-		}
-	}
-
-	return nil, "", nil
+	return c, c.AssetName, nil
 }
 
 func cloneProtectionConfig(config *repository.ProtectionConfig) *repository.ProtectionConfig {

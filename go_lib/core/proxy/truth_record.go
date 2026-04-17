@@ -291,14 +291,13 @@ func (s *RecordStore) ClearWithFilter(assetName, assetID string) {
 		s.completed = nil
 		return
 	}
+	// Enforce instance isolation by asset_id only.
+	if assetID == "" {
+		return
+	}
 
 	for id, r := range s.records {
-		matches := false
-		if assetID != "" {
-			matches = r.AssetID == assetID
-		} else {
-			matches = r.AssetName == assetName
-		}
+		matches := r.AssetID == assetID
 		if matches {
 			delete(s.records, id)
 		}
