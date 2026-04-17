@@ -43,6 +43,81 @@ function Add-Target {
     }
 }
 
+# Function: reject dangerous root paths from configuration.
+function Test-IsSafeCleanupPath {
+    param([string]$PathValue)
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $false
+    }
+
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($PathValue)
+        $rootPath = [System.IO.Path]::GetPathRoot($fullPath)
+        if ([string]::IsNullOrWhiteSpace($rootPath)) {
+            return $false
+        }
+        $normalizedFull = $fullPath.TrimEnd('\')
+        $normalizedRoot = $rootPath.TrimEnd('\')
+        if ([string]::Equals($normalizedFull, $normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $false
+        }
+    } catch {
+        return $false
+    }
+
+    return $true
+}
+
+# Function: collect candidate app_config.json file paths.
+function Get-AppConfigCandidates {
+    $runtimeRoots = @(
+        (Join-Path $env:APPDATA "secnova.ai\bot_sec_manager"),
+        (Join-Path $env:APPDATA "com.bot.secnova.clawdsecbot"),
+        (Join-Path $env:APPDATA "com.clawdsecbot.guard"),
+        (Join-Path $env:APPDATA "ClawdSecbot"),
+        (Join-Path $env:LOCALAPPDATA "secnova.ai\bot_sec_manager"),
+        (Join-Path $env:LOCALAPPDATA "com.bot.secnova.clawdsecbot"),
+        (Join-Path $env:LOCALAPPDATA "com.clawdsecbot.guard"),
+        (Join-Path $env:LOCALAPPDATA "ClawdSecbot")
+    )
+
+    $configCandidates = @()
+    foreach ($root in $runtimeRoots) {
+        $configCandidates += (Join-Path $root "app_config.json")
+    }
+    return $configCandidates
+}
+
+# Function: load custom cleanup paths from app_config.json.
+function Collect-ConfigTargets {
+    foreach ($configPath in (Get-AppConfigCandidates)) {
+        if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+            continue
+        }
+
+        Add-Target -PathValue $configPath
+        Write-InfoLog ("Detected app config: {0}" -f $configPath)
+
+        try {
+            $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+            foreach ($key in @("sandbox_dir", "install_dir", "log_dir")) {
+                $value = $config.$key
+                if ($value -isnot [string] -or [string]::IsNullOrWhiteSpace($value)) {
+                    continue
+                }
+                if (-not (Test-IsSafeCleanupPath -PathValue $value)) {
+                    Write-WarnLog ("Skip unsafe path from app_config ({0}): {1}" -f $key, $value)
+                    continue
+                }
+                Add-Target -PathValue $value
+                Write-InfoLog ("Loaded path from app_config ({0}): {1}" -f $key, $value)
+            }
+        } catch {
+            Write-WarnLog ("Failed to parse app config {0}: {1}" -f $configPath, $_.Exception.Message)
+        }
+    }
+}
+
 # Function: show script usage and cleanup scope.
 function Show-HelpInfo {
     $scopeContent = @(
@@ -54,6 +129,7 @@ function Show-HelpInfo {
         "    - %USERPROFILE%\Documents\.botsec",
         "    - %TEMP%\botsec / %TEMP%\clawdsecbot.lock",
         "    - Desktop and Start Menu shortcuts (ClawdSecbot.lnk / Programs\ClawdSecbot)",
+        "    - Custom paths loaded from app_config.json (sandbox_dir/install_dir/log_dir)",
         "    - Known runtime directories under %APPDATA% and %LOCALAPPDATA%",
         "  [System-level, optional]",
         "    - %ProgramFiles%\ClawdSecbot",
@@ -268,6 +344,7 @@ function Main {
 
     Validate-Permissions
     Collect-UserTargets
+    Collect-ConfigTargets
     if ($RemoveSystemFiles) {
         Collect-SystemTargets
     }
