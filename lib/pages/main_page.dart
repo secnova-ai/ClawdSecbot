@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi' as ffi;
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
+import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -19,7 +22,6 @@ import '../models/asset_model.dart';
 import '../models/protection_config_model.dart';
 import '../models/risk_model.dart';
 import '../providers/locale_provider.dart';
-import '../core_transport/transport_registry.dart';
 import '../services/app_settings_database_service.dart';
 import '../services/scanner_service.dart';
 import '../services/protection_service.dart';
@@ -33,6 +35,8 @@ import '../services/skill_security_analyzer_service.dart';
 import '../services/bookmark_service.dart';
 import '../services/native_library_service.dart';
 import '../services/plugin_service.dart';
+import '../services/api_service.dart';
+import '../services/api_shutdown_service.dart';
 import '../utils/app_logger.dart';
 import '../widgets/mitigation_dialog.dart';
 import '../widgets/settings_dialog.dart';
@@ -43,7 +47,6 @@ import '../widgets/protection_config_dialog.dart';
 import '../widgets/scan_result_view.dart';
 import '../widgets/welcome_overlay.dart';
 import '../widgets/onboarding_completion_overlay.dart';
-import '../utils/window_animation_helper.dart';
 import '../utils/locale_utils.dart';
 import 'mixins/main_page_tray_mixin.dart';
 import 'mixins/main_page_version_mixin.dart';
@@ -97,7 +100,13 @@ class _MainPageState extends State<MainPage>
   bool _launchAtStartupEnabled = false;
   int _scheduledScanIntervalSeconds = 0;
   Timer? _scheduledScanTimer;
+
+  // ============ API Server 状态 ============
   bool _apiServerEnabled = false;
+  bool _isApiServerToggling = false;
+  Timer? _externalStateRefreshTimer;
+  bool _isExternalStateRefreshing = false;
+  StreamSubscription<ApiShutdownRequest>? _apiShutdownSubscription;
 
   /// Future tracking heavy initialization (DB, plugins, etc.)
   Future<void>? _initFuture;
@@ -168,6 +177,7 @@ class _MainPageState extends State<MainPage>
       onExitRequested: _handleAppExitRequest,
     );
     _init();
+    _startExternalStateRefresh();
   }
 
   void _init() async {
@@ -201,6 +211,7 @@ class _MainPageState extends State<MainPage>
     try {
       await NativeLibraryService().initialize();
       await _syncProtectionLanguage();
+      await _registerApiShutdownHandler();
     } catch (e) {
       appLogger.error('[MainPage] Failed to initialize native library', e);
     }
@@ -254,6 +265,9 @@ class _MainPageState extends State<MainPage>
 
     // 启动版本检查服务
     await startVersionCheckService();
+
+    // 初始化 API Server 状态
+    await _initApiServerStatus();
   }
 
   Future<void> _syncProtectionLanguage() async {
@@ -289,6 +303,9 @@ class _MainPageState extends State<MainPage>
     _logSubscription?.cancel();
     _onboardingCompletionTimer?.cancel();
     _scheduledScanTimer?.cancel();
+    _externalStateRefreshTimer?.cancel();
+    _apiShutdownSubscription?.cancel();
+    unawaited(ApiShutdownService().dispose());
     disposeVersionMixin();
     stopVersionCheckService();
     _scanner.dispose();
@@ -337,6 +354,205 @@ class _MainPageState extends State<MainPage>
     }
   }
 
+  // ============ 初始化 API Server 状态 ============
+
+  Future<void> _initApiServerStatus() async {
+    try {
+      final forcedApiServerEnabled = _forcedApiServerEnabledFromEnv();
+      final shouldEnable =
+          forcedApiServerEnabled ??
+          await AppSettingsDatabaseService().getApiServerEnabled(
+            defaultValue: BuildConfig.defaultApiServerEnabled,
+          );
+      if (forcedApiServerEnabled != null) {
+        await AppSettingsDatabaseService().setApiServerEnabled(shouldEnable);
+      }
+      await _applyApiServerState(
+        shouldEnable,
+        persistSetting: false,
+        showFeedback: false,
+      );
+      appLogger.info('[MainPage] API Server preference loaded: $shouldEnable');
+    } catch (e) {
+      appLogger.error('[MainPage] Failed to init API Server status', e);
+    }
+  }
+
+  bool? _forcedApiServerEnabledFromEnv() {
+    final rawValue = Platform.environment['BOTSEC_FORCE_API_SERVER_ENABLED'];
+    if (rawValue == null) {
+      return null;
+    }
+
+    final normalized = rawValue.trim().toLowerCase();
+    if (normalized == 'true' || normalized == '1') {
+      return true;
+    }
+    if (normalized == 'false' || normalized == '0') {
+      return false;
+    }
+    return null;
+  }
+
+  // ============ 切换 API Server 状态 ============
+
+  @override
+  void onWindowFocus() {
+    unawaited(_refreshUiStateFromDatabase(force: true));
+  }
+
+  @override
+  void onWindowRestore() {
+    unawaited(_refreshUiStateFromDatabase(force: true));
+  }
+
+  Future<void> _toggleApiServer(bool enable) async {
+    await _applyApiServerState(
+      enable,
+      persistSetting: true,
+      showFeedback: true,
+    );
+    if (DateTime.now().microsecond >= 0) {
+      return;
+    }
+    try {
+      final result = await ApiService().toggleServer(enable);
+
+      if (result['success'] == true) {
+        if (mounted) {
+          setState(() {
+            _apiServerEnabled = enable;
+          });
+          updateTray();
+        }
+
+        if (enable) {
+          final port = result['port'] ?? 'unknown';
+          final url = result['url'] ?? '';
+          appLogger.info(
+            '[MainPage] API Server started (port: $port, url: $url)',
+          );
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('API 服务已启动 - 端口：$port'),
+                backgroundColor: const Color(0xFF22C55E),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        } else {
+          appLogger.info('[MainPage] API Server stopped');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('API 服务已停止'),
+                backgroundColor: const Color(0xFFEF4444),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        }
+      } else {
+        final error = result['error'] ?? 'Unknown error';
+        appLogger.error('[MainPage] Failed to toggle API Server: $error');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('操作失败：$error'), backgroundColor: Colors.red),
+          );
+        }
+      }
+    } catch (e) {
+      appLogger.error('[MainPage] Failed to toggle API Server', e);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('操作失败：$e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _applyApiServerState(
+    bool enable, {
+    required bool persistSetting,
+    required bool showFeedback,
+  }) async {
+    if (_isApiServerToggling) {
+      appLogger.warning('[MainPage] API Server toggle is already in progress');
+      return;
+    }
+
+    _isApiServerToggling = true;
+    try {
+      final status = await ApiService().checkStatus();
+      Map<String, dynamic> result = {'success': true};
+      if (enable != status.isRunning) {
+        result = await ApiService().toggleServer(enable);
+      }
+
+      if (result['success'] != true) {
+        final error = result['error'] ?? 'Unknown error';
+        appLogger.error('[MainPage] Failed to toggle API Server: $error');
+        if (showFeedback && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to toggle API service: $error'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (persistSetting) {
+        await AppSettingsDatabaseService().setApiServerEnabled(enable);
+      }
+
+      if (mounted) {
+        setState(() {
+          _apiServerEnabled = enable;
+        });
+        updateTray();
+      } else {
+        _apiServerEnabled = enable;
+      }
+
+      if (showFeedback && mounted) {
+        if (enable) {
+          final port = result['port'] ?? 'unknown';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('API service started on port: $port'),
+              backgroundColor: const Color(0xFF22C55E),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('API service stopped'),
+              backgroundColor: Color(0xFFEF4444),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      appLogger.error('[MainPage] Failed to apply API Server state', e);
+      if (showFeedback && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to toggle API service: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      _isApiServerToggling = false;
+    }
+  }
+
   @override
   Future<void> toggleLaunchAtStartup() async {
     try {
@@ -371,7 +587,9 @@ class _MainPageState extends State<MainPage>
   Future<void> _restoreScheduledScanSettings() async {
     try {
       final seconds = await AppSettingsDatabaseService()
-          .getScheduledScanIntervalSeconds();
+          .getScheduledScanIntervalSeconds(
+            defaultValue: BuildConfig.defaultScheduledScanIntervalSeconds,
+          );
       if (mounted) {
         setState(() {
           _scheduledScanIntervalSeconds = seconds;
@@ -448,28 +666,17 @@ class _MainPageState extends State<MainPage>
       appLogger.info('[MainPage] Restoring protection states');
       final enabledConfigs = await ProtectionDatabaseService()
           .getEnabledProtectionConfigs();
+      final stateChanged = await _syncProtectedAssetsFromConfigs(
+        enabledConfigs,
+        scanResult: _pendingScanResult ?? _result,
+      );
       if (enabledConfigs.isEmpty) {
         appLogger.info('[MainPage] No enabled protection configs');
         return;
       }
 
       appLogger.info(
-        '[MainPage] Restoring ${enabledConfigs.length} protected assets',
-      );
-
-      for (final config in enabledConfigs) {
-        if (config.assetID.isEmpty) {
-          appLogger.warning(
-            '[MainPage] Skip restoring protection without assetID: ${config.assetName}',
-          );
-          continue;
-        }
-
-        _protectedAssetIDs.add(config.assetID);
-        _protectedAssetNamesByID[config.assetID] = config.assetName;
-      }
-      appLogger.info(
-        '[MainPage] Enabled assets: ${_protectedAssetIDs.map((id) => '${_protectedAssetNamesByID[id]}/$id').join(', ')}',
+        '[MainPage] Restored ${enabledConfigs.length} protected assets, changed=$stateChanged',
       );
 
       if (mounted) {
@@ -487,6 +694,122 @@ class _MainPageState extends State<MainPage>
           _isRestoringProtection = false;
         });
       }
+    }
+  }
+
+  void _startExternalStateRefresh() {
+    _externalStateRefreshTimer?.cancel();
+    _externalStateRefreshTimer = Timer.periodic(const Duration(seconds: 3), (
+      _,
+    ) {
+      unawaited(_refreshUiStateFromDatabase());
+    });
+  }
+
+  String _scanResultSignature(ScanResult? result) {
+    if (result == null) {
+      return '';
+    }
+    return jsonEncode(result.toJson());
+  }
+
+  Future<bool> _syncProtectedAssetsFromConfigs(
+    List<ProtectionConfig> enabledConfigs, {
+    required ScanResult? scanResult,
+  }) async {
+    final nextProtectedAssetIDs = <String>{};
+    final nextProtectedAssetNamesByID = <String, String>{};
+
+    for (final config in enabledConfigs) {
+      final resolvedAssetID = config.assetID.trim();
+
+      if (resolvedAssetID.isEmpty) {
+        appLogger.warning(
+          '[MainPage] Skip restoring protection without assetID: ${config.assetName}',
+        );
+        continue;
+      }
+
+      nextProtectedAssetIDs.add(resolvedAssetID);
+      nextProtectedAssetNamesByID[resolvedAssetID] = config.assetName;
+    }
+
+    final idsChanged = !setEquals(_protectedAssetIDs, nextProtectedAssetIDs);
+    final namesChanged = !mapEquals(
+      _protectedAssetNamesByID,
+      nextProtectedAssetNamesByID,
+    );
+    if (!idsChanged && !namesChanged) {
+      return false;
+    }
+
+    _protectedAssetIDs
+      ..clear()
+      ..addAll(nextProtectedAssetIDs);
+    _protectedAssetNamesByID
+      ..clear()
+      ..addAll(nextProtectedAssetNamesByID);
+
+    appLogger.info(
+      '[MainPage] Enabled assets synced: ${_protectedAssetIDs.map((id) => '${_protectedAssetNamesByID[id]}/$id').join(', ')}',
+    );
+    return true;
+  }
+
+  Future<void> _refreshUiStateFromDatabase({bool force = false}) async {
+    if (_isExternalStateRefreshing) {
+      return;
+    }
+
+    if (!force && _scanState == ScanState.scanning) {
+      return;
+    }
+
+    _isExternalStateRefreshing = true;
+    try {
+      final latestScanResult = await ScanDatabaseService()
+          .getLatestScanResult();
+      final currentScanResult = _showWelcome ? _pendingScanResult : _result;
+      final scanChanged =
+          latestScanResult != null &&
+          _scanResultSignature(latestScanResult) !=
+              _scanResultSignature(currentScanResult);
+
+      final enabledConfigs = await ProtectionDatabaseService()
+          .getEnabledProtectionConfigs();
+      final protectedStateChanged = await _syncProtectedAssetsFromConfigs(
+        enabledConfigs,
+        scanResult: latestScanResult ?? _pendingScanResult ?? _result,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (scanChanged || protectedStateChanged) {
+        setState(() {
+          if (scanChanged) {
+            if (_showWelcome) {
+              _pendingScanResult = latestScanResult;
+            } else {
+              _result = latestScanResult;
+              _scanState = ScanState.completed;
+            }
+          }
+        });
+
+        if (protectedStateChanged) {
+          await notifyMonitorWindowsProtectionConfigReload();
+        }
+
+        appLogger.info(
+          '[MainPage] UI state refreshed from database: scanChanged=$scanChanged, protectionChanged=$protectedStateChanged',
+        );
+      }
+    } catch (e) {
+      appLogger.warning('[MainPage] Failed to refresh UI state from DB: $e');
+    } finally {
+      _isExternalStateRefreshing = false;
     }
   }
 
@@ -632,14 +955,23 @@ class _MainPageState extends State<MainPage>
     String? authorizedPath,
   }) async {
     try {
-      final transport = TransportRegistry.transport;
-      if (!transport.isReady) return;
-
-      final jsonStr = jsonEncode({
-        'authorized': authorized,
-        'authorized_path': authorizedPath ?? '',
-      });
-      transport.callOneArg('SaveHomeDirectoryPermissionFFI', jsonStr);
+      final dylib = NativeLibraryService().dylib;
+      final freeStr = NativeLibraryService().freeString;
+      if (dylib != null && freeStr != null) {
+        final func = dylib
+            .lookupFunction<
+              ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>),
+              ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>)
+            >('SaveHomeDirectoryPermissionFFI');
+        final jsonStr = jsonEncode({
+          'authorized': authorized,
+          'authorized_path': authorizedPath ?? '',
+        });
+        final argPtr = jsonStr.toNativeUtf8();
+        final resultPtr = func(argPtr);
+        freeStr(resultPtr);
+        malloc.free(argPtr);
+      }
     } catch (e) {
       appLogger.error('[MainPage] Save auth result failed', e);
     }
@@ -652,11 +984,38 @@ class _MainPageState extends State<MainPage>
       context,
     ).showSnackBar(SnackBar(content: Text(l10n.authDeniedExit)));
     await Future.delayed(const Duration(seconds: 1));
+    try {
+      await ApiService().stopServer();
+    } catch (e) {
+      appLogger.warning(
+        '[MainPage] Failed to stop API Server during authorization exit: $e',
+      );
+    }
     await windowManager.close();
     exit(0);
   }
 
   Future<void> _requestAppExit() async {
+    final enabledConfigs = await _loadExitTargets();
+    var restoreConfig = false;
+    if (enabledConfigs.isNotEmpty) {
+      await showWindow();
+      final confirmed = await _showExitRestoreDialog(enabledConfigs.length);
+      if (confirmed != true) {
+        return;
+      }
+      restoreConfig = true;
+    }
+    await _requestAppExitWithOptions(
+      interactive: true,
+      restoreConfig: restoreConfig,
+    );
+  }
+
+  Future<void> _requestAppExitWithOptions({
+    required bool interactive,
+    required bool restoreConfig,
+  }) async {
     if (_isExitFlowInProgress) {
       return;
     }
@@ -664,21 +1023,25 @@ class _MainPageState extends State<MainPage>
 
     try {
       final enabledConfigs = await _loadExitTargets();
+      final shouldRestore = restoreConfig && enabledConfigs.isNotEmpty;
       if (enabledConfigs.isNotEmpty) {
-        if (mounted) {
+        if (interactive && mounted) {
           await showWindow();
         }
-        final confirmed = await _showExitRestoreDialog(enabledConfigs.length);
-        if (confirmed != true) {
-          return;
-        }
-
-        final failures = await _runExitCleanupWithProgress(
-          () => _restoreTargetsForExit(enabledConfigs),
-        );
-        if (failures.isNotEmpty) {
-          await _showExitFailureDialog(failures);
-          return;
+        if (shouldRestore) {
+          final failures = await _runExitCleanupWithProgress(
+            () => _restoreTargetsForExit(enabledConfigs),
+          );
+          if (failures.isNotEmpty) {
+            if (interactive) {
+              await _showExitFailureDialog(failures);
+            } else {
+              appLogger.error(
+                '[MainPage] API-triggered exit restore failed: ${failures.join('; ')}',
+              );
+            }
+            return;
+          }
         }
       }
 
@@ -686,6 +1049,26 @@ class _MainPageState extends State<MainPage>
     } finally {
       _isExitFlowInProgress = false;
     }
+  }
+
+  Future<void> _registerApiShutdownHandler() async {
+    final registered = await ApiShutdownService().register();
+    if (!registered) {
+      return;
+    }
+
+    await _apiShutdownSubscription?.cancel();
+    _apiShutdownSubscription = ApiShutdownService().requests.listen((request) {
+      appLogger.info(
+        '[MainPage] Received API shutdown request: restoreConfig=${request.restoreConfig}',
+      );
+      unawaited(
+        _requestAppExitWithOptions(
+          interactive: false,
+          restoreConfig: request.restoreConfig,
+        ),
+      );
+    });
   }
 
   Future<List<ProtectionConfig>> _loadExitTargets() async {
@@ -934,6 +1317,14 @@ class _MainPageState extends State<MainPage>
   }
 
   Future<void> _finalizeAppExit() async {
+    await _stopProtectionForExit();
+
+    try {
+      await ApiService().stopServer();
+    } catch (e) {
+      appLogger.warning('[MainPage] Failed to stop API Server during exit: $e');
+    }
+
     try {
       await PluginService().closePlugin();
     } catch (e) {
@@ -959,6 +1350,56 @@ class _MainPageState extends State<MainPage>
     }
 
     exit(0);
+  }
+
+  Future<void> _stopProtectionForExit() async {
+    final targets = await _loadExitTargets();
+    if (targets.isEmpty) {
+      return;
+    }
+
+    final pluginService = PluginService();
+    for (final target in targets) {
+      final assetName = target.assetName.trim();
+      final assetID = target.assetID.trim();
+      if (assetName.isEmpty) {
+        continue;
+      }
+
+      try {
+        final exitResult = await pluginService.notifyPluginAppExit(
+          assetName,
+          assetID,
+        );
+        if (exitResult['success'] != true) {
+          appLogger.warning(
+            '[MainPage] Plugin exit callback failed during finalize for $assetName/$assetID: ${exitResult['error']}',
+          );
+        }
+      } catch (e) {
+        appLogger.warning(
+          '[MainPage] Plugin exit callback threw during finalize for $assetName/$assetID: $e',
+        );
+      }
+
+      try {
+        final protectionService = ProtectionService.forAsset(
+          assetName,
+          assetID,
+        );
+        protectionService.setAssetName(assetName, assetID);
+        final stopResult = await protectionService.stopProtectionProxy();
+        if (stopResult['success'] != true) {
+          appLogger.warning(
+            '[MainPage] Stop protection proxy failed during finalize for $assetName/$assetID: ${stopResult['error']}',
+          );
+        }
+      } catch (e) {
+        appLogger.warning(
+          '[MainPage] Stop protection proxy threw during finalize for $assetName/$assetID: $e',
+        );
+      }
+    }
   }
 
   Future<void> _hideOnboarding() async {
@@ -1059,7 +1500,8 @@ class _MainPageState extends State<MainPage>
 
     final l10n = AppLocalizations.of(context)!;
 
-    final beforeAssetIDs = _result?.assets.map((a) => a.id).toSet() ?? <String>{};
+    final beforeAssetIDs =
+        _result?.assets.map((a) => a.id).toSet() ?? <String>{};
 
     setState(() {
       _scanState = ScanState.scanning;
@@ -1102,10 +1544,7 @@ class _MainPageState extends State<MainPage>
 
       if (!skipReconcile) {
         try {
-          await _reconcileAssetsAfterScan(
-            beforeAssetIDs,
-            result.assets,
-          );
+          await _reconcileAssetsAfterScan(beforeAssetIDs, result.assets);
         } catch (e) {
           appLogger.error('[MainPage] Reconcile failed unexpectedly: $e');
         }
@@ -1143,11 +1582,15 @@ class _MainPageState extends State<MainPage>
     final afterAssetNames = afterAssets.map((a) => a.name).toSet();
 
     final idDisappeared = _protectedAssetIDs
-        .where((id) => beforeAssetIDs.contains(id) && !afterAssetIDs.contains(id))
+        .where(
+          (id) => beforeAssetIDs.contains(id) && !afterAssetIDs.contains(id),
+        )
         .toList();
 
     if (idDisappeared.isEmpty) {
-      appLogger.info('[MainPage] Reconcile: all protected assets still present');
+      appLogger.info(
+        '[MainPage] Reconcile: all protected assets still present',
+      );
       return;
     }
 
@@ -1224,8 +1667,8 @@ class _MainPageState extends State<MainPage>
     );
   }
 
-  /// 从 DB 重建 _protectedAssetIDs，按名字映射到扫描结果的最新 asset_id。
-  /// 解决 bot 重启导致 asset_id 临时变化时 UI 匹配不上的问题。
+  /// 从 DB 重建 _protectedAssetIDs。
+  /// 实例标识仅按 asset_id 处理，避免同名资产误匹配。
   Future<void> _syncProtectedAssetsWithScanResult(List<Asset> assets) async {
     final enabledConfigs = await ProtectionDatabaseService()
         .getEnabledProtectionConfigs();
@@ -1240,10 +1683,8 @@ class _MainPageState extends State<MainPage>
       return;
     }
 
-    final scanIdByName = <String, String>{};
     final scanIdSet = <String>{};
     for (final asset in assets) {
-      scanIdByName[asset.name] = asset.id;
       scanIdSet.add(asset.id);
     }
 
@@ -1255,18 +1696,8 @@ class _MainPageState extends State<MainPage>
         newIDs.add(config.assetID);
         newNames[config.assetID] = config.assetName;
       } else {
-        final scanID = scanIdByName[config.assetName];
-        if (scanID != null) {
-          appLogger.info(
-            '[MainPage] Sync: asset_id changed for ${config.assetName}: '
-            '${config.assetID} -> $scanID',
-          );
-          newIDs.add(scanID);
-          newNames[scanID] = config.assetName;
-        } else {
-          newIDs.add(config.assetID);
-          newNames[config.assetID] = config.assetName;
-        }
+        newIDs.add(config.assetID);
+        newNames[config.assetID] = config.assetName;
       }
     }
 
@@ -1404,7 +1835,7 @@ class _MainPageState extends State<MainPage>
     return false;
   }
 
-  void _resetScan() async {
+  Future<bool> _prepareForFullRescan() async {
     final l10n = AppLocalizations.of(context)!;
 
     showDialog(
@@ -1448,7 +1879,7 @@ class _MainPageState extends State<MainPage>
       }
 
       if (activeCount > 0) {
-        if (!mounted) return;
+        if (!mounted) return false;
 
         final confirmed = await showDialog<bool>(
           context: context,
@@ -1516,7 +1947,7 @@ class _MainPageState extends State<MainPage>
         );
 
         if (confirmed != true) {
-          return;
+          return false;
         }
 
         try {
@@ -1545,11 +1976,188 @@ class _MainPageState extends State<MainPage>
         });
         await windowManager.setSize(AppConstants.windowSize);
       }
+      return true;
     } catch (e) {
       appLogger.error('[MainPage] Failed to check protection status', e);
       if (mounted) {
         Navigator.of(context).pop();
       }
+      return false;
+    }
+  }
+
+  Future<void> _rescanAll() async {
+    final canContinue = await _prepareForFullRescan();
+    if (!canContinue) {
+      return;
+    }
+    await _startScan();
+  }
+
+  Future<void> _handleRescan() async {
+    switch (_selectedRescanAction) {
+      case RescanAction.securityDiscovery:
+        await _rescanSecurityDiscovery();
+        break;
+      case RescanAction.fullScan:
+        await _rescanAll();
+        break;
+    }
+  }
+
+  Future<void> _rescanSecurityDiscovery() async {
+    final existingResult = _result;
+    if (existingResult == null) {
+      await _startScan();
+      return;
+    }
+    if (_scanState == ScanState.scanning) {
+      return;
+    }
+
+    final l10n = AppLocalizations.of(context)!;
+    if (mounted) {
+      setState(() {
+        _scanState = ScanState.scanning;
+        _logs.clear();
+      });
+    }
+
+    await _logSubscription?.cancel();
+    _logSubscription = _scanner.logStream.listen((log) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _logs.add(log);
+      });
+    });
+
+    _scanner.setLocalization(l10n);
+
+    try {
+      final beforeAssetIDs = existingResult.assets.map((asset) => asset.id).toSet();
+      final refreshedResult = await _scanner.rediscoverSecurityFindings(
+        configFound: existingResult.configFound,
+        configPath: existingResult.configPath,
+        config: existingResult.config,
+      );
+      await ScanDatabaseService().saveScanResult(refreshedResult);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _scanState = ScanState.completed;
+        _result = refreshedResult;
+      });
+      try {
+        await _reconcileAssetsAfterScan(beforeAssetIDs, refreshedResult.assets);
+      } catch (e) {
+        appLogger.error('[MainPage] Security discovery reconcile failed: $e');
+      }
+      try {
+        await _syncProtectedAssetsWithScanResult(refreshedResult.assets);
+      } catch (e) {
+        appLogger.error(
+          '[MainPage] Security discovery sync protected assets failed: $e',
+        );
+      }
+    } catch (e) {
+      appLogger.error('[MainPage] Security discovery refresh failed', e);
+      if (mounted) {
+        setState(() {
+          _scanState = ScanState.completed;
+        });
+      }
+    } finally {
+      await _logSubscription?.cancel();
+      _logSubscription = null;
+      await windowManager.setSize(AppConstants.windowSize);
+    }
+  }
+
+  Future<void> _deleteRiskSkillFromFinding(RiskInfo risk) async {
+    final skillPath = risk.args?['skillPath']?.toString() ?? '';
+    final skillHash = risk.args?['skillHash']?.toString() ?? '';
+    final skillName = risk.args?['skillName']?.toString() ?? '';
+    final l10n = AppLocalizations.of(context)!;
+
+    if (skillPath.isEmpty || skillHash.isEmpty) {
+      appLogger.warning(
+        '[MainPage] Missing skillPath/skillHash for risk skill deletion',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.deleteRiskSkillUnavailable)),
+        );
+      }
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text(
+          l10n.deleteRiskSkill,
+          style: AppFonts.inter(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        content: Text(
+          l10n.deleteRiskSkillConfirm(
+            skillName.isNotEmpty ? skillName : skillHash,
+          ),
+          style: AppFonts.inter(fontSize: 14, color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(
+              l10n.cancel,
+              style: AppFonts.inter(color: Colors.white54),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+            ),
+            child: Text(l10n.deleteRiskSkill),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    final deleteResult = await SkillSecurityAnalyzerService().deleteSkill(
+      skillPath: skillPath,
+      skillHash: skillHash,
+    );
+
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          deleteResult.success
+              ? (deleteResult.alreadyMissing
+                    ? l10n.deleteRiskSkillAlreadyMissing
+                    : l10n.deleteRiskSkillSuccess)
+              : l10n.deleteRiskSkillFailed,
+        ),
+      ),
+    );
+    if (deleteResult.success) {
+      await _rescanSecurityDiscovery();
     }
   }
 
@@ -1665,77 +2273,6 @@ class _MainPageState extends State<MainPage>
     }
   }
 
-  void _handleRescanActionChanged(RescanAction action) {
-    if (_selectedRescanAction == action) return;
-    setState(() {
-      _selectedRescanAction = action;
-    });
-  }
-
-  Future<void> _deleteRiskSkill(RiskInfo risk) async {
-    final l10n = AppLocalizations.of(context)!;
-    final args = risk.args ?? const <String, Object>{};
-    final skillName = (args['skillName'] ?? args['skill_name'] ?? '')
-        .toString()
-        .trim();
-    final skillPath = (args['skillPath'] ?? args['skill_path'] ?? '')
-        .toString()
-        .trim();
-    final skillHash = (args['skillHash'] ?? args['skill_hash'] ?? '')
-        .toString()
-        .trim();
-
-    if (skillPath.isEmpty || skillHash.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(l10n.deleteRiskSkillUnavailable)));
-      return;
-    }
-
-    final displayName = skillName.isNotEmpty ? skillName : skillPath;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(l10n.deleteRiskSkill),
-        content: Text(l10n.deleteRiskSkillConfirm(displayName)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(l10n.cancel),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(l10n.localeName.startsWith('zh') ? '确认' : 'Confirm'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-
-    final deleteResult = await SkillSecurityAnalyzerService().deleteSkill(
-      skillPath: skillPath,
-      skillHash: skillHash,
-    );
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          deleteResult.success
-              ? (deleteResult.alreadyMissing
-                    ? l10n.deleteRiskSkillAlreadyMissing
-                    : l10n.deleteRiskSkillSuccess)
-              : l10n.deleteRiskSkillFailed,
-        ),
-      ),
-    );
-
-    if (deleteResult.success) {
-      await _startScan();
-    }
-  }
-
   void _showSkillScanDialog() async {
     await showDialog(
       context: context,
@@ -1776,11 +2313,7 @@ class _MainPageState extends State<MainPage>
           reauthorizeDirectory();
         },
         apiServerEnabled: _apiServerEnabled,
-        onToggleApiServer: (enabled) {
-          setState(() {
-            _apiServerEnabled = enabled;
-          });
-        },
+        onToggleApiServer: _toggleApiServer,
       ),
     );
   }
@@ -1817,10 +2350,7 @@ class _MainPageState extends State<MainPage>
                     layoutBuilder: (currentChild, previousChildren) {
                       return Stack(
                         alignment: Alignment.topCenter,
-                        children: [
-                          ...previousChildren,
-                          ?currentChild,
-                        ],
+                        children: [...previousChildren, ?currentChild],
                       );
                     },
                     transitionBuilder: _buildContentTransition,
@@ -2048,12 +2578,12 @@ class _MainPageState extends State<MainPage>
           const SizedBox(width: 8),
           _buildWindowButton(
             icon: LucideIcons.minus,
-            onTap: () => windowManager.minimize(),
+            onTap: () => minimizeMainWindow(),
           ),
           const SizedBox(width: 8),
           _buildWindowButton(
             icon: LucideIcons.x,
-            onTap: () => WindowAnimationHelper.hideWithAnimation(),
+            onTap: () => hideMainWindow(),
             isClose: true,
             isCloseBtn: true,
           ),
@@ -2337,14 +2867,18 @@ class _MainPageState extends State<MainPage>
       protectedAssets: _protectedAssetIDs,
       isRestoringProtection: _isRestoringProtection,
       selectedRescanAction: _selectedRescanAction,
-      onRescanActionChanged: _handleRescanActionChanged,
-      onRescan: _resetScan,
+      onRescanActionChanged: (action) {
+        if (!mounted) return;
+        setState(() {
+          _selectedRescanAction = action;
+        });
+      },
+      onRescan: _handleRescan,
       onViewSkillScanResults: _showSkillScanResultsDialog,
       onShowProtectionConfig: _showProtectionConfigDialog,
-      onShowProtectionMonitor: (asset) =>
-          _showProtectionMonitorResolved(asset),
+      onShowProtectionMonitor: (asset) => _showProtectionMonitorResolved(asset),
       onShowMitigation: (risk) => _showMitigationDialog(context, risk),
-      onDeleteRiskSkill: _deleteRiskSkill,
+      onDeleteRiskSkill: _deleteRiskSkillFromFinding,
     );
   }
 }

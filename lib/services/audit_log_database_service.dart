@@ -199,17 +199,12 @@ class AuditLogDatabaseService {
     String? assetName,
     String? assetID,
   }) async {
-    final hasAssetFilter =
-        (assetName != null && assetName.isNotEmpty) ||
-        (assetID != null && assetID.isNotEmpty);
+    final normalizedAssetID = (assetID ?? '').trim();
+    final hasAssetFilter = normalizedAssetID.isNotEmpty;
     final result = hasAssetFilter
         ? _callFFI(
             'GetAuditLogStatisticsWithFilterFFI',
-            jsonEncode({
-              if (assetName != null && assetName.isNotEmpty)
-                'asset_name': assetName,
-              if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
-            }),
+            jsonEncode({'asset_id': normalizedAssetID}),
           )
         : _callFFINoArg('GetAuditLogStatisticsFFI');
     if (result['success'] != true) {
@@ -270,24 +265,20 @@ class AuditLogDatabaseService {
 
   /// Clear audit logs for the current asset tab. Falls back to clearing all
   /// logs when no asset filter is provided.
-  Future<void> clearAuditLogs({
-    String? assetName,
-    String? assetID,
-  }) async {
-    final hasAssetFilter =
-        (assetName != null && assetName.isNotEmpty) ||
-        (assetID != null && assetID.isNotEmpty);
-    if (!hasAssetFilter) {
+  Future<void> clearAuditLogs({String? assetName, String? assetID}) async {
+    final normalizedAssetID = (assetID ?? '').trim();
+    final normalizedAssetName = (assetName ?? '').trim();
+    if (normalizedAssetID.isEmpty && normalizedAssetName.isNotEmpty) {
+      throw Exception('asset_id is required for filtered clear');
+    }
+    if (normalizedAssetID.isEmpty) {
       await clearAllAuditLogs();
       return;
     }
 
     _callFFI(
       'ClearAuditLogsWithFilterFFI',
-      jsonEncode({
-        if (assetName != null && assetName.isNotEmpty) 'asset_name': assetName,
-        if (assetID != null && assetID.isNotEmpty) 'asset_id': assetID,
-      }),
+      jsonEncode({'asset_id': normalizedAssetID}),
     );
   }
 

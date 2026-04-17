@@ -1,25 +1,28 @@
 import 'dart:async';
+import 'dart:io';
+
 import 'package:lucide_icons/lucide_icons.dart';
+
+import '../config/build_config.dart';
 import '../l10n/app_localizations.dart';
 import '../models/risk_model.dart';
-import '../config/build_config.dart';
-import '../utils/runtime_env.dart';
-import '../utils/runtime_platform.dart';
 import 'plugin_service.dart';
 import 'scan_database_service.dart';
 
 class BotScanner {
   final StreamController<String> _logController =
       StreamController<String>.broadcast();
-  Stream<String> get logStream => _logController.stream;
   final PluginService _pluginService = PluginService();
+
   AppLocalizations? _l10n;
+
+  Stream<String> get logStream => _logController.stream;
 
   void _log(String message) {
     _logController.add(message);
   }
 
-  /// 设置本地化对象，用于生成中文等本地化文本
+  /// Sets localization for scan-time risk copy.
   void setLocalization(AppLocalizations l10n) {
     _l10n = l10n;
   }
@@ -28,13 +31,11 @@ class BotScanner {
     _log('Starting security scan using plugins...');
     await Future.delayed(const Duration(milliseconds: 300));
 
-    // 1. Load Plugins and Scan (Identify + AssessRisks)
     _log('Loading plugins and scanning...');
-
-    ScanResult pluginResult = await _pluginService.scan();
+    final pluginResult = await _pluginService.scan();
 
     _log('Found ${pluginResult.assets.length} assets.');
-    for (var asset in pluginResult.assets) {
+    for (final asset in pluginResult.assets) {
       _log('Identified asset: ${asset.name} (${asset.type})');
     }
 
@@ -47,16 +48,15 @@ class BotScanner {
     _log('Risk assessment completed via plugins.');
     _log('Found ${pluginResult.risks.length} potential issues.');
 
-    // 2. Add System Level Checks (e.g. Scanner running as root)
-    List<RiskInfo> finalRisks = List.from(pluginResult.risks);
-    _checkSystemRisks(finalRisks);
+    final baseRisks = List<RiskInfo>.from(pluginResult.riskInfo);
+    _checkSystemRisks(baseRisks);
 
-    // 3. Add Risky Skills from database
-    await _addRiskySkills(finalRisks);
+    final skillRisks = await _loadRiskySkills();
 
     return ScanResult(
       config: pluginResult.config,
-      risks: finalRisks,
+      riskInfo: baseRisks,
+      skillResult: skillRisks,
       configFound: pluginResult.configFound,
       configPath: pluginResult.configPath,
       assets: pluginResult.assets,
@@ -64,21 +64,44 @@ class BotScanner {
     );
   }
 
+  Future<ScanResult> rediscoverSecurityFindings({
+    required bool configFound,
+    String? configPath,
+    Map<String, dynamic>? config,
+  }) async {
+    _log('Refreshing security findings...');
+    await Future.delayed(const Duration(milliseconds: 150));
+
+    // Re-scan assets to avoid reusing stale asset snapshots during
+    // "security discovery" refresh.
+    final pluginResult = await _pluginService.scan();
+    final baseRisks = List<RiskInfo>.from(pluginResult.riskInfo);
+    _log('Found ${baseRisks.length} potential issues.');
+
+    _checkSystemRisks(baseRisks);
+    final skillRisks = await _loadRiskySkills();
+
+    return ScanResult(
+      config: pluginResult.config ?? config,
+      riskInfo: baseRisks,
+      skillResult: skillRisks,
+      configFound: pluginResult.configFound || configFound,
+      configPath: pluginResult.configPath ?? configPath,
+      assets: pluginResult.assets,
+      scannedAt: DateTime.now(),
+    );
+  }
+
   void _checkSystemRisks(List<RiskInfo> risks) {
-    // AppStore版本在沙盒中运行,无法执行系统命令和读取环境变量,跳过系统级检查
     if (BuildConfig.isAppStore) {
       _log('Skipping system risk checks (App Store build)');
       return;
     }
 
-    // 检查运行权限
-    if (isRuntimeLinux || isRuntimeMacOS) {
-      // This checks if the *scanner itself* is running as root,
-      // which might be relevant if it needs to check other users' files.
-      // But usually running as root is a risk for the tool itself.
-      // We'll keep it as a general warning.
+    if (Platform.isLinux || Platform.isMacOS) {
       try {
-        final uidStr = getRuntimeEnv('UID') ?? getRuntimeEnv('EUID');
+        final env = Platform.environment;
+        final uidStr = env['UID'] ?? env['EUID'];
         if (uidStr != null) {
           final uid = int.tryParse(uidStr);
           if (uid == 0) {
@@ -94,34 +117,40 @@ class BotScanner {
             );
           }
         }
-      } catch (e) {
-        // Ignore
+      } catch (_) {
+        // Ignore environment read failures here.
       }
     }
   }
 
-  Future<void> _addRiskySkills(List<RiskInfo> risks) async {
+  Future<List<RiskInfo>> _loadRiskySkills() async {
+    final risks = <RiskInfo>[];
+
     try {
       final riskySkills = await ScanDatabaseService().getRiskySkills();
-      for (var skill in riskySkills) {
+      final mergedRiskySkills = _mergeRiskySkillsByPath(riskySkills);
+      for (final skill in mergedRiskySkills) {
         final skillName = skill['skill_name'] as String;
-        final skillPath = (skill['skill_path'] ?? '').toString();
-        final skillHash = (skill['skill_hash'] ?? '').toString();
         final issues = skill['issues'] as List<String>;
-        final issueCount = issues.length;
-
-        // 使用本地化文本（若有）
+        final persistedIssueCount = (skill['issue_count'] as num?)?.toInt() ?? 0;
+        final issueCount = persistedIssueCount > issues.length
+            ? persistedIssueCount
+            : issues.length;
+        final normalizedIssueCount = issueCount > 0 ? issueCount : 1;
         final title = _l10n != null
             ? _l10n!.riskSkillSecurityIssue(skillName)
             : 'Risky Skill: $skillName';
         final description = _l10n != null
-            ? (issueCount > 0
-                  ? _l10n!.riskSkillSecurityIssueDesc(skillName, issueCount)
+            ? (normalizedIssueCount > 0
+                  ? _l10n!.riskSkillSecurityIssueDesc(
+                      skillName,
+                      normalizedIssueCount,
+                    )
                   : (_l10n!.localeName.startsWith('zh')
                         ? '技能 "$skillName" 存在安全风险。建议删除此技能。'
                         : 'Skill "$skillName" is risky. Consider deleting it.'))
-            : (issueCount > 0
-                  ? 'Skill "$skillName" has $issueCount security issue(s): ${issues.join("; ")}'
+            : (normalizedIssueCount > 0
+                  ? 'Skill "$skillName" has $normalizedIssueCount security issue(s): ${issues.join("; ")}'
                   : 'Skill "$skillName" was flagged as potentially risky.');
 
         risks.add(
@@ -129,20 +158,89 @@ class BotScanner {
             id: 'riskSkillSecurityIssue',
             args: {
               'skillName': skillName,
-              'issueCount': issueCount,
-              if (skillPath.isNotEmpty) 'skillPath': skillPath,
-              if (skillHash.isNotEmpty) 'skillHash': skillHash,
+              'skillHash': skill['skill_hash'] as String? ?? '',
+              'asset_name': skill['source_plugin'] as String? ?? '',
+              'asset_id': skill['asset_id'] as String? ?? '',
+              'issueCount': normalizedIssueCount,
+              'issues': issues.join('; '),
+              if ((skill['skill_path'] as String? ?? '').isNotEmpty)
+                'skillPath': skill['skill_path'] as String,
             },
             title: title,
             description: description,
-            level: RiskLevel.high,
+            level: _parseSkillRiskLevel(skill['risk_level'] as String?),
             icon: LucideIcons.alertTriangle,
+            sourcePlugin: skill['source_plugin'] as String? ?? '',
           ),
         );
-        _log('Found risky skill: $skillName ($issueCount issues)');
+        _log('Found risky skill: $skillName ($normalizedIssueCount issues)');
       }
     } catch (e) {
       _log('Failed to check risky skills: $e');
+    }
+
+    return risks;
+  }
+
+  /// 按 skill_path 去重并合并问题，避免风险技能重复展示。
+  List<Map<String, dynamic>> _mergeRiskySkillsByPath(
+    List<Map<String, dynamic>> riskySkills,
+  ) {
+    final merged = <String, Map<String, dynamic>>{};
+    for (final skill in riskySkills) {
+      final skillName = (skill['skill_name'] as String? ?? '').trim();
+      final skillHash = (skill['skill_hash'] as String? ?? '').trim();
+      final skillPath = (skill['skill_path'] as String? ?? '').trim();
+      final sourcePlugin = (skill['source_plugin'] as String? ?? '').trim();
+      final assetID = (skill['asset_id'] as String? ?? '').trim();
+      final key = skillPath.isNotEmpty
+          ? 'path:${skillPath.toLowerCase()}|${sourcePlugin.toLowerCase()}|${assetID.toLowerCase()}'
+          : 'fallback:${skillName.toLowerCase()}|${skillHash.toLowerCase()}|${sourcePlugin.toLowerCase()}|${assetID.toLowerCase()}';
+      final issues = (skill['issues'] as List<String>? ?? const <String>[])
+          .where((issue) => issue.trim().isNotEmpty)
+          .toList();
+      final rawIssueCount = (skill['issue_count'] as num?)?.toInt() ?? 0;
+      final normalizedIssueCount = rawIssueCount > 0
+          ? rawIssueCount
+          : issues.length;
+
+      final existed = merged[key];
+      if (existed == null) {
+        final newSkill = Map<String, dynamic>.from(skill);
+        newSkill['issues'] = issues.toSet().toList();
+        newSkill['issue_count'] = normalizedIssueCount;
+        merged[key] = newSkill;
+        continue;
+      }
+
+      final existedIssues =
+          (existed['issues'] as List<String>? ?? const <String>[]).toSet();
+      existedIssues.addAll(issues);
+      existed['issues'] = existedIssues.toList();
+      final mergedIssueCount = (existed['issue_count'] as num?)?.toInt() ?? 0;
+      final dedupIssueCount = existedIssues.length;
+      final nextIssueCount = [
+        mergedIssueCount,
+        normalizedIssueCount,
+        dedupIssueCount,
+      ].reduce((a, b) => a > b ? a : b);
+      existed['issue_count'] = nextIssueCount;
+    }
+    return merged.values.toList();
+  }
+
+  RiskLevel _parseSkillRiskLevel(String? level) {
+    switch (level?.toLowerCase()) {
+      case 'critical':
+        return RiskLevel.critical;
+      case 'high':
+        return RiskLevel.high;
+      case 'medium':
+        return RiskLevel.medium;
+      case 'low':
+        return RiskLevel.low;
+      default:
+        return RiskLevel.high;
     }
   }
 

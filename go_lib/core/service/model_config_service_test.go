@@ -75,6 +75,36 @@ func TestSaveBotModelConfig(t *testing.T) {
 	}
 }
 
+func TestSaveBotModelConfig_AllowsMissingAssetName(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	input := `{
+		"asset_id": "openclaw:test-2",
+		"provider": "openai",
+		"base_url": "https://api.siliconflow.cn/v1",
+		"api_key": "sk-test",
+		"model": "deepseek-chat"
+	}`
+
+	result := SaveBotModelConfig(input)
+	if result["success"] != true {
+		t.Fatalf("Expected success=true, got: %v", result)
+	}
+
+	readBack := GetBotModelConfig("openclaw:test-2")
+	if readBack["success"] != true {
+		t.Fatalf("Expected success=true from GetBotModelConfig, got: %v", readBack)
+	}
+	if readBack["data"] == nil {
+		t.Fatal("expected bot model config data")
+	}
+	data := readBack["data"].(map[string]interface{})
+	if data["asset_name"] != "openclaw" {
+		t.Fatalf("expected inferred asset_name=openclaw, got: %v", data["asset_name"])
+	}
+}
+
 // TestGetBotModelConfig 验证获取Bot模型配置
 func TestGetBotModelConfig(t *testing.T) {
 	cleanup := setupTestDB(t)

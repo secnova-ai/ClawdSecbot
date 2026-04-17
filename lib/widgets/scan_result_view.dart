@@ -359,6 +359,7 @@ class ScanResultView extends StatelessWidget {
     final title = _getRiskTitle(risk, l10n);
     final description = _getRiskDesc(risk, l10n);
     final levelText = _getRiskLevel(risk.level, l10n);
+    final assetName = _getRiskAssetName(risk);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -415,6 +416,30 @@ class ScanResultView extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (assetName != null) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.15),
+                      ),
+                    ),
+                    child: Text(
+                      '${l10n.assetName}: ${_getAssetDisplayName(assetName)}',
+                      style: AppFonts.inter(
+                        fontSize: 10,
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 6),
                 Text(
                   description,
@@ -496,16 +521,6 @@ class ScanResultView extends StatelessWidget {
     );
   }
 
-  /// 返回当前重新扫描模式标签
-  String _rescanActionLabel(AppLocalizations l10n, RescanAction action) {
-    switch (action) {
-      case RescanAction.securityDiscovery:
-        return l10n.rescanSecurityDiscovery;
-      case RescanAction.fullScan:
-        return l10n.rescanAll;
-    }
-  }
-
   String _getRiskTitle(RiskInfo risk, AppLocalizations l10n) {
     switch (risk.id) {
       case 'riskNonLoopbackBinding':
@@ -514,9 +529,13 @@ class ScanResultView extends StatelessWidget {
       case 'riskNoAuth':
       case 'gateway_auth_disabled':
         return l10n.riskNoAuth;
+      case 'gateway_auth_password_mode':
+        return l10n.riskGatewayAuthPasswordMode;
       case 'riskWeakPassword':
       case 'gateway_weak_password':
         return l10n.riskWeakPassword;
+      case 'gateway_weak_token':
+        return l10n.riskGatewayWeakToken;
       case 'riskAllPluginsAllowed':
         return l10n.riskAllPluginsAllowed;
       case 'riskControlUiEnabled':
@@ -533,14 +552,33 @@ class ScanResultView extends StatelessWidget {
         return l10n.riskSandboxDisabledAgent;
       case 'logging_redact_off':
         return l10n.riskLoggingRedactOff;
+      case 'audit_disabled':
+        return l10n.riskAuditDisabled;
+      case 'autonomy_workspace_unrestricted':
+        return l10n.riskAutonomyWorkspaceUnrestricted;
       case 'log_dir_perm_unsafe':
         return l10n.riskLogDirPermUnsafe;
       case 'plaintext_secrets':
         return l10n.riskPlaintextSecrets;
+      case 'memory_dir_perm_unsafe':
+        return l10n.riskMemoryDirPermUnsafe;
+      case 'process_running_as_root':
+        return l10n.riskProcessRunningAsRoot;
+      case 'skill_agent_risk':
+        return l10n.riskSkillAgentRisk;
       case 'skills_not_scanned':
         return l10n.riskSkillsNotScanned;
       case 'openclaw_1click_rce_vulnerability':
+      case 'nullclaw_1click_rce_vulnerability':
         return l10n.riskOneClickRce;
+      case 'terminal_backend_local':
+        return l10n.riskTerminalBackendLocal;
+      case 'approvals_mode_disabled':
+        return l10n.riskApprovalsModeDisabled;
+      case 'redact_secrets_disabled':
+        return l10n.riskRedactSecretsDisabled;
+      case 'model_base_url_public':
+        return l10n.riskModelBaseUrlPublic;
       case 'riskSkillSecurityIssue':
         return l10n.riskSkillSecurityIssue(
           risk.args?['skillName']?.toString() ?? risk.title,
@@ -560,9 +598,13 @@ class ScanResultView extends StatelessWidget {
       case 'riskNoAuth':
       case 'gateway_auth_disabled':
         return l10n.riskNoAuthDesc;
+      case 'gateway_auth_password_mode':
+        return l10n.riskGatewayAuthPasswordModeDesc;
       case 'riskWeakPassword':
       case 'gateway_weak_password':
         return l10n.riskWeakPasswordDesc;
+      case 'gateway_weak_token':
+        return l10n.riskGatewayWeakTokenDesc;
       case 'riskAllPluginsAllowed':
         return l10n.riskAllPluginsAllowedDesc;
       case 'riskControlUiEnabled':
@@ -605,6 +647,10 @@ class ScanResultView extends StatelessWidget {
         );
       case 'logging_redact_off':
         return l10n.riskLoggingRedactOffDesc;
+      case 'audit_disabled':
+        return l10n.riskAuditDisabledDesc;
+      case 'autonomy_workspace_unrestricted':
+        return l10n.riskAutonomyWorkspaceUnrestrictedDesc;
       case 'log_dir_perm_unsafe':
         if (isRuntimeWindows) {
           return _getWindowsAclRiskDesc(
@@ -620,14 +666,33 @@ class ScanResultView extends StatelessWidget {
         return l10n.riskPlaintextSecretsDesc(
           risk.args?['pattern']?.toString() ?? '',
         );
+      case 'memory_dir_perm_unsafe':
+        return l10n.riskMemoryDirPermUnsafeDesc;
+      case 'process_running_as_root':
+        return l10n.riskProcessRunningAsRootDesc;
+      case 'skill_agent_risk':
+        return l10n.riskSkillAgentRiskDesc;
       case 'skills_not_scanned':
         return l10n.riskSkillsNotScannedDesc(
           risk.args?['count'] as int? ?? 0,
           risk.args?['skills']?.toString() ?? '',
         );
       case 'openclaw_1click_rce_vulnerability':
+      case 'nullclaw_1click_rce_vulnerability':
         return l10n.riskOneClickRceDesc(
           risk.args?['current_version']?.toString() ?? 'unknown',
+        );
+      case 'terminal_backend_local':
+        return l10n.riskTerminalBackendLocalDesc;
+      case 'approvals_mode_disabled':
+        return l10n.riskApprovalsModeDisabledDesc(
+          risk.args?['mode']?.toString() ?? 'off',
+        );
+      case 'redact_secrets_disabled':
+        return l10n.riskRedactSecretsDisabledDesc;
+      case 'model_base_url_public':
+        return l10n.riskModelBaseUrlPublicDesc(
+          risk.args?['base_url']?.toString() ?? '',
         );
       case 'riskSkillSecurityIssue':
         return l10n.riskSkillSecurityIssueDesc(
@@ -712,6 +777,27 @@ class ScanResultView extends StatelessWidget {
       case RiskLevel.critical:
         return l10n.riskLevelCritical;
     }
+  }
+
+  String? _getRiskAssetName(RiskInfo risk) {
+    final fromArgs = (risk.args?['asset_name'] ?? risk.args?['assetName'])
+        ?.toString()
+        .trim();
+    if (fromArgs != null && fromArgs.isNotEmpty) {
+      return fromArgs;
+    }
+    final fromSourcePlugin = risk.sourcePlugin?.trim();
+    if (fromSourcePlugin != null && fromSourcePlugin.isNotEmpty) {
+      return fromSourcePlugin;
+    }
+    return null;
+  }
+
+  String _getAssetDisplayName(String name) {
+    const displayNames = {
+      'dintalclaw': '政务龙虾',
+    };
+    return displayNames[name] ?? name;
   }
 }
 
