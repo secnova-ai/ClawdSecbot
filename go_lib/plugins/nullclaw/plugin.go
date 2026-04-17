@@ -323,7 +323,7 @@ func (p *NullclawPlugin) RestoreBotDefaultState(assetID string) string {
 	backupDir := ""
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
-		backupDir = filepath.Join(homeDir, ".botsec", "backups")
+		backupDir = core.ResolveBackupDir(homeDir)
 	}
 	result := RestoreToInitialConfigByAsset(backupDir, assetID)
 	payload, err := json.Marshal(result)
@@ -342,7 +342,7 @@ func (p *NullclawPlugin) OnBeforeProxyStop(ctx *core.ProtectionContext) {
 	backupDir := ctx.BackupDir
 	if backupDir == "" {
 		homeDir, _ := os.UserHomeDir()
-		backupDir = filepath.Join(homeDir, ".botsec", "backups")
+		backupDir = core.ResolveBackupDir(homeDir)
 	}
 
 	// 恢复原始配置

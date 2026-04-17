@@ -87,7 +87,7 @@ func buildGatewayRestartRequestFromDB(assetID string) *GatewayRestartRequest {
 		policyDir = pm.GetPolicyDir()
 	} else {
 		homeDir, _ := os.UserHomeDir()
-		policyDir = filepath.Join(homeDir, ".botsec", "policies")
+		policyDir = core.ResolvePolicyDir(homeDir)
 	}
 	req.PolicyDir = policyDir
 

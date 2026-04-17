@@ -1190,7 +1190,7 @@ func (pp *ProxyProtection) GetBackupDir() string {
 		return pm.GetBackupDir()
 	}
 	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".botsec", "backups")
+	return core.ResolveBackupDir(homeDir)
 }
 
 // GetProxyProtection 获取全局代理防护实例

@@ -38,11 +38,16 @@ func ErrorResult(err error) map[string]interface{} {
 // Initialize configures the shared path manager.
 // workspaceDir is the app data base directory provided by Flutter.
 // homeDir is the user home directory for discovery and policy paths.
-func Initialize(workspaceDir, homeDir string) (map[string]interface{}, error) {
-	logging.Info("Initializing global path manager: workspaceDir=%s, homeDir=%s", workspaceDir, homeDir)
+func Initialize(workspaceDir, homeDir, sandboxDir string) (map[string]interface{}, error) {
+	logging.Info(
+		"Initializing global path manager: workspaceDir=%s, homeDir=%s, sandboxDir=%s",
+		workspaceDir,
+		homeDir,
+		sandboxDir,
+	)
 
 	pm := GetPathManager()
-	if err := pm.Initialize(workspaceDir, homeDir); err != nil {
+	if err := pm.InitializeWithSandbox(workspaceDir, homeDir, sandboxDir); err != nil {
 		logging.Error("Failed to initialize path manager: %v", err)
 		return nil, err
 	}
@@ -51,7 +56,9 @@ func Initialize(workspaceDir, homeDir string) (map[string]interface{}, error) {
 		"success":           true,
 		"workspace_dir":     pm.GetWorkspaceDir(),
 		"home_dir":          pm.GetHomeDir(),
+		"sandbox_dir":       pm.GetSandboxDir(),
 		"log_dir":           pm.GetLogDir(),
+		"sandbox_log_dir":   pm.GetSandboxLogDir(),
 		"backup_dir":        pm.GetBackupDir(),
 		"policy_dir":        pm.GetPolicyDir(),
 		"react_skill_dir":   pm.GetReActSkillDir(),
@@ -112,7 +119,9 @@ func GetPaths() map[string]interface{} {
 		"success":           true,
 		"workspace_dir":     pm.GetWorkspaceDir(),
 		"home_dir":          pm.GetHomeDir(),
+		"sandbox_dir":       pm.GetSandboxDir(),
 		"log_dir":           pm.GetLogDir(),
+		"sandbox_log_dir":   pm.GetSandboxLogDir(),
 		"backup_dir":        pm.GetBackupDir(),
 		"policy_dir":        pm.GetPolicyDir(),
 		"react_skill_dir":   pm.GetReActSkillDir(),

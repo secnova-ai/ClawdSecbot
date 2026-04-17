@@ -16,8 +16,7 @@ var hookDLLPath string
 
 // isSandboxSupportedOnPlatform checks if sandbox_hook.dll is available on Windows
 func isSandboxSupportedOnPlatform() bool {
-	homeDir, _ := os.UserHomeDir()
-	policyDir := filepath.Join(homeDir, ".botsec", "policies")
+	policyDir := GetDefaultPolicyDir()
 	p := findHookDLL(policyDir)
 	if p != "" {
 		logging.Info("[Sandbox] Found hook DLL: %s", p)

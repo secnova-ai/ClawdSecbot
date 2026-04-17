@@ -233,7 +233,7 @@ class _MainPageState extends State<MainPage>
 
     // 3. 加载 dylib + 初始化 Go 日志 + 初始化 Go 数据库
     try {
-      await NativeLibraryService().initialize();
+      await NativeLibraryService().initialize(logDir: appLogger.logDir);
       await _syncProtectionLanguage();
       await _registerApiShutdownHandler();
     } catch (e) {

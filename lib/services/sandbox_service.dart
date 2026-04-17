@@ -5,6 +5,7 @@ import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as path;
 import '../models/protection_config_model.dart';
 import '../utils/app_logger.dart';
+import 'app_config_service.dart';
 import 'native_library_service.dart' hide FreeStringDart;
 
 // FFI type definitions
@@ -133,13 +134,9 @@ class SandboxService {
   /// Get the policy directory path
   /// Note: Policy files must be outside sandbox for sandbox-exec to read them
   Future<String> getPolicyDir() async {
-    final homeDir =
-        Platform.environment['HOME'] ??
-        Platform.environment['USERPROFILE'] ??
-        '';
-    // Use ~/.botsec/policies instead of app documents directory
-    // because sandbox-exec needs to read the policy file before applying sandbox
-    final policyDir = '$homeDir/.botsec/policies';
+    final sandboxDir = await AppConfigService().getSandboxDir();
+    // Use configured sandbox root (default: ~/.botsec) for policy files.
+    final policyDir = path.join(sandboxDir, 'policies');
 
     // Ensure directory exists
     final dir = Directory(policyDir);

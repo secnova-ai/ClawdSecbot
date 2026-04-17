@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:ffi/ffi.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as path;
+import 'app_config_service.dart';
 import '../utils/app_logger.dart';
 import 'database_service.dart';
 
@@ -12,6 +13,18 @@ typedef _InitPathsFFIC =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 typedef _InitPathsFFIDart =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef _InitPathsWithConfigFFIC =
+    ffi.Pointer<Utf8> Function(
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<Utf8>,
+    );
+typedef _InitPathsWithConfigFFIDart =
+    ffi.Pointer<Utf8> Function(
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<Utf8>,
+    );
 
 typedef _InitLoggingFFIC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 typedef _InitLoggingFFIDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
@@ -75,7 +88,7 @@ class NativeLibraryService {
   /// 初始化原生库：加载dylib + 初始化Go日志 + 初始化Go数据库
   ///
   /// 在应用启动时调用，在 DatabaseService.init() 之后
-  Future<void> initialize() async {
+  Future<void> initialize({String? logDir}) async {
     if (_initialized) return;
 
     // Prefer the database directory (Application Support) as Go workspace.
@@ -102,10 +115,11 @@ class NativeLibraryService {
           appLogger.info('[NativeLib] Library loaded: ${entity.path}');
 
           // 初始化Go路径管理器
-          _initGoPaths(dylib, freeStr);
+          final workspaceDir = await _resolveWorkspaceDir();
+          await _initGoPaths(dylib, freeStr, workspaceDir: workspaceDir);
 
           // 初始化Go日志
-          _initGoLogging(dylib, freeStr);
+          _initGoLogging(dylib, freeStr, logDir: logDir);
 
           // 初始化Go数据库
           await _initGoDatabase(dylib, freeStr);
@@ -238,17 +252,47 @@ class NativeLibraryService {
   }
 
   /// 初始化Go路径管理器
-  void _initGoPaths(ffi.DynamicLibrary dylib, FreeStringDart freeStr) {
-    final appDataDir = DatabaseService().appDataDir;
-    // workspaceDir 使用插件目录的父目录
-    final pluginDir = _getPluginDirectory();
-    final fallbackWorkspaceDir = pluginDir.parent.path;
-    final workspaceDir = appDataDir ?? fallbackWorkspaceDir;
+  Future<void> _initGoPaths(
+    ffi.DynamicLibrary dylib,
+    FreeStringDart freeStr, {
+    required String workspaceDir,
+  }) async {
     // homeDir 使用用户主目录
     final homeDir =
         Platform.environment['HOME'] ??
         Platform.environment['USERPROFILE'] ??
         '';
+    String sandboxDir = '';
+    try {
+      sandboxDir = await AppConfigService().getSandboxDir();
+    } catch (e) {
+      appLogger.warning('[NativeLib] Failed to read sandbox_dir config: $e');
+    }
+
+    try {
+      final initPathsWithConfigFFI = dylib
+          .lookupFunction<
+            _InitPathsWithConfigFFIC,
+            _InitPathsWithConfigFFIDart
+          >('InitPathsWithConfigFFI');
+      final workspaceDirPtr = workspaceDir.toNativeUtf8();
+      final homeDirPtr = homeDir.toNativeUtf8();
+      final sandboxDirPtr = sandboxDir.toNativeUtf8();
+      final resultPtr = initPathsWithConfigFFI(
+        workspaceDirPtr,
+        homeDirPtr,
+        sandboxDirPtr,
+      );
+      final result = resultPtr.toDartString();
+      freeStr(resultPtr);
+      malloc.free(workspaceDirPtr);
+      malloc.free(homeDirPtr);
+      malloc.free(sandboxDirPtr);
+      appLogger.info('[NativeLib] Go paths initialized: $result');
+      return;
+    } catch (_) {
+      // Backward-compatible fallback for old Go dylib.
+    }
 
     try {
       final initPathsFFI = dylib
@@ -266,14 +310,42 @@ class NativeLibraryService {
     }
   }
 
-  /// 初始化Go日志
-  void _initGoLogging(ffi.DynamicLibrary dylib, FreeStringDart freeStr) {
+  /// 解析 Go PathManager 的 workspaceDir（与安装目录根一致）。
+  Future<String> _resolveWorkspaceDir() async {
+    // Fallback workspace directory uses plugin dir parent.
+    final pluginDir = _getPluginDirectory();
+    final fallbackWorkspaceDir = pluginDir.parent.path;
+    try {
+      final installDir = await AppConfigService().getInstallDir();
+      if (installDir.trim().isNotEmpty) {
+        return installDir;
+      }
+    } catch (e) {
+      appLogger.warning('[NativeLib] Failed to read install_dir config: $e');
+    }
+
+    final appDataDir = DatabaseService().appDataDir;
+    if (appDataDir != null && appDataDir.trim().isNotEmpty) {
+      return appDataDir;
+    }
+    return fallbackWorkspaceDir;
+  }
+
+  /// 初始化Go日志。
+  ///
+  /// [logDir] 为空时，Go 侧将回退到 PathManager 推导目录。
+  void _initGoLogging(
+    ffi.DynamicLibrary dylib,
+    FreeStringDart freeStr, {
+    String? logDir,
+  }) {
     try {
       final initLoggingFFI = dylib
           .lookupFunction<_InitLoggingFFIC, _InitLoggingFFIDart>(
             'InitLoggingFFI',
           );
-      final logDirPtr = ''.toNativeUtf8();
+      final resolvedLogDir = logDir?.trim() ?? '';
+      final logDirPtr = resolvedLogDir.toNativeUtf8();
       final resultPtr = initLoggingFFI(logDirPtr);
       final result = resultPtr.toDartString();
       freeStr(resultPtr);

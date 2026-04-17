@@ -181,9 +181,30 @@ func InitPathsFFI(workspaceDirC, homeDirC *C.char) *C.char {
 	workspaceDir := C.GoString(workspaceDirC)
 	homeDir := C.GoString(homeDirC)
 
-	result, err := core.Initialize(workspaceDir, homeDir)
+	result, err := core.Initialize(workspaceDir, homeDir, "")
 	if err != nil {
 		return errorCString(err)
+	}
+	pm := core.GetPathManager()
+	if pm.IsInitialized() {
+		sandbox.SetDefaultPolicyDir(pm.GetPolicyDir())
+	}
+	return jsonToCString(result)
+}
+
+//export InitPathsWithConfigFFI
+func InitPathsWithConfigFFI(workspaceDirC, homeDirC, sandboxDirC *C.char) *C.char {
+	workspaceDir := C.GoString(workspaceDirC)
+	homeDir := C.GoString(homeDirC)
+	sandboxDir := C.GoString(sandboxDirC)
+
+	result, err := core.Initialize(workspaceDir, homeDir, sandboxDir)
+	if err != nil {
+		return errorCString(err)
+	}
+	pm := core.GetPathManager()
+	if pm.IsInitialized() {
+		sandbox.SetDefaultPolicyDir(pm.GetPolicyDir())
 	}
 	return jsonToCString(result)
 }

@@ -84,7 +84,7 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 func restartWithSandbox(req *GatewayRestartRequest, binaryPath, homeDir string) (map[string]interface{}, error) {
 	policyDir := req.PolicyDir
 	if policyDir == "" {
-		policyDir = filepath.Join(homeDir, ".botsec", "policies")
+		policyDir = core.ResolvePolicyDir(homeDir)
 	}
 
 	logDir := policyDir

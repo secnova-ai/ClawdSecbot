@@ -112,7 +112,7 @@ func getBackupDir() string {
 		return dir
 	}
 	homeDir, _ := os.UserHomeDir()
-	dir := filepath.Join(homeDir, ".botsec", "backups")
+	dir := core.ResolveBackupDir(homeDir)
 	_ = os.MkdirAll(dir, 0755)
 	return dir
 }
