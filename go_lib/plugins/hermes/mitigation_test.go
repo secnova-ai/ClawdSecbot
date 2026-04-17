@@ -9,6 +9,25 @@ import (
 	"testing"
 )
 
+func buildMitigationRequest(
+	t *testing.T,
+	riskID string,
+	args map[string]interface{},
+	formData map[string]interface{},
+) string {
+	t.Helper()
+	req := map[string]interface{}{
+		"id":        riskID,
+		"args":      args,
+		"form_data": formData,
+	}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("failed to build mitigation request: %v", err)
+	}
+	return string(raw)
+}
+
 func parseMitigationPayload(t *testing.T, raw string) map[string]interface{} {
 	t.Helper()
 	payload := map[string]interface{}{}
@@ -40,13 +59,23 @@ func TestConfigPermMitigation_ApplyAndSkip(t *testing.T) {
 		t.Fatalf("write config failed: %v", err)
 	}
 
-	skipReq := `{"id":"config_perm_unsafe","args":{"path":"` + cfgPath + `"},"form_data":{"fix_permission":false}}`
+	skipReq := buildMitigationRequest(
+		t,
+		"config_perm_unsafe",
+		map[string]interface{}{"path": cfgPath},
+		map[string]interface{}{"fix_permission": false},
+	)
 	skipPayload := parseMitigationPayload(t, MitigateRiskDispatch(skipReq))
 	if success, _ := skipPayload["success"].(bool); !success {
 		t.Fatalf("expected skip to succeed: %+v", skipPayload)
 	}
 
-	applyReq := `{"id":"config_perm_unsafe","args":{"path":"` + cfgPath + `"},"form_data":{"fix_permission":true}}`
+	applyReq := buildMitigationRequest(
+		t,
+		"config_perm_unsafe",
+		map[string]interface{}{"path": cfgPath},
+		map[string]interface{}{"fix_permission": true},
+	)
 	applyPayload := parseMitigationPayload(t, MitigateRiskDispatch(applyReq))
 	if success, _ := applyPayload["success"].(bool); !success {
 		t.Fatalf("expected apply to succeed: %+v", applyPayload)
@@ -71,7 +100,12 @@ func TestConfigDirPermMitigation_Apply(t *testing.T) {
 		t.Fatalf("chmod failed: %v", err)
 	}
 
-	req := `{"id":"config_dir_perm_unsafe","args":{"path":"` + dir + `"},"form_data":{"fix_permission":true}}`
+	req := buildMitigationRequest(
+		t,
+		"config_dir_perm_unsafe",
+		map[string]interface{}{"path": dir},
+		map[string]interface{}{"fix_permission": true},
+	)
 	payload := parseMitigationPayload(t, MitigateRiskDispatch(req))
 	if success, _ := payload["success"].(bool); !success {
 		t.Fatalf("expected apply to succeed: %+v", payload)
@@ -93,13 +127,23 @@ func TestRedactSecretsMitigation_EnableAndSkip(t *testing.T) {
 		t.Fatalf("write config failed: %v", err)
 	}
 
-	skipReq := `{"id":"redact_secrets_disabled","args":{"config_path":"` + cfgPath + `"},"form_data":{"enable_redaction":false}}`
+	skipReq := buildMitigationRequest(
+		t,
+		"redact_secrets_disabled",
+		map[string]interface{}{"config_path": cfgPath},
+		map[string]interface{}{"enable_redaction": false},
+	)
 	skipPayload := parseMitigationPayload(t, MitigateRiskDispatch(skipReq))
 	if success, _ := skipPayload["success"].(bool); !success {
 		t.Fatalf("expected skip to succeed: %+v", skipPayload)
 	}
 
-	applyReq := `{"id":"redact_secrets_disabled","args":{"config_path":"` + cfgPath + `"},"form_data":{"enable_redaction":true}}`
+	applyReq := buildMitigationRequest(
+		t,
+		"redact_secrets_disabled",
+		map[string]interface{}{"config_path": cfgPath},
+		map[string]interface{}{"enable_redaction": true},
+	)
 	applyPayload := parseMitigationPayload(t, MitigateRiskDispatch(applyReq))
 	if success, _ := applyPayload["success"].(bool); !success {
 		t.Fatalf("expected enable to succeed: %+v", applyPayload)
@@ -121,7 +165,12 @@ func TestApprovalsModeMitigation_ValidateAndApply(t *testing.T) {
 		t.Fatalf("write config failed: %v", err)
 	}
 
-	invalidReq := `{"id":"approvals_mode_disabled","args":{"config_path":"` + cfgPath + `"},"form_data":{"mode":"invalid"}}`
+	invalidReq := buildMitigationRequest(
+		t,
+		"approvals_mode_disabled",
+		map[string]interface{}{"config_path": cfgPath},
+		map[string]interface{}{"mode": "invalid"},
+	)
 	invalidPayload := parseMitigationPayload(t, MitigateRiskDispatch(invalidReq))
 	if success, _ := invalidPayload["success"].(bool); success {
 		t.Fatalf("expected invalid mode failure: %+v", invalidPayload)
@@ -130,7 +179,12 @@ func TestApprovalsModeMitigation_ValidateAndApply(t *testing.T) {
 		t.Fatalf("unexpected invalid mode error: %+v", invalidPayload)
 	}
 
-	applyReq := `{"id":"approvals_mode_disabled","args":{"config_path":"` + cfgPath + `"},"form_data":{"mode":"smart"}}`
+	applyReq := buildMitigationRequest(
+		t,
+		"approvals_mode_disabled",
+		map[string]interface{}{"config_path": cfgPath},
+		map[string]interface{}{"mode": "smart"},
+	)
 	applyPayload := parseMitigationPayload(t, MitigateRiskDispatch(applyReq))
 	if success, _ := applyPayload["success"].(bool); !success {
 		t.Fatalf("expected smart mode apply success: %+v", applyPayload)
@@ -144,7 +198,12 @@ func TestApprovalsModeMitigation_ValidateAndApply(t *testing.T) {
 		t.Fatalf("expected approvals.mode=smart, got %q", cfg.Approvals.Mode)
 	}
 
-	defaultReq := `{"id":"approvals_mode_disabled","args":{"config_path":"` + cfgPath + `"},"form_data":{}}`
+	defaultReq := buildMitigationRequest(
+		t,
+		"approvals_mode_disabled",
+		map[string]interface{}{"config_path": cfgPath},
+		map[string]interface{}{},
+	)
 	defaultPayload := parseMitigationPayload(t, MitigateRiskDispatch(defaultReq))
 	if success, _ := defaultPayload["success"].(bool); !success {
 		t.Fatalf("expected default mode apply success: %+v", defaultPayload)
