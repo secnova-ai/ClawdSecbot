@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
-import '../l10n/app_localizations.dart';
+import '../utils/app_fonts.dart';
 import '../models/risk_model.dart';
 import '../services/plugin_service.dart';
-import '../utils/app_fonts.dart';
-import '../utils/risk_localization.dart';
+import '../utils/runtime_platform.dart';
 
 class MitigationDialog extends StatefulWidget {
   final RiskInfo risk;
@@ -25,16 +23,16 @@ class _MitigationDialogState extends State<MitigationDialog> {
   @override
   void initState() {
     super.initState();
+    // Check if this is a skills_not_scanned risk - handle specially
     if (widget.risk.id == 'skills_not_scanned') {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _redirectToSkillScan();
       });
       return;
     }
-
-    final mitigation = widget.risk.mitigation;
-    if (mitigation != null) {
-      for (final item in mitigation.formSchema) {
+    // Initialize default values
+    if (widget.risk.mitigation != null) {
+      for (var item in widget.risk.mitigation!.formSchema) {
         if (item.defaultValue != null) {
           _formData[item.key] = item.defaultValue;
         }
@@ -43,11 +41,11 @@ class _MitigationDialogState extends State<MitigationDialog> {
   }
 
   void _redirectToSkillScan() {
+    // Return special result to indicate skill scan is needed
     Navigator.of(context).pop({'action': 'skill_scan'});
   }
 
   Future<void> _submit() async {
-    final l10n = AppLocalizations.of(context)!;
     if (!_formKey.currentState!.validate()) return;
     _formKey.currentState!.save();
 
@@ -59,39 +57,40 @@ class _MitigationDialogState extends State<MitigationDialog> {
     try {
       final result = await PluginService().mitigateRisk(widget.risk, _formData);
       if (result['success'] == true) {
-        if (!mounted) return;
-        Navigator.of(context).pop(true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white, size: 24),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    l10n.fixApplied,
-                    style: AppFonts.inter(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
+        if (mounted) {
+          Navigator.of(context).pop(true); // Return success
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white, size: 24),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '修复成功',
+                      style: AppFonts.inter(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
+              backgroundColor: const Color(0xFF10B981),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              margin: const EdgeInsets.all(16),
+              elevation: 6,
+              duration: const Duration(seconds: 3),
             ),
-            backgroundColor: const Color(0xFF10B981),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            margin: const EdgeInsets.all(16),
-            elevation: 6,
-            duration: const Duration(seconds: 3),
-          ),
-        );
+          );
+        }
       } else {
         setState(() {
-          _error = result['error']?.toString() ?? 'Unknown error';
+          _error = result['error'] ?? 'Unknown error';
         });
       }
     } catch (e) {
@@ -109,26 +108,26 @@ class _MitigationDialogState extends State<MitigationDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-
+    // For skills_not_scanned, show loading while redirecting
     if (widget.risk.id == 'skills_not_scanned') {
-      return const AlertDialog(
-        backgroundColor: Color(0xFF1A1A2E),
-        content: SizedBox(
+      return AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        content: const SizedBox(
           height: 100,
           child: Center(child: CircularProgressIndicator()),
         ),
       );
     }
 
+    // For suggestion type, show suggestions instead of form
     if (widget.risk.mitigation?.type == 'suggestion') {
-      return _buildSuggestionDialog(l10n);
+      return _buildSuggestionDialog();
     }
 
     return AlertDialog(
       backgroundColor: const Color(0xFF1A1A2E),
       title: Text(
-        l10n.mitigationDialogTitle,
+        '风险处置',
         style: AppFonts.inter(color: Colors.white, fontWeight: FontWeight.bold),
       ),
       content: SingleChildScrollView(
@@ -139,17 +138,8 @@ class _MitigationDialogState extends State<MitigationDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                RiskLocalization.mitigationTitle(widget.risk, l10n),
-                style: AppFonts.inter(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                RiskLocalization.mitigationDescription(widget.risk, l10n),
-                style: AppFonts.inter(color: Colors.white70, fontSize: 13),
+                widget.risk.title,
+                style: AppFonts.inter(color: Colors.white70, fontSize: 14),
               ),
               const SizedBox(height: 16),
               if (_error != null)
@@ -172,13 +162,13 @@ class _MitigationDialogState extends State<MitigationDialog> {
                 ...widget.risk.mitigation!.formSchema.map((item) {
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 16),
-                    child: _buildFormItem(l10n, item),
+                    child: _buildFormItem(item),
                   );
                 }),
               if (widget.risk.mitigation?.formSchema.isEmpty ?? true)
-                Text(
-                  l10n.mitigationConfirmAutoFix,
-                  style: const TextStyle(color: Colors.white70),
+                const Text(
+                  '确定要执行自动修复吗？',
+                  style: TextStyle(color: Colors.white70),
                 ),
             ],
           ),
@@ -187,10 +177,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
       actions: [
         TextButton(
           onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
-          child: Text(
-            l10n.cancel,
-            style: const TextStyle(color: Colors.white54),
-          ),
+          child: const Text('取消', style: TextStyle(color: Colors.white54)),
         ),
         ElevatedButton(
           onPressed: _isLoading ? null : _submit,
@@ -207,14 +194,14 @@ class _MitigationDialogState extends State<MitigationDialog> {
                     color: Colors.white,
                   ),
                 )
-              : Text(l10n.mitigationExecute),
+              : const Text('执行修复'),
         ),
       ],
     );
   }
 
-  Widget _buildFormItem(AppLocalizations l10n, FormItem item) {
-    final label = RiskLocalization.formLabel(widget.risk, item, l10n);
+  Widget _buildFormItem(FormItem item) {
+    final label = _displayFormLabel(item);
     switch (item.type) {
       case 'boolean':
         return CheckboxListTile(
@@ -261,16 +248,13 @@ class _MitigationDialogState extends State<MitigationDialog> {
                   vertical: 8,
                 ),
               ),
-              items: (item.options ?? []).map((option) {
+              items: (item.options ?? []).map<DropdownMenuItem<String>>((
+                option,
+              ) {
                 return DropdownMenuItem<String>(
                   value: option,
                   child: Text(
-                    RiskLocalization.formOption(
-                      widget.risk,
-                      item,
-                      option,
-                      l10n,
-                    ),
+                    option,
                     style: const TextStyle(color: Colors.white),
                   ),
                 );
@@ -282,7 +266,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
               },
               validator: (value) {
                 if (item.required && (value == null || value.isEmpty)) {
-                  return l10n.mitigationFieldRequired;
+                  return '此项必填';
                 }
                 return null;
               },
@@ -314,20 +298,20 @@ class _MitigationDialogState extends State<MitigationDialog> {
           ),
           validator: (value) {
             if (item.required && (value == null || value.isEmpty)) {
-              return l10n.mitigationFieldRequired;
+              return '此项必填';
             }
             if (value != null && value.isNotEmpty) {
               if (item.minLength > 0 && value.length < item.minLength) {
-                return l10n.mitigationFieldMinLength(item.minLength);
+                return '最小长度为 ${item.minLength}';
               }
               if (item.regex != null && item.regex!.isNotEmpty) {
                 try {
                   final regExp = RegExp(item.regex!);
                   if (!regExp.hasMatch(value)) {
-                    return item.regexMsg ?? l10n.mitigationFieldInvalidFormat;
+                    return item.regexMsg ?? '格式不正确';
                   }
-                } catch (_) {
-                  return l10n.mitigationFieldInvalidRegex;
+                } catch (e) {
+                  return '无效的正则规则';
                 }
               }
             }
@@ -337,13 +321,37 @@ class _MitigationDialogState extends State<MitigationDialog> {
         );
       default:
         return Text(
-          '${l10n.mitigationUnsupportedFieldType}: ${item.type}',
+          '不支持的字段类型: ${item.type}',
           style: const TextStyle(color: Colors.red),
         );
     }
   }
 
-  Widget _buildSuggestionDialog(AppLocalizations l10n) {
+  String _displayFormLabel(FormItem item) {
+    final locale = Localizations.localeOf(context).languageCode.toLowerCase();
+    final isZh = locale == 'zh';
+    if (!isZh) return item.label;
+
+    if (item.key == 'fix_permission') {
+      if (!isRuntimeWindows) {
+        return '修复目录/文件权限（Unix: chmod）';
+      }
+      switch (widget.risk.id) {
+        case 'config_perm_unsafe':
+          return '修复配置文件 ACL 权限';
+        case 'config_dir_perm_unsafe':
+          return '修复配置目录 ACL 权限';
+        case 'log_dir_perm_unsafe':
+          return '修复日志目录 ACL 权限';
+        default:
+          return '修复 ACL 权限';
+      }
+    }
+
+    return item.label;
+  }
+
+  Widget _buildSuggestionDialog() {
     final mitigation = widget.risk.mitigation!;
     return Dialog(
       backgroundColor: const Color(0xFF1A1A2E),
@@ -353,6 +361,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Header
             Row(
               children: [
                 Container(
@@ -373,24 +382,23 @@ class _MitigationDialogState extends State<MitigationDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        RiskLocalization.mitigationTitle(widget.risk, l10n),
+                        mitigation.title ?? '安全建议',
                         style: AppFonts.inter(
                           color: Colors.white,
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        RiskLocalization.mitigationDescription(
-                          widget.risk,
-                          l10n,
+                      if (mitigation.description != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          mitigation.description!,
+                          style: AppFonts.inter(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
                         ),
-                        style: AppFonts.inter(
-                          color: Colors.white70,
-                          fontSize: 12,
-                        ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
@@ -401,11 +409,13 @@ class _MitigationDialogState extends State<MitigationDialog> {
               ],
             ),
             const SizedBox(height: 24),
+            // Content
             Expanded(
               child: SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Risk description
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
@@ -416,7 +426,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
                         ),
                       ),
                       child: Text(
-                        RiskLocalization.riskDescription(widget.risk, l10n),
+                        widget.risk.description,
                         style: AppFonts.inter(
                           color: Colors.white70,
                           fontSize: 14,
@@ -425,11 +435,12 @@ class _MitigationDialogState extends State<MitigationDialog> {
                       ),
                     ),
                     const SizedBox(height: 24),
+                    // Suggestions
                     if (mitigation.suggestions != null)
                       ...mitigation.suggestions!.map((group) {
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 24),
-                          child: _buildSuggestionGroup(l10n, group),
+                          child: _buildSuggestionGroup(group),
                         );
                       }),
                   ],
@@ -437,13 +448,14 @@ class _MitigationDialogState extends State<MitigationDialog> {
               ),
             ),
             const SizedBox(height: 16),
+            // Footer
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: Text(
-                  l10n.close,
-                  style: const TextStyle(color: Colors.white70),
+                child: const Text(
+                  '关闭',
+                  style: TextStyle(color: Colors.white70),
                 ),
               ),
             ),
@@ -453,7 +465,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
     );
   }
 
-  Widget _buildSuggestionGroup(AppLocalizations l10n, SuggestionGroup group) {
+  Widget _buildSuggestionGroup(SuggestionGroup group) {
     Color priorityColor;
     IconData priorityIcon;
     switch (group.priority) {
@@ -482,7 +494,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
             Icon(priorityIcon, color: priorityColor, size: 20),
             const SizedBox(width: 8),
             Text(
-              '${group.priority} - ${RiskLocalization.suggestionCategory(widget.risk, group, l10n)}',
+              '${group.priority} - ${group.category}',
               style: AppFonts.inter(
                 color: priorityColor,
                 fontSize: 15,
@@ -493,20 +505,18 @@ class _MitigationDialogState extends State<MitigationDialog> {
         ),
         const SizedBox(height: 12),
         ...group.items.asMap().entries.map((entry) {
+          final index = entry.key;
+          final item = entry.value;
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: _buildSuggestionItem(l10n, entry.value, entry.key + 1),
+            child: _buildSuggestionItem(item, index + 1),
           );
         }),
       ],
     );
   }
 
-  Widget _buildSuggestionItem(
-    AppLocalizations l10n,
-    SuggestionItem item,
-    int index,
-  ) {
+  Widget _buildSuggestionItem(SuggestionItem item, int index) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -514,88 +524,93 @@ class _MitigationDialogState extends State<MitigationDialog> {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.white10),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 24,
-            height: 24,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: const Color(0xFF6366F1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              '$index',
-              style: AppFonts.inter(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  RiskLocalization.suggestionAction(widget.risk, item, l10n),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6366F1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '$index',
                   style: AppFonts.inter(
                     color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  RiskLocalization.suggestionDetail(widget.risk, item, l10n),
-                  style: AppFonts.inter(
-                    color: Colors.white70,
-                    fontSize: 13,
-                    height: 1.5,
-                  ),
-                ),
-                if (item.command != null) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(6),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.action,
+                      style: AppFonts.inter(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            item.command!,
-                            style: AppFonts.robotoMono(
-                              color: const Color(0xFF10B981),
-                              fontSize: 12,
-                            ),
-                          ),
+                    const SizedBox(height: 8),
+                    Text(
+                      item.detail,
+                      style: AppFonts.inter(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        height: 1.5,
+                      ),
+                    ),
+                    if (item.command != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(6),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.copy, size: 16),
-                          color: Colors.white54,
-                          onPressed: () {
-                            Clipboard.setData(
-                              ClipboardData(text: item.command!),
-                            );
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(l10n.mitigationCommandCopied),
-                                duration: const Duration(seconds: 2),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                item.command!,
+                                style: AppFonts.robotoMono(
+                                  color: const Color(0xFF10B981),
+                                  fontSize: 12,
+                                ),
                               ),
-                            );
-                          },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.copy, size: 16),
+                              color: Colors.white54,
+                              onPressed: () {
+                                Clipboard.setData(
+                                  ClipboardData(text: item.command!),
+                                );
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('命令已复制到剪贴板'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),

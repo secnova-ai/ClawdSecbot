@@ -1,13 +1,7 @@
 import 'dart:convert';
-import 'dart:ffi' as ffi;
-import 'package:ffi/ffi.dart';
+import '../core_transport/transport_registry.dart';
 import '../models/protection_analysis_model.dart';
 import '../utils/app_logger.dart';
-import 'native_library_service.dart';
-
-// FFI type definitions
-typedef _OneArgC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
-typedef _OneArgDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
 
 /// API 指标 FFI 持久化门面：通过 FFI 委托 Go 层进行数据持久化，Flutter 不直接操作 DB。
 class MetricsDatabaseService {
@@ -17,9 +11,6 @@ class MetricsDatabaseService {
   factory MetricsDatabaseService() => _instance;
 
   MetricsDatabaseService._internal();
-
-  ffi.DynamicLibrary? get _dylib => NativeLibraryService().dylib;
-  FreeStringDart? get _freeString => NativeLibraryService().freeString;
 
   /// Save API metrics
   Future<void> saveApiMetrics(
@@ -145,20 +136,11 @@ class MetricsDatabaseService {
 
   /// Get daily token usage for an asset
   Future<int> getDailyTokenUsage(String assetName, String assetID) async {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) return 0;
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) return 0;
 
     try {
-      final func = dylib.lookupFunction<_OneArgC, _OneArgDart>(
-        'GetDailyTokenUsageFFI',
-      );
-      final assetIDPtr = assetID.toNativeUtf8();
-      final resultPtr = func(assetIDPtr);
-      final resultStr = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(assetIDPtr);
-
-      final result = jsonDecode(resultStr) as Map<String, dynamic>;
+      final result = transport.callOneArg('GetDailyTokenUsageFFI', assetID);
       if (result['success'] == true) {
         return result['data'] as int? ?? 0;
       }
@@ -172,19 +154,13 @@ class MetricsDatabaseService {
   // --- Helper methods ---
 
   Map<String, dynamic> _callFFI(String funcName, String jsonStr) {
-    final dylib = _dylib;
-    if (dylib == null || _freeString == null) {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
       return {'success': false, 'error': 'Native library not initialized'};
     }
 
     try {
-      final func = dylib.lookupFunction<_OneArgC, _OneArgDart>(funcName);
-      final argPtr = jsonStr.toNativeUtf8();
-      final resultPtr = func(argPtr);
-      final result = resultPtr.toDartString();
-      _freeString!(resultPtr);
-      malloc.free(argPtr);
-      return jsonDecode(result) as Map<String, dynamic>;
+      return transport.callOneArg(funcName, jsonStr);
     } catch (e) {
       appLogger.error('[MetricsDB] $funcName failed: $e');
       return {'success': false, 'error': '$funcName failed: $e'};

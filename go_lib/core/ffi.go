@@ -49,8 +49,8 @@ func Initialize(workspaceDir, homeDir string) (map[string]interface{}, error) {
 
 	return map[string]interface{}{
 		"success":           true,
-		"workspace_dir":     workspaceDir,
-		"home_dir":          homeDir,
+		"workspace_dir":     pm.GetWorkspaceDir(),
+		"home_dir":          pm.GetHomeDir(),
 		"log_dir":           pm.GetLogDir(),
 		"backup_dir":        pm.GetBackupDir(),
 		"policy_dir":        pm.GetPolicyDir(),

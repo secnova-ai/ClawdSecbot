@@ -2,16 +2,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:io' show Platform;
-import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../config/build_config.dart';
+import '../../core_transport/transport_registry.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/version_info.dart';
 import '../../services/message_bridge_service.dart';
-import '../../services/native_library_service.dart';
 import '../../utils/app_fonts.dart';
 import '../../utils/app_logger.dart';
 import '../main_page.dart';
@@ -70,22 +69,12 @@ mixin MainPageVersionMixin on State<MainPage> {
         'enabled': true,
       };
 
-      final dylib = NativeLibraryService().dylib;
-      final freeStr = NativeLibraryService().freeString;
-      if (dylib != null && freeStr != null) {
-        final func = dylib.lookupFunction<
-            ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>),
-            ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>)>(
+      final transport = TransportRegistry.transport;
+      if (transport.isReady) {
+        final result = transport.callOneArg(
           'StartVersionCheckServiceFFI',
+          jsonEncode(config),
         );
-
-        final argPtr = jsonEncode(config).toNativeUtf8();
-        final resultPtr = func(argPtr);
-        final resultStr = resultPtr.toDartString();
-        freeStr(resultPtr);
-        malloc.free(argPtr);
-
-        final result = jsonDecode(resultStr);
         if (result['success'] == true) {
           appLogger.info('[MainPage] Version check service started');
         } else {
@@ -102,18 +91,10 @@ mixin MainPageVersionMixin on State<MainPage> {
   /// 停止版本检查服务（Go 层）
   Future<void> stopVersionCheckService() async {
     try {
-      final dylib = NativeLibraryService().dylib;
-      final freeStr = NativeLibraryService().freeString;
-      if (dylib != null && freeStr != null) {
-        final func = dylib.lookupFunction<
-            ffi.Pointer<Utf8> Function(),
-            ffi.Pointer<Utf8> Function()>('StopVersionCheckServiceFFI');
-
-        final resultPtr = func();
-        final resultStr = resultPtr.toDartString();
-        freeStr(resultPtr);
-
-        appLogger.info('[MainPage] Version check service stopped: $resultStr');
+      final transport = TransportRegistry.transport;
+      if (transport.isReady) {
+        final result = transport.callNoArg('StopVersionCheckServiceFFI');
+        appLogger.info('[MainPage] Version check service stopped: $result');
       }
     } catch (e) {
       appLogger.error('[MainPage] Failed to stop version check service', e);
@@ -123,20 +104,9 @@ mixin MainPageVersionMixin on State<MainPage> {
   /// 更新版本检查服务语言设置
   Future<void> updateVersionCheckLanguage(String language) async {
     try {
-      final dylib = NativeLibraryService().dylib;
-      final freeStr = NativeLibraryService().freeString;
-      if (dylib != null && freeStr != null) {
-        final func = dylib.lookupFunction<
-            ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>),
-            ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>)>(
-          'UpdateVersionCheckLanguageFFI',
-        );
-
-        final argPtr = language.toNativeUtf8();
-        final resultPtr = func(argPtr);
-        freeStr(resultPtr);
-        malloc.free(argPtr);
-
+      final transport = TransportRegistry.transport;
+      if (transport.isReady) {
+        transport.callOneArg('UpdateVersionCheckLanguageFFI', language);
         appLogger.info('[MainPage] Version check language updated: $language');
       }
     } catch (e) {

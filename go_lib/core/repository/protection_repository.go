@@ -465,7 +465,7 @@ func (r *ProtectionRepository) ClearProtectionStatistics(assetID string) error {
 
 // --- Shepherd Rules ---
 
-// GetShepherdSensitiveActions 获取指定资产实例的 Shepherd 敏感操作列表。
+// GetShepherdSensitiveActions 获取指定资产实例的Shepherd敏感操作列表
 func (r *ProtectionRepository) GetShepherdSensitiveActions(assetName string, assetID string) ([]string, bool, error) {
 	if r.db == nil {
 		return nil, false, fmt.Errorf("database not initialized")

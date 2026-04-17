@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -7,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../config/build_config.dart';
 import '../l10n/app_localizations.dart';
 import '../utils/app_fonts.dart';
+import '../utils/runtime_platform.dart';
 
 enum _ScheduledScanUnit { seconds, minutes, hours }
 
@@ -287,7 +286,7 @@ class _GeneralSettingsTabState extends State<GeneralSettingsTab> {
             subtitle: '${l10n.version} / ${l10n.buildNumber}',
             onTap: widget.onShowAbout,
           ),
-          if (Platform.isMacOS && BuildConfig.requiresDirectoryAuth) ...[
+          if (isRuntimeMacOS && BuildConfig.requiresDirectoryAuth) ...[
             const SizedBox(height: 16),
             _buildSectionHeader(l10n.permissionsSection),
             const SizedBox(height: 8),
