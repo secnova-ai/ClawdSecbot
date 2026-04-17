@@ -163,8 +163,9 @@ mixin MainPageWindowMixin on State<MainPage>, WindowListener {
   }
 
   String _monitorWindowKey(String assetName, [String assetID = '']) {
-    if (assetID.isNotEmpty) return assetID;
-    return assetName;
+    final normalizedAssetID = assetID.trim();
+    if (normalizedAssetID.isNotEmpty) return normalizedAssetID;
+    return '__no_asset_id__';
   }
 
   /// 创建防护监控窗口实例

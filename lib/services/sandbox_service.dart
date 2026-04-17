@@ -14,14 +14,14 @@ typedef StartSandboxedGatewayDart =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> configJSON);
 
 typedef StopSandboxedGatewayC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetID);
 typedef StopSandboxedGatewayDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetID);
 
 typedef GetSandboxStatusC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetID);
 typedef GetSandboxStatusDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetID);
 
 typedef EnableProcessMonitorC =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> configJSON);
@@ -29,9 +29,9 @@ typedef EnableProcessMonitorDart =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> configJSON);
 
 typedef DisableProcessMonitorC =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetID);
 typedef DisableProcessMonitorDart =
-    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetName);
+    ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> assetID);
 
 typedef KillUnmanagedGatewayC =
     ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> configJSON);
@@ -152,6 +152,7 @@ class SandboxService {
 
   /// Start a gateway process with sandbox protection
   Future<Map<String, dynamic>> startSandboxedGateway({
+    required String assetID,
     required String assetName,
     required String gatewayBinaryPath,
     required String gatewayConfigPath,
@@ -181,6 +182,7 @@ class SandboxService {
       final actualPolicyDir = policyDir ?? await getPolicyDir();
 
       final request = {
+        'asset_id': assetID,
         'asset_name': assetName,
         'gateway_binary_path': gatewayBinaryPath,
         'gateway_config_path': gatewayConfigPath,
@@ -213,7 +215,7 @@ class SandboxService {
   }
 
   /// Stop a sandboxed gateway
-  Future<Map<String, dynamic>> stopSandboxedGateway(String assetName) async {
+  Future<Map<String, dynamic>> stopSandboxedGateway(String assetID) async {
     if (!isSandboxSupported) {
       return {'success': true, 'message': 'Sandbox not supported'};
     }
@@ -228,7 +230,7 @@ class SandboxService {
         'FreeString',
       );
 
-      final assetPtr = assetName.toNativeUtf8();
+      final assetPtr = assetID.toNativeUtf8();
       final resultPtr = stopFunc(assetPtr);
       malloc.free(assetPtr);
 
@@ -245,7 +247,7 @@ class SandboxService {
   }
 
   /// Get sandbox status
-  Future<SandboxStatus?> getSandboxStatus(String assetName) async {
+  Future<SandboxStatus?> getSandboxStatus(String assetID) async {
     if (!isSandboxSupported) return null;
 
     try {
@@ -258,7 +260,7 @@ class SandboxService {
         'FreeString',
       );
 
-      final assetPtr = assetName.toNativeUtf8();
+      final assetPtr = assetID.toNativeUtf8();
       final resultPtr = getStatusFunc(assetPtr);
       malloc.free(assetPtr);
 
@@ -275,6 +277,7 @@ class SandboxService {
 
   /// Enable process monitor to detect and takeover unmanaged gateways
   Future<Map<String, dynamic>> enableProcessMonitor({
+    required String assetID,
     required String assetName,
     required String gatewayPattern,
     int checkIntervalSeconds = 5,
@@ -294,6 +297,7 @@ class SandboxService {
       );
 
       final request = {
+        'asset_id': assetID,
         'asset_name': assetName,
         'gateway_pattern': gatewayPattern,
         'check_interval_seconds': checkIntervalSeconds,
@@ -318,7 +322,7 @@ class SandboxService {
   }
 
   /// Disable process monitor
-  Future<Map<String, dynamic>> disableProcessMonitor(String assetName) async {
+  Future<Map<String, dynamic>> disableProcessMonitor(String assetID) async {
     if (!isSandboxSupported) {
       return {'success': true};
     }
@@ -333,7 +337,7 @@ class SandboxService {
         'FreeString',
       );
 
-      final assetPtr = assetName.toNativeUtf8();
+      final assetPtr = assetID.toNativeUtf8();
       final resultPtr = disableFunc(assetPtr);
       malloc.free(assetPtr);
 

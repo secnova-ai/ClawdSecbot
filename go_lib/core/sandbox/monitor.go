@@ -268,28 +268,50 @@ var (
 	monitorMu       sync.RWMutex
 )
 
-// GetProcessMonitor gets or creates a process monitor for an asset
+// GetProcessMonitor gets or creates a process monitor keyed by assetName.
 func GetProcessMonitor(assetName string, gatewayPattern string) *ProcessMonitor {
+	return GetProcessMonitorByKey(assetName, assetName, gatewayPattern)
+}
+
+// GetProcessMonitorByKey gets or creates a process monitor with an explicit instance key.
+func GetProcessMonitorByKey(assetKey, displayName, gatewayPattern string) *ProcessMonitor {
+	assetKey = strings.TrimSpace(assetKey)
+	displayName = strings.TrimSpace(displayName)
+	if assetKey == "" {
+		assetKey = displayName
+	}
+	if displayName == "" {
+		displayName = assetKey
+	}
 	monitorMu.Lock()
 	defer monitorMu.Unlock()
 
-	if monitor, exists := processMonitors[assetName]; exists {
+	if monitor, exists := processMonitors[assetKey]; exists {
 		return monitor
 	}
 
-	monitor := NewProcessMonitor(assetName, gatewayPattern)
-	processMonitors[assetName] = monitor
+	monitor := NewProcessMonitor(displayName, gatewayPattern)
+	processMonitors[assetKey] = monitor
 	return monitor
 }
 
-// RemoveProcessMonitor removes a process monitor
+// RemoveProcessMonitor removes a process monitor keyed by assetName.
 func RemoveProcessMonitor(assetName string) {
+	RemoveProcessMonitorByKey(assetName)
+}
+
+// RemoveProcessMonitorByKey removes a process monitor by explicit instance key.
+func RemoveProcessMonitorByKey(assetKey string) {
+	assetKey = strings.TrimSpace(assetKey)
+	if assetKey == "" {
+		return
+	}
 	monitorMu.Lock()
 	defer monitorMu.Unlock()
 
-	if monitor, exists := processMonitors[assetName]; exists {
+	if monitor, exists := processMonitors[assetKey]; exists {
 		monitor.Stop()
-		delete(processMonitors, assetName)
+		delete(processMonitors, assetKey)
 	}
 }
 

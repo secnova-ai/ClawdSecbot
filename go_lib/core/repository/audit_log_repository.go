@@ -173,6 +173,7 @@ func (r *AuditLogRepository) GetAuditLogs(filter *AuditLogFilter) ([]*AuditLog, 
 	}
 	filter.AssetName = strings.TrimSpace(filter.AssetName)
 	filter.AssetID = strings.TrimSpace(filter.AssetID)
+	_ = filter.AssetName
 
 	conditions := []string{}
 	params := []interface{}{}
@@ -180,13 +181,10 @@ func (r *AuditLogRepository) GetAuditLogs(filter *AuditLogFilter) ([]*AuditLog, 
 	if filter.RiskOnly {
 		conditions = append(conditions, "has_risk = 1")
 	}
-	// asset_id is the unique instance key; when present it is sufficient and preferred.
+	// asset_id is the unique instance key.
 	if filter.AssetID != "" {
 		conditions = append(conditions, "asset_id = ?")
 		params = append(params, filter.AssetID)
-	} else if filter.AssetName != "" {
-		conditions = append(conditions, "asset_name = ?")
-		params = append(params, filter.AssetName)
 	}
 	if filter.StartTime != "" {
 		conditions = append(conditions, "timestamp >= ?")
@@ -244,18 +242,16 @@ func (r *AuditLogRepository) GetAuditLogCount(riskOnly bool, assetName, assetID,
 
 	assetName = strings.TrimSpace(assetName)
 	assetID = strings.TrimSpace(assetID)
+	_ = assetName
 	conditions := make([]string, 0, 4)
 	params := make([]interface{}, 0, 8)
 	if riskOnly {
 		conditions = append(conditions, "has_risk = 1")
 	}
-	// Prefer unique asset_id; only fallback to asset_name when asset_id is absent.
+	// asset_id is the unique instance key.
 	if assetID != "" {
 		conditions = append(conditions, "asset_id = ?")
 		params = append(params, assetID)
-	} else if assetName != "" {
-		conditions = append(conditions, "asset_name = ?")
-		params = append(params, assetName)
 	}
 	appendAuditLogSearchConditions(&conditions, &params, searchQuery)
 
@@ -281,15 +277,13 @@ func (r *AuditLogRepository) GetAuditLogStatistics(assetName, assetID string) (*
 
 	assetName = strings.TrimSpace(assetName)
 	assetID = strings.TrimSpace(assetID)
+	_ = assetName
 	conditions := make([]string, 0, 2)
 	params := make([]interface{}, 0, 2)
-	// Prefer unique asset_id; only fallback to asset_name when asset_id is absent.
+	// asset_id is the unique instance key.
 	if assetID != "" {
 		conditions = append(conditions, "asset_id = ?")
 		params = append(params, assetID)
-	} else if assetName != "" {
-		conditions = append(conditions, "asset_name = ?")
-		params = append(params, assetName)
 	}
 
 	whereClause := ""
@@ -374,14 +368,12 @@ func (r *AuditLogRepository) ClearAllAuditLogs(assetName, assetID string) error 
 
 	assetName = strings.TrimSpace(assetName)
 	assetID = strings.TrimSpace(assetID)
+	_ = assetName
 	where := make([]string, 0, 2)
 	args := make([]interface{}, 0, 2)
 	if assetID != "" {
 		where = append(where, "asset_id = ?")
 		args = append(args, assetID)
-	} else if assetName != "" {
-		where = append(where, "asset_name = ?")
-		args = append(args, assetName)
 	}
 
 	query := "DELETE FROM audit_logs"
@@ -400,22 +392,19 @@ func (r *AuditLogRepository) ClearAuditLogs(assetName, assetID string) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
+	assetName = strings.TrimSpace(assetName)
+	_ = assetName
+	assetID = strings.TrimSpace(assetID)
 
 	if assetID == "" && assetName == "" {
 		return r.ClearAllAuditLogs("", "")
 	}
-
-	var (
-		query string
-		args  []interface{}
-	)
-	if assetID != "" {
-		query = "DELETE FROM audit_logs WHERE asset_id = ?"
-		args = append(args, assetID)
-	} else {
-		query = "DELETE FROM audit_logs WHERE asset_name = ?"
-		args = append(args, assetName)
+	if assetID == "" {
+		return fmt.Errorf("asset_id is required")
 	}
+
+	query := "DELETE FROM audit_logs WHERE asset_id = ?"
+	args := []interface{}{assetID}
 
 	if _, err := r.db.Exec(query, args...); err != nil {
 		return fmt.Errorf("failed to clear filtered audit logs: %w", err)
