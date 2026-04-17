@@ -246,6 +246,86 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get riskGatewayAuthPasswordMode => 'Gateway Password Mode Enabled';
+
+  @override
+  String get riskGatewayAuthPasswordModeDesc =>
+      'Gateway is in password mode. This mode is easier to brute-force than token mode. Switch to token mode.';
+
+  @override
+  String get riskGatewayWeakToken => 'Weak Gateway Token';
+
+  @override
+  String get riskGatewayWeakTokenDesc =>
+      'Gateway token strength is insufficient. Regenerate a stronger token immediately.';
+
+  @override
+  String get riskAuditDisabled => 'Audit Logging Disabled';
+
+  @override
+  String get riskAuditDisabledDesc =>
+      'Security audit logging is disabled. Important risky actions may not be traceable.';
+
+  @override
+  String get riskAutonomyWorkspaceUnrestricted =>
+      'Workspace Scope Is Not Restricted';
+
+  @override
+  String get riskAutonomyWorkspaceUnrestrictedDesc =>
+      'Agent workspace restriction is disabled. The agent may access files outside the intended workspace.';
+
+  @override
+  String get riskMemoryDirPermUnsafe => 'Memory Directory Permission Unsafe';
+
+  @override
+  String get riskMemoryDirPermUnsafeDesc =>
+      'The memory directory permissions are too broad. Tighten directory access permissions.';
+
+  @override
+  String get riskProcessRunningAsRoot => 'Process Running As Root';
+
+  @override
+  String get riskProcessRunningAsRootDesc =>
+      'The process is running as root. Use a restricted non-root account.';
+
+  @override
+  String get riskSkillAgentRisk => 'High-Risk Skill Detected';
+
+  @override
+  String get riskSkillAgentRiskDesc =>
+      'A high-risk skill was detected. Delete or disable it if not trusted.';
+
+  @override
+  String get riskTerminalBackendLocal => 'Terminal Backend Is Local';
+
+  @override
+  String get riskTerminalBackendLocalDesc =>
+      'terminal.backend is local, so agent operations execute directly on host without isolation.';
+
+  @override
+  String get riskApprovalsModeDisabled => 'Approvals Mode Disabled';
+
+  @override
+  String riskApprovalsModeDisabledDesc(String mode) {
+    return 'approvals.mode is \'$mode\', so risky actions may run without interactive confirmation.';
+  }
+
+  @override
+  String get riskRedactSecretsDisabled => 'Secret Redaction Disabled';
+
+  @override
+  String get riskRedactSecretsDisabledDesc =>
+      'security.redact_secrets is false. Sensitive tokens may leak into logs.';
+
+  @override
+  String get riskModelBaseUrlPublic => 'Custom Model Endpoint Is Public';
+
+  @override
+  String riskModelBaseUrlPublicDesc(String baseUrl) {
+    return 'model.base_url points to a non-local endpoint: $baseUrl. Restrict it to local or trusted private network.';
+  }
+
+  @override
   String get riskOneClickRce =>
       '1-click RCE Remote Code Execution Vulnerability';
 

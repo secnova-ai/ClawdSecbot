@@ -236,6 +236,82 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get riskGatewayAuthPasswordMode => '网关启用了密码模式';
+
+  @override
+  String get riskGatewayAuthPasswordModeDesc =>
+      '网关当前使用密码认证，相比 Token 模式更易被暴力破解。建议切换为 Token 模式。';
+
+  @override
+  String get riskGatewayWeakToken => '网关 Token 强度不足';
+
+  @override
+  String get riskGatewayWeakTokenDesc => '当前网关 Token 强度不足，建议立即轮换为高强度 Token。';
+
+  @override
+  String get riskAuditDisabled => '安全审计日志已禁用';
+
+  @override
+  String get riskAuditDisabledDesc => '安全审计日志处于关闭状态，关键高风险操作可能无法追溯。';
+
+  @override
+  String get riskAutonomyWorkspaceUnrestricted => '工作区访问范围未限制';
+
+  @override
+  String get riskAutonomyWorkspaceUnrestrictedDesc =>
+      'Agent 未限制在工作区内访问文件，可能越界读取或写入非预期路径。';
+
+  @override
+  String get riskMemoryDirPermUnsafe => 'memory 目录权限不安全';
+
+  @override
+  String get riskMemoryDirPermUnsafeDesc =>
+      'memory 目录权限过宽，可能导致运行时记忆数据泄露。建议收紧目录权限。';
+
+  @override
+  String get riskProcessRunningAsRoot => '进程以 root 身份运行';
+
+  @override
+  String get riskProcessRunningAsRootDesc =>
+      '检测到进程以 root 身份运行，建议改为普通用户以降低高权限风险。';
+
+  @override
+  String get riskSkillAgentRisk => '检测到高风险 Skill';
+
+  @override
+  String get riskSkillAgentRiskDesc => '检测到高风险 Skill。若不可信，建议立即删除或禁用。';
+
+  @override
+  String get riskTerminalBackendLocal => '终端后端为本地执行';
+
+  @override
+  String get riskTerminalBackendLocalDesc =>
+      'terminal.backend 为 local，Agent 操作将直接在宿主机执行，缺少远程隔离。';
+
+  @override
+  String get riskApprovalsModeDisabled => '审批模式已禁用';
+
+  @override
+  String riskApprovalsModeDisabledDesc(String mode) {
+    return 'approvals.mode 为 \'$mode\'，高风险操作可能无需交互确认即可执行。';
+  }
+
+  @override
+  String get riskRedactSecretsDisabled => '密钥脱敏已禁用';
+
+  @override
+  String get riskRedactSecretsDisabledDesc =>
+      'security.redact_secrets 为 false，敏感凭据可能泄露到日志。';
+
+  @override
+  String get riskModelBaseUrlPublic => '自定义模型地址暴露公网';
+
+  @override
+  String riskModelBaseUrlPublicDesc(String baseUrl) {
+    return 'model.base_url 指向非本地地址：$baseUrl。建议改为本地或受控私网地址。';
+  }
+
+  @override
   String get riskOneClickRce => '1-click RCE 远程代码执行漏洞';
 
   @override

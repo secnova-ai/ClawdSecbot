@@ -17,9 +17,13 @@ class RiskLocalization {
       case 'riskNoAuth':
       case 'gateway_auth_disabled':
         return l10n.riskNoAuthDesc;
+      case 'gateway_auth_password_mode':
+        return l10n.riskGatewayAuthPasswordModeDesc;
       case 'riskWeakPassword':
       case 'gateway_weak_password':
         return l10n.riskWeakPasswordDesc;
+      case 'gateway_weak_token':
+        return l10n.riskGatewayWeakTokenDesc;
       case 'riskAllPluginsAllowed':
         return l10n.riskAllPluginsAllowedDesc;
       case 'riskControlUiEnabled':
@@ -60,6 +64,10 @@ class RiskLocalization {
         );
       case 'logging_redact_off':
         return l10n.riskLoggingRedactOffDesc;
+      case 'audit_disabled':
+        return l10n.riskAuditDisabledDesc;
+      case 'autonomy_workspace_unrestricted':
+        return l10n.riskAutonomyWorkspaceUnrestrictedDesc;
       case 'log_dir_perm_unsafe':
         if (Platform.isWindows) {
           return _windowsAclDesc(
@@ -84,18 +92,24 @@ class RiskLocalization {
         return l10n.riskOneClickRceDesc(
           risk.args?['current_version']?.toString() ?? 'unknown',
         );
+      case 'terminal_backend_local':
+        return l10n.riskTerminalBackendLocalDesc;
+      case 'approvals_mode_disabled':
+        return l10n.riskApprovalsModeDisabledDesc(
+          risk.args?['mode']?.toString() ?? 'off',
+        );
+      case 'redact_secrets_disabled':
+        return l10n.riskRedactSecretsDisabledDesc;
+      case 'model_base_url_public':
+        return l10n.riskModelBaseUrlPublicDesc(
+          risk.args?['base_url']?.toString() ?? '',
+        );
       case 'process_running_as_root':
-        return _isZh(l10n)
-            ? 'DinTalClaw 进程以 root 身份运行，存在高权限被滥用的风险。建议切换到普通用户运行。'
-            : 'DinTalClaw is running as root, which increases the impact of compromise. Move it to a restricted non-root account.';
+        return l10n.riskProcessRunningAsRootDesc;
       case 'memory_dir_perm_unsafe':
-        return _isZh(l10n)
-            ? 'memory 目录权限过宽，可能导致运行时记忆数据泄露。建议立即收紧目录权限。'
-            : 'The memory directory permissions are too broad and may expose runtime memory data. Tighten the directory permissions.';
+        return l10n.riskMemoryDirPermUnsafeDesc;
       case 'skill_agent_risk':
-        return _isZh(l10n)
-            ? '检测到高风险 Skill。若确认该 Skill 不可信，建议删除或停用。'
-            : 'A risky skill was detected. Delete or disable the skill if it is not trusted.';
+        return l10n.riskSkillAgentRiskDesc;
       case 'riskSkillSecurityIssue':
         return l10n.riskSkillSecurityIssueDesc(
           risk.args?['skillName']?.toString() ?? '',
@@ -145,6 +159,14 @@ class RiskLocalization {
           return '修复 memory 目录权限';
         case 'process_running_as_root':
           return '停止以 root 身份运行 DinTalClaw';
+        case 'terminal_backend_local':
+          return '切换终端后端到受隔离环境';
+        case 'approvals_mode_disabled':
+          return '启用审批确认模式';
+        case 'redact_secrets_disabled':
+          return '启用敏感信息脱敏';
+        case 'model_base_url_public':
+          return '限制自定义模型公网地址';
         case 'openclaw_1click_rce_vulnerability':
           return '修复 OpenClaw 1-click RCE 漏洞';
         case 'nullclaw_1click_rce_vulnerability':
@@ -195,6 +217,14 @@ class RiskLocalization {
           return '该风险可通过收紧 memory 目录权限自动修复，降低运行时记忆数据泄露风险。';
         case 'process_running_as_root':
           return '该风险需要人工修复，不提供自动执行按钮。建议改为普通用户运行服务。';
+        case 'terminal_backend_local':
+          return '该风险可通过将终端执行后端切换到远程受隔离环境修复，避免直接在宿主机执行高风险操作。';
+        case 'approvals_mode_disabled':
+          return '该风险可通过启用审批模式修复，确保高风险操作需要交互确认后才能执行。';
+        case 'redact_secrets_disabled':
+          return '该风险可通过启用密钥脱敏修复，减少敏感信息泄露到日志和审计记录的可能。';
+        case 'model_base_url_public':
+          return '该风险可通过将自定义模型地址改为本地或受限内网地址修复，减少外网暴露面。';
         case 'openclaw_1click_rce_vulnerability':
         case 'nullclaw_1click_rce_vulnerability':
           return '该风险需要人工修复，不提供自动执行按钮。建议优先升级版本并完成网关入口加固。';

@@ -2036,8 +2036,8 @@ class _MainPageState extends State<MainPage>
     _scanner.setLocalization(l10n);
 
     try {
+      final beforeAssetIDs = existingResult.assets.map((asset) => asset.id).toSet();
       final refreshedResult = await _scanner.rediscoverSecurityFindings(
-        assets: existingResult.assets,
         configFound: existingResult.configFound,
         configPath: existingResult.configPath,
         config: existingResult.config,
@@ -2050,6 +2050,18 @@ class _MainPageState extends State<MainPage>
         _scanState = ScanState.completed;
         _result = refreshedResult;
       });
+      try {
+        await _reconcileAssetsAfterScan(beforeAssetIDs, refreshedResult.assets);
+      } catch (e) {
+        appLogger.error('[MainPage] Security discovery reconcile failed: $e');
+      }
+      try {
+        await _syncProtectedAssetsWithScanResult(refreshedResult.assets);
+      } catch (e) {
+        appLogger.error(
+          '[MainPage] Security discovery sync protected assets failed: $e',
+        );
+      }
     } catch (e) {
       appLogger.error('[MainPage] Security discovery refresh failed', e);
       if (mounted) {
