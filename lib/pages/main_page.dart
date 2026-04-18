@@ -997,19 +997,19 @@ class _MainPageState extends State<MainPage>
 
   Future<void> _requestAppExit() async {
     final enabledConfigs = await _loadExitTargets();
-    var restoreConfig = false;
     if (enabledConfigs.isNotEmpty) {
       await showWindow();
-      final confirmed = await _showExitRestoreDialog(enabledConfigs.length);
-      if (confirmed != true) {
+      final restoreConfig = await _showExitRestoreDialog(enabledConfigs.length);
+      if (restoreConfig == null) {
         return;
       }
-      restoreConfig = true;
+      await _requestAppExitWithOptions(
+        interactive: true,
+        restoreConfig: restoreConfig,
+      );
+      return;
     }
-    await _requestAppExitWithOptions(
-      interactive: true,
-      restoreConfig: restoreConfig,
-    );
+    await _requestAppExitWithOptions(interactive: true, restoreConfig: false);
   }
 
   Future<void> _requestAppExitWithOptions({
@@ -1249,10 +1249,17 @@ class _MainPageState extends State<MainPage>
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.of(context).pop(),
             child: Text(
               l10n.cancel,
               style: AppFonts.inter(color: Colors.white54),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(
+              l10n.exitWithoutRestoreConfirm,
+              style: AppFonts.inter(color: const Color(0xFFFCA5A5)),
             ),
           ),
           ElevatedButton(
@@ -2036,7 +2043,9 @@ class _MainPageState extends State<MainPage>
     _scanner.setLocalization(l10n);
 
     try {
-      final beforeAssetIDs = existingResult.assets.map((asset) => asset.id).toSet();
+      final beforeAssetIDs = existingResult.assets
+          .map((asset) => asset.id)
+          .toSet();
       final refreshedResult = await _scanner.rediscoverSecurityFindings(
         configFound: existingResult.configFound,
         configPath: existingResult.configPath,

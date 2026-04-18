@@ -1010,6 +1010,7 @@
     }
   },
   "exitRestoreConfirm": "Restore and Exit",
+  "exitWithoutRestoreConfirm": "Exit Without Restoring",
   "exitRestoreInProgress": "Restoring the Bot's default service. Please wait...",
   "exitRestoreFailedTitle": "Restore Failed, Exit Cancelled",
   "exitRestoreFailedMessage": "The following assets could not be restored, so the app will stay open to avoid leaving the Bot unusable after exit:\n\n{details}",

@@ -1815,6 +1815,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get exitRestoreConfirm => '恢复并退出';
 
   @override
+  String get exitWithoutRestoreConfirm => '不恢复直接退出';
+
+  @override
   String get exitRestoreInProgress => '正在恢复 Bot 默认服务，请稍候...';
 
   @override
