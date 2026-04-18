@@ -1050,6 +1050,7 @@ func (pp *ProxyProtection) finalizeTruthRecord(requestID string, outputContent s
 				Arguments:   truncateToBytes(tc.Function.Arguments, maxRecordToolArgsBytes),
 				IsSensitive: isSensitive,
 				Source:      "response",
+				LatestRound: true,
 			})
 		}
 	})

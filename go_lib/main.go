@@ -5,13 +5,11 @@ package main
 
 // DartCallback Dart 消息回调函数类型
 typedef void (*DartCallback)(const char* message);
-// AppShutdownCallback API shutdown 回调函数类型
-typedef void (*AppShutdownCallback)(const char* payload);
+typedef void (*DartAppShutdownCallback)(const char* message);
 
 // 存储 Dart 回调指针
 static DartCallback dartCallback = NULL;
-// 存储 API shutdown 回调指针
-static AppShutdownCallback appShutdownCallback = NULL;
+static DartAppShutdownCallback dartAppShutdownCallback = NULL;
 
 // setDartCallback 设置 Dart 回调
 static inline void setDartCallback(DartCallback cb) {
@@ -21,6 +19,14 @@ static inline void setDartCallback(DartCallback cb) {
 // clearDartCallback 清除 Dart 回调
 static inline void clearDartCallback() {
     dartCallback = NULL;
+}
+
+static inline void setDartAppShutdownCallback(DartAppShutdownCallback cb) {
+    dartAppShutdownCallback = cb;
+}
+
+static inline void clearDartAppShutdownCallback() {
+    dartAppShutdownCallback = NULL;
 }
 
 // isDartCallbackSet 检查回调是否已设置
@@ -35,25 +41,9 @@ static inline void invokeDartCallback(const char* msg) {
     }
 }
 
-// setAppShutdownCallback 设置 API shutdown 回调
-static inline void setAppShutdownCallback(AppShutdownCallback cb) {
-    appShutdownCallback = cb;
-}
-
-// clearAppShutdownCallback 清除 API shutdown 回调
-static inline void clearAppShutdownCallback() {
-    appShutdownCallback = NULL;
-}
-
-// isAppShutdownCallbackSet 检查 API shutdown 回调是否已设置
-static inline int isAppShutdownCallbackSet() {
-    return appShutdownCallback != NULL ? 1 : 0;
-}
-
-// invokeAppShutdownCallback 调用 API shutdown 回调
-static inline void invokeAppShutdownCallback(const char* payload) {
-    if (appShutdownCallback != NULL) {
-        appShutdownCallback(payload);
+static inline void invokeDartAppShutdownCallback(const char* msg) {
+    if (dartAppShutdownCallback != NULL) {
+        dartAppShutdownCallback(msg);
     }
 }
 */
@@ -65,7 +55,6 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
-	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -80,15 +69,15 @@ import (
 	"go_lib/core/shepherd"
 
 	// Import all plugins to trigger init() registration
-	dintalclaw "go_lib/plugins/dintalclaw"
-	hermes "go_lib/plugins/hermes"
-	nullclaw "go_lib/plugins/nullclaw"
-	openclaw "go_lib/plugins/openclaw"
+	_ "go_lib/plugins/dintalclaw"
+	_ "go_lib/plugins/nullclaw"
+	_ "go_lib/plugins/openclaw"
 )
 
 func init() {
 	resetSignals()
 	startPprofIfNeeded()
+	configureRealtimeExportHooks()
 }
 
 func startPprofIfNeeded() {
@@ -129,49 +118,6 @@ func errorCString(err error) *C.char {
 		"success": false,
 		"error":   err.Error(),
 	})
-}
-
-func splitAssetNameFromID(assetID string) string {
-	trimmed := strings.TrimSpace(assetID)
-	if trimmed == "" {
-		return ""
-	}
-	parts := strings.SplitN(trimmed, ":", 2)
-	return strings.TrimSpace(parts[0])
-}
-
-func resolveSandboxAssetIdentity(assetName, assetID string) (assetKey string, displayName string, err error) {
-	assetKey = strings.TrimSpace(assetID)
-	if assetKey == "" {
-		return "", "", fmt.Errorf("asset_id is required")
-	}
-	displayName = strings.TrimSpace(assetName)
-	if displayName == "" {
-		displayName = splitAssetNameFromID(assetKey)
-	}
-	if displayName == "" {
-		displayName = assetKey
-	}
-	return assetKey, displayName, nil
-}
-
-//export SetConfigPathFFI
-func SetConfigPathFFI(pathC *C.char) *C.char {
-	path := C.GoString(pathC)
-	openclaw.SetConfigPath(path)
-	nullclaw.SetConfigPath(path)
-	dintalclaw.SetConfigPath(path)
-	hermes.SetConfigPath(path)
-	return jsonToCString(map[string]interface{}{"success": true, "path": path})
-}
-
-//export SetAppStoreBuildFFI
-func SetAppStoreBuildFFI(isAppStore C.int) *C.char {
-	value := isAppStore != 0
-	openclaw.SetAppStoreBuild(value)
-	nullclaw.SetAppStoreBuild(value)
-	hermes.SetAppStoreBuild(value)
-	return jsonToCString(map[string]interface{}{"success": true, "is_app_store": value})
 }
 
 // ==================== 全局初始化 FFI ====================
@@ -328,8 +274,8 @@ func GetSkillScanByHash(hashC *C.char) *C.char {
 }
 
 //export DeleteSkillScanFFI
-func DeleteSkillScanFFI(skillNameC *C.char) *C.char {
-	return jsonToCString(service.DeleteSkillScan(C.GoString(skillNameC)))
+func DeleteSkillScanFFI(skillHashC *C.char) *C.char {
+	return jsonToCString(service.DeleteSkillScan(C.GoString(skillHashC)))
 }
 
 //export GetRiskySkills
@@ -338,8 +284,8 @@ func GetRiskySkills() *C.char {
 }
 
 //export TrustSkillScan
-func TrustSkillScan(skillNameC *C.char) *C.char {
-	return jsonToCString(service.TrustSkill(C.GoString(skillNameC)))
+func TrustSkillScan(skillHashC *C.char) *C.char {
+	return jsonToCString(service.TrustSkill(C.GoString(skillHashC)))
 }
 
 //export GetAllSkillScansFFI
@@ -633,7 +579,6 @@ func StartSandboxedGateway(configJSON *C.char) *C.char {
 	jsonStr := C.GoString(configJSON)
 
 	var req struct {
-		AssetID           string                          `json:"asset_id"`
 		AssetName         string                          `json:"asset_name"`
 		GatewayBinaryPath string                          `json:"gateway_binary_path"`
 		GatewayConfigPath string                          `json:"gateway_config_path"`
@@ -654,17 +599,12 @@ func StartSandboxedGateway(configJSON *C.char) *C.char {
 		return C.CString(`{"success": false, "error": "sandbox-exec not supported", "sandbox_supported": false}`)
 	}
 
-	assetKey, displayName, err := resolveSandboxAssetIdentity(req.AssetName, req.AssetID)
-	if err != nil {
-		return errorCString(err)
-	}
-
 	policyDir := req.PolicyDir
 	if policyDir == "" {
 		policyDir = sandbox.GetDefaultPolicyDir()
 	}
 
-	manager := sandbox.GetSandboxManagerByKey(assetKey, policyDir)
+	manager := sandbox.GetSandboxManager(req.AssetName, policyDir)
 	if req.LogDir != "" {
 		manager.SetLogDir(req.LogDir)
 	} else {
@@ -675,7 +615,7 @@ func StartSandboxedGateway(configJSON *C.char) *C.char {
 	}
 
 	config := sandbox.SandboxConfig{
-		AssetName:         assetKey,
+		AssetName:         req.AssetName,
 		GatewayBinaryPath: req.GatewayBinaryPath,
 		GatewayConfigPath: req.GatewayConfigPath,
 		PathPermission:    req.PathPermission,
@@ -696,37 +636,31 @@ func StartSandboxedGateway(configJSON *C.char) *C.char {
 		"success":           true,
 		"managed_pid":       status.ManagedPID,
 		"policy_path":       status.PolicyPath,
-		"asset_name":        displayName,
-		"asset_id":          assetKey,
+		"asset_name":        status.AssetName,
 		"sandbox_supported": true,
 	})
 }
 
 //export StopSandboxedGateway
-func StopSandboxedGateway(assetID *C.char) *C.char {
-	key := strings.TrimSpace(C.GoString(assetID))
-	if key == "" {
-		return errorCString(fmt.Errorf("asset_id is required"))
-	}
-	if sandbox.GetExistingSandboxManagerByKey(key) == nil {
+func StopSandboxedGateway(assetName *C.char) *C.char {
+	name := C.GoString(assetName)
+	manager := sandbox.GetSandboxManager(name, sandbox.GetDefaultPolicyDir())
+	if manager == nil {
 		return C.CString(`{"success": true, "message": "no sandbox manager found"}`)
 	}
 
-	sandbox.RemoveProcessMonitorByKey(key)
-	sandbox.RemoveSandboxManagerByKey(key)
+	if err := manager.Stop(); err != nil {
+		return C.CString(fmt.Sprintf(`{"success": false, "error": "%v"}`, err))
+	}
+
+	sandbox.RemoveProcessMonitor(name)
 	return C.CString(`{"success": true}`)
 }
 
 //export GetSandboxStatus
-func GetSandboxStatus(assetID *C.char) *C.char {
-	key := strings.TrimSpace(C.GoString(assetID))
-	if key == "" {
-		return errorCString(fmt.Errorf("asset_id is required"))
-	}
-	manager := sandbox.GetExistingSandboxManagerByKey(key)
-	if manager == nil {
-		return errorCString(fmt.Errorf("sandbox manager not found for asset_id: %s", key))
-	}
+func GetSandboxStatus(assetName *C.char) *C.char {
+	name := C.GoString(assetName)
+	manager := sandbox.GetSandboxManager(name, sandbox.GetDefaultPolicyDir())
 	status := manager.GetStatus()
 	return jsonToCString(status)
 }
@@ -736,7 +670,6 @@ func EnableProcessMonitor(configJSON *C.char) *C.char {
 	jsonStr := C.GoString(configJSON)
 
 	var req struct {
-		AssetID        string `json:"asset_id"`
 		AssetName      string `json:"asset_name"`
 		GatewayPattern string `json:"gateway_pattern"`
 		CheckInterval  int    `json:"check_interval_seconds"`
@@ -746,17 +679,9 @@ func EnableProcessMonitor(configJSON *C.char) *C.char {
 		return C.CString(fmt.Sprintf(`{"success": false, "error": "invalid json: %v"}`, err))
 	}
 
-	assetKey, displayName, err := resolveSandboxAssetIdentity(req.AssetName, req.AssetID)
-	if err != nil {
-		return errorCString(err)
-	}
-
-	manager := sandbox.GetSandboxManagerByKey(assetKey, sandbox.GetDefaultPolicyDir())
-	monitor := sandbox.GetProcessMonitorByKey(assetKey, displayName, req.GatewayPattern)
+	manager := sandbox.GetSandboxManager(req.AssetName, sandbox.GetDefaultPolicyDir())
+	monitor := sandbox.GetProcessMonitor(req.AssetName, req.GatewayPattern)
 	monitor.SetSandboxManager(manager)
-	if req.CheckInterval > 0 {
-		monitor.SetCheckInterval(time.Duration(req.CheckInterval) * time.Second)
-	}
 	manager.SetMonitor(monitor)
 
 	if err := monitor.Start(); err != nil {
@@ -767,12 +692,9 @@ func EnableProcessMonitor(configJSON *C.char) *C.char {
 }
 
 //export DisableProcessMonitor
-func DisableProcessMonitor(assetID *C.char) *C.char {
-	key := strings.TrimSpace(C.GoString(assetID))
-	if key == "" {
-		return errorCString(fmt.Errorf("asset_id is required"))
-	}
-	sandbox.RemoveProcessMonitorByKey(key)
+func DisableProcessMonitor(assetName *C.char) *C.char {
+	name := C.GoString(assetName)
+	sandbox.RemoveProcessMonitor(name)
 	return C.CString(`{"success": true}`)
 }
 
@@ -868,41 +790,121 @@ var (
 	callbackActive   bool
 )
 
-// API 服务全局实例
-var (
-	apiServer   *api.APIServer
-	apiServerMu sync.Mutex
-)
-
-// API shutdown 回调桥接
-var appShutdownCallbackMu sync.Mutex
-
-func emitAppShutdownRequest(options api.AppShutdownOptions) error {
-	appShutdownCallbackMu.Lock()
-	defer appShutdownCallbackMu.Unlock()
-
-	if C.isAppShutdownCallbackSet() == 0 {
-		return fmt.Errorf("app shutdown callback is not registered")
-	}
-
-	payload, err := json.Marshal(map[string]interface{}{
-		"restoreConfig": options.RestoreConfig,
-	})
-	if err != nil {
-		return fmt.Errorf("marshal shutdown payload failed: %w", err)
-	}
-
-	// 内存由 Dart 在回调处理后通过 FreeString 释放。
-	cPayload := C.CString(string(payload))
-	C.invokeAppShutdownCallback(cPayload)
-	return nil
-}
-
 // 版本检查服务全局实例
 var (
 	versionCheckService   *service.VersionCheckService
 	versionCheckServiceMu sync.Mutex
 )
+
+// API Server 全局实例
+var (
+	apiServer     *api.APIServer
+	apiServerLock sync.Mutex
+)
+
+var (
+	appShutdownCallbackMu sync.Mutex
+	appShutdownCallbackOn bool
+)
+
+func configureRealtimeExportHooks() {
+	proxy.SetCompletedTruthRecordCallback(func(record proxy.TruthRecord) {
+		appendTruthRecordAuditToExport(record)
+	})
+
+	shepherd.GetSecurityEventBuffer().SetExportCallback(func(event shepherd.SecurityEvent) {
+		appendSecurityEventToExport(event)
+	})
+}
+
+func appendTruthRecordAuditToExport(record proxy.TruthRecord) {
+	apiServerLock.Lock()
+	server := apiServer
+	apiServerLock.Unlock()
+	if server == nil {
+		return
+	}
+	record = proxy.BuildAuditDeltaTruthRecordForSink(record, "export_audit_jsonl")
+
+	toolCalls := make([]api.ToolCall, 0, len(record.ToolCalls))
+	for _, tc := range record.ToolCalls {
+		toolCalls = append(toolCalls, api.ToolCall{
+			Tool:       tc.Name,
+			Parameters: tc.Arguments,
+			Result:     tc.Result,
+		})
+	}
+
+	action := "ALLOW"
+	riskLevel := ""
+	riskReason := ""
+	if record.Decision != nil {
+		action = record.Decision.Action
+		riskLevel = record.Decision.RiskLevel
+		riskReason = record.Decision.Reason
+	}
+
+	requestContent := ""
+	for _, msg := range record.Messages {
+		if msg.Role == "user" {
+			requestContent = msg.Content
+			break
+		}
+	}
+
+	durationMs := 0
+	if record.StartedAt != "" && record.CompletedAt != "" {
+		if startedAt, err := time.Parse(time.RFC3339Nano, record.StartedAt); err == nil {
+			if completedAt, err := time.Parse(time.RFC3339Nano, record.CompletedAt); err == nil {
+				durationMs = int(completedAt.Sub(startedAt).Milliseconds())
+			}
+		}
+	}
+
+	entry := &api.AuditLogEntry{
+		BotID:         record.AssetID,
+		LogID:         record.RequestID,
+		LogTimestamp:  record.StartedAt,
+		RequestID:     record.RequestID,
+		Model:         record.Model,
+		Action:        action,
+		RiskLevel:     riskLevel,
+		RiskCauses:    riskReason,
+		DurationMs:    durationMs,
+		TokenCount:    record.PromptTokens + record.CompletionTokens,
+		UserRequest:   requestContent,
+		ToolCallCount: len(record.ToolCalls),
+		ToolCalls:     toolCalls,
+	}
+
+	if err := server.AppendAuditLog(entry); err != nil {
+		fmt.Fprintf(os.Stderr, "[export] append audit log failed: %v\n", err)
+	}
+}
+
+func appendSecurityEventToExport(event shepherd.SecurityEvent) {
+	apiServerLock.Lock()
+	server := apiServer
+	apiServerLock.Unlock()
+	if server == nil {
+		return
+	}
+
+	entry := &api.SecurityEventEntry{
+		BotID:      event.BotID,
+		EventID:    event.ID,
+		Timestamp:  event.Timestamp,
+		EventType:  event.EventType,
+		ActionDesc: event.ActionDesc,
+		RiskType:   event.RiskType,
+		Detail:     event.Detail,
+		Source:     event.Source,
+	}
+
+	if err := server.AppendSecurityEvent(entry); err != nil {
+		fmt.Fprintf(os.Stderr, "[export] append security event failed: %v\n", err)
+	}
+}
 
 //export RegisterMessageCallback
 func RegisterMessageCallback(callback C.DartCallback) *C.char {
@@ -1048,86 +1050,113 @@ func UpdateVersionCheckLanguageFFI(langC *C.char) *C.char {
 	return jsonToCString(map[string]interface{}{"success": true})
 }
 
-// ==================== 辅助函数 FFI ====================
-
-// ==================== API 服务 FFI ====================
+// ==================== API Server FFI ====================
 
 //export StartAPIServerFFI
 func StartAPIServerFFI(configJSON *C.char) *C.char {
-	var req struct {
-		Port int `json:"port"`
-	}
+	apiServerLock.Lock()
+	defer apiServerLock.Unlock()
 
-	if err := json.Unmarshal([]byte(C.GoString(configJSON)), &req); err != nil {
-		return errorCString(fmt.Errorf("invalid config json: %w", err))
-	}
-
-	apiServerMu.Lock()
-	defer apiServerMu.Unlock()
-
-	if apiServer == nil {
-		apiServer = api.NewAPIServer()
-	}
-
-	apiServer.SetShutdownHandler(func(options api.AppShutdownOptions) error {
-		return emitAppShutdownRequest(options)
-	})
-
-	if apiServer.IsRunning() {
-		port := apiServer.Port()
+	// 检查是否已有 apiServer 在运行
+	if apiServer != nil && apiServer.IsRunning() {
 		return jsonToCString(map[string]interface{}{
-			"success": true,
-			"running": true,
-			"port":    port,
-			"token":   apiServer.Token(),
-			"url":     fmt.Sprintf("http://127.0.0.1:%d", port),
+			"success": false,
+			"error":   "API server is already running",
 		})
 	}
 
-	if err := apiServer.Start(req.Port); err != nil {
-		return errorCString(err)
+	// 解析配置
+	var config struct {
+		Port int `json:"port"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(configJSON)), &config); err != nil {
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("invalid config: %v", err),
+		})
 	}
 
-	port := apiServer.Port()
+	// 使用默认端口 23481
+	port := config.Port
+	if port == 0 {
+		port = 23481
+	}
+
+	// 创建并启动 API Server
+	apiServer = api.NewAPIServer()
+	apiServer.SetShutdownHandler(func(options api.AppShutdownOptions) error {
+		return triggerAppShutdown(options)
+	})
+	if err := apiServer.Start(port); err != nil {
+		apiServer = nil
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
 	return jsonToCString(map[string]interface{}{
 		"success": true,
-		"running": true,
-		"port":    port,
+		"port":    apiServer.Port(),
 		"token":   apiServer.Token(),
-		"url":     fmt.Sprintf("http://127.0.0.1:%d", port),
+		"url":     fmt.Sprintf("http://127.0.0.1:%d", apiServer.Port()),
 	})
 }
 
 //export StopAPIServerFFI
 func StopAPIServerFFI() *C.char {
-	apiServerMu.Lock()
-	defer apiServerMu.Unlock()
+	apiServerLock.Lock()
+	defer apiServerLock.Unlock()
 
-	if apiServer == nil {
+	// 检查是否有 apiServer 在运行
+	if apiServer == nil || !apiServer.IsRunning() {
 		return jsonToCString(map[string]interface{}{
-			"success": true,
-			"running": false,
-			"message": "api server not initialized",
+			"success": false,
+			"error":   "API server is not running",
 		})
 	}
 
+	// 停止 API Server
 	if err := apiServer.Stop(); err != nil {
-		return errorCString(err)
+		return jsonToCString(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
 	}
 
-	return jsonToCString(map[string]interface{}{
-		"success": true,
-		"running": false,
-	})
+	// 置空引用
+	apiServer = nil
+
+	return jsonToCString(map[string]interface{}{"success": true})
 }
 
-//export RegisterAppShutdownCallback
-func RegisterAppShutdownCallback(callback C.AppShutdownCallback) *C.char {
+// ==================== 辅助函数 FFI ====================
+
+func triggerAppShutdown(options api.AppShutdownOptions) error {
 	appShutdownCallbackMu.Lock()
 	defer appShutdownCallbackMu.Unlock()
 
-	C.setAppShutdownCallback(callback)
-	return jsonToCString(map[string]interface{}{"success": true})
+	if !appShutdownCallbackOn {
+		return fmt.Errorf("app shutdown callback is not registered")
+	}
+
+	payload, err := json.Marshal(options)
+	if err != nil {
+		return fmt.Errorf("marshal shutdown payload: %w", err)
+	}
+
+	C.invokeDartAppShutdownCallback(C.CString(string(payload)))
+	return nil
+}
+
+//export RegisterAppShutdownCallback
+func RegisterAppShutdownCallback(callback C.DartAppShutdownCallback) *C.char {
+	appShutdownCallbackMu.Lock()
+	defer appShutdownCallbackMu.Unlock()
+
+	C.setDartAppShutdownCallback(callback)
+	appShutdownCallbackOn = true
+	return jsonToCString(map[string]interface{}{"success": true, "mode": "callback"})
 }
 
 //export UnregisterAppShutdownCallback
@@ -1135,7 +1164,8 @@ func UnregisterAppShutdownCallback() *C.char {
 	appShutdownCallbackMu.Lock()
 	defer appShutdownCallbackMu.Unlock()
 
-	C.clearAppShutdownCallback()
+	appShutdownCallbackOn = false
+	C.clearDartAppShutdownCallback()
 	return jsonToCString(map[string]interface{}{"success": true})
 }
 

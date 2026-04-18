@@ -1205,10 +1205,11 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 				for _, tc := range bufferToolCalls {
 					args := truncateToBytes(tc.Function.Arguments, maxRecordToolArgsBytes)
 					r.ToolCalls = append(r.ToolCalls, RecordToolCall{
-						ID:        tc.ID,
-						Name:      tc.Function.Name,
-						Arguments: args,
-						Source:    "response",
+						ID:          tc.ID,
+						Name:        tc.Function.Name,
+						Arguments:   args,
+						Source:      "response",
+						LatestRound: true,
 					})
 				}
 				if contentWithTools == "" {
@@ -1253,6 +1254,7 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 								Arguments:   truncateToBytes(it.RawArgs, maxRecordToolArgsBytes),
 								IsSensitive: isSensitive,
 								Source:      "response",
+								LatestRound: true,
 							})
 						}
 						assistantIndex := len(r.Messages)
