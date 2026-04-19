@@ -89,6 +89,7 @@ class _MainPageState extends State<MainPage>
   bool _showOnboardingCompletionOverlay = false;
   bool _showWelcome = true;
   bool _startupFlowStarted = false;
+  bool _pendingProxyRestoreAfterWelcome = false;
   Timer? _onboardingCompletionTimer;
   AppLifecycleListener? _appExitListener;
   bool _isExitFlowInProgress = false;
@@ -176,6 +177,10 @@ class _MainPageState extends State<MainPage>
     _appExitListener = AppLifecycleListener(
       onExitRequested: _handleAppExitRequest,
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _startWelcomeSequence();
+      subscribeVersionUpdates();
+    });
     _init();
     _startExternalStateRefresh();
   }
@@ -192,14 +197,7 @@ class _MainPageState extends State<MainPage>
     _hasConfigAccess = !Platform.isMacOS || !BuildConfig.requiresDirectoryAuth;
     appLogger.info('[MainPage] Initial config access: $_hasConfigAccess');
 
-    // 启动重量级初始化（与欢迎覆盖层并发运行）
-    _initFuture = _performHeavyInit();
-
-    // 帧构建后启动欢迎屏幕序列
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _startWelcomeSequence();
-      subscribeVersionUpdates();
-    });
+    // 重初始化改为欢迎层结束后再触发，避免启动首屏被重任务阻塞。
   }
 
   /// 执行重量级初始化任务（数据库、插件、扫描结果恢复）
@@ -207,7 +205,21 @@ class _MainPageState extends State<MainPage>
     // 1. 计算数据库路径
     await DatabaseService().init();
 
-    // 2. 加载 dylib + 初始化 Go 日志 + 初始化 Go 数据库
+    // 2. 优先恢复扫描结果，让主界面尽快展示可交互内容。
+    final savedResult = await ScanDatabaseService().getLatestScanResult();
+    if (savedResult != null) {
+      _pendingScanResult = savedResult;
+      _applyPendingScanResultIfReady();
+      appLogger.info(
+        '[MainPage] Loaded saved scan result with ${savedResult.risks.length} risks',
+      );
+    } else {
+      appLogger.info('[MainPage] No saved scan result found');
+    }
+
+    await _restoreScheduledScanSettings();
+
+    // 3. 加载 dylib + 初始化 Go 日志 + 初始化 Go 数据库
     try {
       await NativeLibraryService().initialize();
       await _syncProtectionLanguage();
@@ -216,14 +228,17 @@ class _MainPageState extends State<MainPage>
       appLogger.error('[MainPage] Failed to initialize native library', e);
     }
 
-    // 3. 初始化插件专有配置
+    // 4. 初始化插件专有配置
     try {
       await PluginService().initializePlugin();
     } catch (e) {
       appLogger.error('[MainPage] Failed to initialize plugin', e);
     }
 
-    // 4. 启动维护任务（清理旧日志和指标）
+    // 5. 从数据库恢复已启用的防护状态（按钮进入 loading，后台异步恢复）。
+    await _restoreProtectionStates();
+
+    // 6. 启动维护任务（清理旧日志和指标）
     try {
       await MetricsDatabaseService().cleanOldApiMetrics();
       await AuditLogDatabaseService().cleanOldAuditLogs();
@@ -232,7 +247,7 @@ class _MainPageState extends State<MainPage>
       appLogger.error('[MainPage] Maintenance failed', e);
     }
 
-    // 初始化 Shepherd 规则
+    // 7. 初始化 Shepherd 规则
     try {
       final enabledConfigs = await ProtectionDatabaseService()
           .getEnabledProtectionConfigs();
@@ -247,26 +262,10 @@ class _MainPageState extends State<MainPage>
       appLogger.error('[MainPage] Failed to init Shepherd rules', e);
     }
 
-    // 检查现有扫描结果
-    final savedResult = await ScanDatabaseService().getLatestScanResult();
-    if (savedResult != null) {
-      _pendingScanResult = savedResult;
-      appLogger.info(
-        '[MainPage] Loaded saved scan result with ${savedResult.risks.length} risks',
-      );
-    } else {
-      appLogger.info('[MainPage] No saved scan result found');
-    }
-
-    await _restoreScheduledScanSettings();
-
-    // 从数据库恢复已启用的防护状态
-    await _restoreProtectionStates();
-
-    // 启动版本检查服务
+    // 8. 启动版本检查服务
     await startVersionCheckService();
 
-    // 初始化 API Server 状态
+    // 9. 初始化 API Server 状态
     await _initApiServerStatus();
   }
 
@@ -685,6 +684,14 @@ class _MainPageState extends State<MainPage>
         });
       }
 
+      if (_showWelcome) {
+        _pendingProxyRestoreAfterWelcome = true;
+        appLogger.info(
+          '[MainPage] Deferred proxy restore until welcome overlay is dismissed',
+        );
+        return;
+      }
+
       // 后台启动代理
       _startProxyInBackground();
     } catch (e) {
@@ -882,24 +889,40 @@ class _MainPageState extends State<MainPage>
       });
     }
 
-    final futures = <Future>[
-      Future.delayed(const Duration(milliseconds: 1500)),
-    ];
-    if (_initFuture != null) {
-      futures.add(_initFuture!);
-    }
-    await Future.wait(futures);
+    await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
     setState(() {
       _showWelcome = false;
-      if (_pendingScanResult != null) {
-        _result = _pendingScanResult;
-        _scanState = ScanState.completed;
-        _pendingScanResult = null;
-        appLogger.info('[MainPage] Applied pending scan result');
-      }
     });
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    _ensureHeavyInitStarted();
+    if (_pendingProxyRestoreAfterWelcome) {
+      _pendingProxyRestoreAfterWelcome = false;
+      _startProxyInBackground();
+    }
+    _applyPendingScanResultIfReady();
     await _runStartupFlowAfterWelcome();
+  }
+
+  void _ensureHeavyInitStarted() {
+    if (_initFuture != null) {
+      return;
+    }
+    _initFuture = _performHeavyInit();
+    unawaited(_initFuture!.then((_) => _applyPendingScanResultIfReady()));
+  }
+
+  void _applyPendingScanResultIfReady() {
+    if (!mounted || _showWelcome || _pendingScanResult == null) {
+      return;
+    }
+    setState(() {
+      _result = _pendingScanResult;
+      _scanState = ScanState.completed;
+      _pendingScanResult = null;
+      appLogger.info('[MainPage] Applied pending scan result');
+    });
   }
 
   Future<void> _runStartupFlowAfterWelcome() async {
@@ -1045,7 +1068,7 @@ class _MainPageState extends State<MainPage>
         }
       }
 
-      await _finalizeAppExit();
+      await _finalizeAppExit(stopProtectionForExit: restoreConfig);
     } finally {
       _isExitFlowInProgress = false;
     }
@@ -1100,6 +1123,7 @@ class _MainPageState extends State<MainPage>
     final failures = <String>[];
 
     for (final target in targets) {
+      await Future<void>.delayed(Duration.zero);
       final assetName = target.assetName.trim();
       final assetID = target.assetID.trim();
       final assetLabel = assetID.isEmpty ? assetName : '$assetName ($assetID)';
@@ -1323,8 +1347,10 @@ class _MainPageState extends State<MainPage>
     );
   }
 
-  Future<void> _finalizeAppExit() async {
-    await _stopProtectionForExit();
+  Future<void> _finalizeAppExit({required bool stopProtectionForExit}) async {
+    if (stopProtectionForExit) {
+      await _stopProtectionForExit();
+    }
 
     try {
       await ApiService().stopServer();
@@ -1367,6 +1393,7 @@ class _MainPageState extends State<MainPage>
 
     final pluginService = PluginService();
     for (final target in targets) {
+      await Future<void>.delayed(Duration.zero);
       final assetName = target.assetName.trim();
       final assetID = target.assetID.trim();
       if (assetName.isEmpty) {

@@ -196,6 +196,48 @@ class ProtectionProxyFFI {
     return resultStr;
   }
 
+  /// Execute GetProtectionProxyStatus in a background Isolate.
+  static String getProtectionProxyStatusInIsolate(String libPath) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final getStatus = dylib
+        .lookupFunction<
+          GetProtectionProxyStatusC,
+          GetProtectionProxyStatusDart
+        >('GetProtectionProxyStatus');
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final resultPtr = getStatus();
+    final resultStr = resultPtr.toDartString();
+    freeString(resultPtr);
+    return resultStr;
+  }
+
+  /// Execute GetProtectionProxyStatusByAsset in a background Isolate.
+  static String getProtectionProxyStatusByAssetInIsolate(
+    String libPath,
+    String assetID,
+  ) {
+    final dylib = ffi.DynamicLibrary.open(libPath);
+    final getStatus = dylib
+        .lookupFunction<
+          GetProtectionProxyStatusByAssetC,
+          GetProtectionProxyStatusByAssetDart
+        >('GetProtectionProxyStatusByAsset');
+    final freeString = dylib.lookupFunction<FreeStringC, FreeStringDart>(
+      'FreeString',
+    );
+
+    final assetIDPtr = assetID.toNativeUtf8();
+    final resultPtr = getStatus(assetIDPtr);
+    malloc.free(assetIDPtr);
+
+    final resultStr = resultPtr.toDartString();
+    freeString(resultPtr);
+    return resultStr;
+  }
+
   /// 在后台 Isolate 中执行 SyncGatewaySandbox（网关完整重启，耗时较长）。
   /// [libPath] 为插件 dylib 路径。
   /// 返回 Go 层返回的 JSON 字符串。
