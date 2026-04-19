@@ -12,6 +12,7 @@ import 'model_config_database_service.dart';
 import 'metrics_database_service.dart';
 import 'protection_database_service.dart';
 import 'protection_monitor_service.dart';
+import 'protection_proxy_executor.dart';
 import '../utils/app_logger.dart';
 
 /// 防护服务：统一管理代理启停、配置热更新、环境同步与监控协调。
@@ -331,12 +332,7 @@ class ProtectionService {
     };
 
     final configJSON = jsonEncode(configPayload);
-    final transport = TransportRegistry.transport;
-    if (!transport.isReady) {
-      throw Exception('Transport not initialized');
-    }
-
-    final result = transport.callOneArg('StartProtectionProxy', configJSON);
+    final result = await ProtectionProxyExecutor.start(configJSON);
     appLogger.info(
       '[Protection] Proxy start result: success=${result['success']}',
     );
@@ -386,14 +382,9 @@ class ProtectionService {
 
     appLogger.info('[Protection] Stopping proxy...');
     try {
-      final transport = TransportRegistry.transport;
-      if (!transport.isReady) {
-        throw Exception('Transport not initialized');
-      }
-
-      final result = _hasAssetBinding
-          ? transport.callOneArg('StopProtectionProxyByAsset', _assetID)
-          : transport.callNoArg('StopProtectionProxy');
+      final result = await ProtectionProxyExecutor.stop(
+        assetID: _hasAssetBinding ? _assetID : '',
+      );
       appLogger.info('[Protection] Proxy stopped successfully');
       return result;
     } catch (e) {
@@ -457,7 +448,9 @@ class ProtectionService {
     try {
       final transport = TransportRegistry.transport;
       if (!transport.isReady) {
-        appLogger.error('[Protection] setAuditOnly failed: transport not ready');
+        appLogger.error(
+          '[Protection] setAuditOnly failed: transport not ready',
+        );
         return false;
       }
       Map<String, dynamic> result;
@@ -737,16 +730,9 @@ class ProtectionService {
 
   Future<Map<String, dynamic>> getProtectionProxyStatus() async {
     try {
-      final transport = TransportRegistry.transport;
-      if (!transport.isReady) {
-        return {'running': false, 'error': 'transport not ready'};
-      }
-      Map<String, dynamic> result;
-      if (_hasAssetBinding) {
-        result = transport.callOneArg('GetProtectionProxyStatusByAsset', _assetID);
-      } else {
-        result = transport.callNoArg('GetProtectionProxyStatus');
-      }
+      final result = await ProtectionProxyExecutor.status(
+        assetID: _hasAssetBinding ? _assetID : '',
+      );
       _isProxyRunning = result['running'] == true;
       if (_isProxyRunning) {
         _proxyPort = result['port'];

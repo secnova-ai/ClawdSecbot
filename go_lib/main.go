@@ -5,9 +5,13 @@ package main
 
 // DartCallback Dart 消息回调函数类型
 typedef void (*DartCallback)(const char* message);
+// AppShutdownCallback API shutdown 回调函数类型
+typedef void (*AppShutdownCallback)(const char* payload);
 
 // 存储 Dart 回调指针
 static DartCallback dartCallback = NULL;
+// 存储 API shutdown 回调指针
+static AppShutdownCallback appShutdownCallback = NULL;
 
 // setDartCallback 设置 Dart 回调
 static inline void setDartCallback(DartCallback cb) {
@@ -30,6 +34,28 @@ static inline void invokeDartCallback(const char* msg) {
         dartCallback(msg);
     }
 }
+
+// setAppShutdownCallback 设置 API shutdown 回调
+static inline void setAppShutdownCallback(AppShutdownCallback cb) {
+    appShutdownCallback = cb;
+}
+
+// clearAppShutdownCallback 清除 API shutdown 回调
+static inline void clearAppShutdownCallback() {
+    appShutdownCallback = NULL;
+}
+
+// isAppShutdownCallbackSet 检查 API shutdown 回调是否已设置
+static inline int isAppShutdownCallbackSet() {
+    return appShutdownCallback != NULL ? 1 : 0;
+}
+
+// invokeAppShutdownCallback 调用 API shutdown 回调
+static inline void invokeAppShutdownCallback(const char* payload) {
+    if (appShutdownCallback != NULL) {
+        appShutdownCallback(payload);
+    }
+}
 */
 import "C"
 
@@ -46,6 +72,7 @@ import (
 
 	"go_lib/chatmodel-routing/adapter"
 	"go_lib/core"
+	"go_lib/core/api"
 	"go_lib/core/callback_bridge"
 	"go_lib/core/proxy"
 	"go_lib/core/sandbox"
@@ -820,6 +847,36 @@ var (
 	callbackActive   bool
 )
 
+// API 服务全局实例
+var (
+	apiServer   *api.APIServer
+	apiServerMu sync.Mutex
+)
+
+// API shutdown 回调桥接
+var appShutdownCallbackMu sync.Mutex
+
+func emitAppShutdownRequest(options api.AppShutdownOptions) error {
+	appShutdownCallbackMu.Lock()
+	defer appShutdownCallbackMu.Unlock()
+
+	if C.isAppShutdownCallbackSet() == 0 {
+		return fmt.Errorf("app shutdown callback is not registered")
+	}
+
+	payload, err := json.Marshal(map[string]interface{}{
+		"restoreConfig": options.RestoreConfig,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal shutdown payload failed: %w", err)
+	}
+
+	// 内存由 Dart 在回调处理后通过 FreeString 释放。
+	cPayload := C.CString(string(payload))
+	C.invokeAppShutdownCallback(cPayload)
+	return nil
+}
+
 // 版本检查服务全局实例
 var (
 	versionCheckService   *service.VersionCheckService
@@ -971,6 +1028,95 @@ func UpdateVersionCheckLanguageFFI(langC *C.char) *C.char {
 }
 
 // ==================== 辅助函数 FFI ====================
+
+// ==================== API 服务 FFI ====================
+
+//export StartAPIServerFFI
+func StartAPIServerFFI(configJSON *C.char) *C.char {
+	var req struct {
+		Port int `json:"port"`
+	}
+
+	if err := json.Unmarshal([]byte(C.GoString(configJSON)), &req); err != nil {
+		return errorCString(fmt.Errorf("invalid config json: %w", err))
+	}
+
+	apiServerMu.Lock()
+	defer apiServerMu.Unlock()
+
+	if apiServer == nil {
+		apiServer = api.NewAPIServer()
+	}
+
+	apiServer.SetShutdownHandler(func(options api.AppShutdownOptions) error {
+		return emitAppShutdownRequest(options)
+	})
+
+	if apiServer.IsRunning() {
+		port := apiServer.Port()
+		return jsonToCString(map[string]interface{}{
+			"success": true,
+			"running": true,
+			"port":    port,
+			"token":   apiServer.Token(),
+			"url":     fmt.Sprintf("http://127.0.0.1:%d", port),
+		})
+	}
+
+	if err := apiServer.Start(req.Port); err != nil {
+		return errorCString(err)
+	}
+
+	port := apiServer.Port()
+	return jsonToCString(map[string]interface{}{
+		"success": true,
+		"running": true,
+		"port":    port,
+		"token":   apiServer.Token(),
+		"url":     fmt.Sprintf("http://127.0.0.1:%d", port),
+	})
+}
+
+//export StopAPIServerFFI
+func StopAPIServerFFI() *C.char {
+	apiServerMu.Lock()
+	defer apiServerMu.Unlock()
+
+	if apiServer == nil {
+		return jsonToCString(map[string]interface{}{
+			"success": true,
+			"running": false,
+			"message": "api server not initialized",
+		})
+	}
+
+	if err := apiServer.Stop(); err != nil {
+		return errorCString(err)
+	}
+
+	return jsonToCString(map[string]interface{}{
+		"success": true,
+		"running": false,
+	})
+}
+
+//export RegisterAppShutdownCallback
+func RegisterAppShutdownCallback(callback C.AppShutdownCallback) *C.char {
+	appShutdownCallbackMu.Lock()
+	defer appShutdownCallbackMu.Unlock()
+
+	C.setAppShutdownCallback(callback)
+	return jsonToCString(map[string]interface{}{"success": true})
+}
+
+//export UnregisterAppShutdownCallback
+func UnregisterAppShutdownCallback() *C.char {
+	appShutdownCallbackMu.Lock()
+	defer appShutdownCallbackMu.Unlock()
+
+	C.clearAppShutdownCallback()
+	return jsonToCString(map[string]interface{}{"success": true})
+}
 
 //export FreeString
 func FreeString(str *C.char) {

@@ -3286,6 +3286,12 @@ abstract class AppLocalizations {
   /// **'恢复并退出'**
   String get exitRestoreConfirm;
 
+  /// No description provided for @exitWithoutRestoreConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'不恢复直接退出'**
+  String get exitWithoutRestoreConfirm;
+
   /// No description provided for @exitRestoreInProgress.
   ///
   /// In zh, this message translates to:

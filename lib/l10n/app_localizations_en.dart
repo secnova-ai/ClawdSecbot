@@ -1887,6 +1887,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get exitRestoreConfirm => 'Restore and Exit';
 
   @override
+  String get exitWithoutRestoreConfirm => 'Exit Without Restoring';
+
+  @override
   String get exitRestoreInProgress =>
       'Restoring the Bot\'s default service. Please wait...';
 
