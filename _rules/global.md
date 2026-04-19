@@ -25,6 +25,7 @@
 - Flutter 生产日志统一使用 `appLogger`；Go 使用 `core/logging`。
 - 非明确需求不做隐式向前兼容与数据迁移。
 - 单文件代码不超过1500行
+- 涉及耗时操作的实现与评审必须遵循 [`_rules/ui_non_blocking_async.md`](ui_non_blocking_async.md)。
 
 ## 4. 分层与调用链
 
