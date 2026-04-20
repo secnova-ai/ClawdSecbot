@@ -111,6 +111,7 @@ class _MainPageState extends State<MainPage>
 
   /// Future tracking heavy initialization (DB, plugins, etc.)
   Future<void>? _initFuture;
+  Completer<void>? _initialScanRestoreCompleter;
 
   /// 待应用的扫描结果（在 welcome sequence 结束后应用）
   ScanResult? _pendingScanResult;
@@ -202,19 +203,23 @@ class _MainPageState extends State<MainPage>
 
   /// 执行重量级初始化任务（数据库、插件、扫描结果恢复）
   Future<void> _performHeavyInit() async {
-    // 1. 计算数据库路径
-    await DatabaseService().init();
+    try {
+      // 1. 计算数据库路径
+      await DatabaseService().init();
 
-    // 2. 优先恢复扫描结果，让主界面尽快展示可交互内容。
-    final savedResult = await ScanDatabaseService().getLatestScanResult();
-    if (savedResult != null) {
-      _pendingScanResult = savedResult;
-      _applyPendingScanResultIfReady();
-      appLogger.info(
-        '[MainPage] Loaded saved scan result with ${savedResult.risks.length} risks',
-      );
-    } else {
-      appLogger.info('[MainPage] No saved scan result found');
+      // 2. 优先恢复扫描结果，让主界面尽快展示可交互内容。
+      final savedResult = await ScanDatabaseService().getLatestScanResult();
+      if (savedResult != null) {
+        _pendingScanResult = savedResult;
+        _applyPendingScanResultIfReady();
+        appLogger.info(
+          '[MainPage] Loaded saved scan result with ${savedResult.risks.length} risks',
+        );
+      } else {
+        appLogger.info('[MainPage] No saved scan result found');
+      }
+    } finally {
+      _completeInitialScanRestorePhase();
     }
 
     await _restoreScheduledScanSettings();
@@ -883,20 +888,29 @@ class _MainPageState extends State<MainPage>
   Future<void> _startWelcomeSequence() async {
     if (_startupFlowStarted) return;
     _startupFlowStarted = true;
+    _ensureHeavyInitStarted();
     if (mounted) {
       setState(() {
         _showWelcome = true;
       });
     }
 
-    await Future.delayed(const Duration(milliseconds: 300));
+    await Future.wait([
+      Future.delayed(const Duration(milliseconds: 300)),
+      _waitForInitialScanRestorePhase(),
+    ]);
     if (!mounted) return;
     setState(() {
       _showWelcome = false;
+      if (_pendingScanResult != null) {
+        _result = _pendingScanResult;
+        _scanState = ScanState.completed;
+        _pendingScanResult = null;
+        appLogger.info('[MainPage] Applied pending scan result');
+      }
     });
     await Future<void>.delayed(Duration.zero);
     if (!mounted) return;
-    _ensureHeavyInitStarted();
     if (_pendingProxyRestoreAfterWelcome) {
       _pendingProxyRestoreAfterWelcome = false;
       _startProxyInBackground();
@@ -909,8 +923,21 @@ class _MainPageState extends State<MainPage>
     if (_initFuture != null) {
       return;
     }
+    _initialScanRestoreCompleter ??= Completer<void>();
     _initFuture = _performHeavyInit();
     unawaited(_initFuture!.then((_) => _applyPendingScanResultIfReady()));
+  }
+
+  Future<void> _waitForInitialScanRestorePhase() async {
+    _initialScanRestoreCompleter ??= Completer<void>();
+    await _initialScanRestoreCompleter!.future;
+  }
+
+  void _completeInitialScanRestorePhase() {
+    final completer = _initialScanRestoreCompleter;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
   }
 
   void _applyPendingScanResultIfReady() {
