@@ -52,6 +52,19 @@ func SaveScanResult(resultJSON string) map[string]interface{} {
 		return errorResult(err)
 	}
 
+	// 将默认防护策略同步到当前扫描资产：
+	// - 为无配置资产创建继承默认策略的配置
+	// - 更新已标记继承默认策略的资产到最新默认策略
+	if err := SyncDefaultProtectionPolicyForAssets(input.Assets); err != nil {
+		// 同步失败时回滚本次扫描写入，确保“保存+同步”原子化。
+		if rollbackErr := repo.DeleteScanResultByID(record.ID); rollbackErr != nil {
+			logging.Error("Failed to sync default protection policy after scan save: %v; rollback scan failed: %v", err, rollbackErr)
+			return errorMessageResult(err.Error() + "; rollback scan failed: " + rollbackErr.Error())
+		}
+		logging.Error("Failed to sync default protection policy after scan save, scan rolled back: %v", err)
+		return errorResult(err)
+	}
+
 	return map[string]interface{}{
 		"success": true,
 		"scan_id": record.ID,

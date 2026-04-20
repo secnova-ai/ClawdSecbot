@@ -193,3 +193,37 @@ func (r *ScanRepository) GetLatestScanResult() (*ScanRecord, error) {
 		record.ID, len(record.Assets), len(record.Risks))
 	return &record, nil
 }
+
+// DeleteScanResultByID 删除指定扫描记录及其关联资产、风险数据。
+// 用于上层在“保存成功但后续同步失败”场景下执行补偿回滚，保证原子语义。
+func (r *ScanRepository) DeleteScanResultByID(scanID int64) error {
+	if r.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	if scanID <= 0 {
+		return fmt.Errorf("scan_id must be greater than 0")
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin delete scan transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM risks WHERE scan_id = ?`, scanID); err != nil {
+		return fmt.Errorf("failed to delete risks for scan_id=%d: %w", scanID, err)
+	}
+	if _, err := tx.Exec(`DELETE FROM assets WHERE scan_id = ?`, scanID); err != nil {
+		return fmt.Errorf("failed to delete assets for scan_id=%d: %w", scanID, err)
+	}
+	if _, err := tx.Exec(`DELETE FROM scans WHERE id = ?`, scanID); err != nil {
+		return fmt.Errorf("failed to delete scan record for scan_id=%d: %w", scanID, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit delete scan transaction: %w", err)
+	}
+
+	logging.Info("Scan result rollback completed, scan_id=%d", scanID)
+	return nil
+}
