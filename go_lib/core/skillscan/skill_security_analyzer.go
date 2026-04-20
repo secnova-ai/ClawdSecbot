@@ -297,6 +297,7 @@ func parseAgentOutput(output string, skillPath string) (*SkillAnalysisResult, er
 		return &SkillAnalysisResult{
 			Safe:      false,
 			RiskLevel: riskLevel,
+			Issues:    buildManualReviewIssues(skillPath),
 			Summary:   extractSummary(output),
 			RawOutput: output,
 		}, nil
@@ -309,6 +310,19 @@ func parseAgentOutput(output string, skillPath string) (*SkillAnalysisResult, er
 		Summary:   extractSummary(output),
 		RawOutput: output,
 	}, nil
+}
+
+// buildManualReviewIssues 构建解析失败场景的人工复核问题列表
+func buildManualReviewIssues(skillPath string) []SkillSecurityIssue {
+	return []SkillSecurityIssue{
+		{
+			Type:        "manual_review_required",
+			Severity:    "medium",
+			File:        strings.TrimSpace(skillPath),
+			Description: "模型输出解析失败，需人工复核",
+			Evidence:    "structured JSON parsing failed",
+		},
+	}
 }
 
 func containsRiskIndicators(text string) bool {
