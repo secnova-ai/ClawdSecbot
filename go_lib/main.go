@@ -55,6 +55,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -118,6 +119,30 @@ func errorCString(err error) *C.char {
 		"success": false,
 		"error":   err.Error(),
 	})
+}
+
+func splitAssetNameFromID(assetID string) string {
+	trimmed := strings.TrimSpace(assetID)
+	if trimmed == "" {
+		return ""
+	}
+	parts := strings.SplitN(trimmed, ":", 2)
+	return strings.TrimSpace(parts[0])
+}
+
+func resolveSandboxAssetIdentity(assetName, assetID string) (assetKey string, displayName string, err error) {
+	assetKey = strings.TrimSpace(assetID)
+	if assetKey == "" {
+		return "", "", fmt.Errorf("asset_id is required")
+	}
+	displayName = strings.TrimSpace(assetName)
+	if displayName == "" {
+		displayName = splitAssetNameFromID(assetKey)
+	}
+	if displayName == "" {
+		displayName = assetKey
+	}
+	return assetKey, displayName, nil
 }
 
 // ==================== 全局初始化 FFI ====================
@@ -579,6 +604,7 @@ func StartSandboxedGateway(configJSON *C.char) *C.char {
 	jsonStr := C.GoString(configJSON)
 
 	var req struct {
+		AssetID           string                          `json:"asset_id"`
 		AssetName         string                          `json:"asset_name"`
 		GatewayBinaryPath string                          `json:"gateway_binary_path"`
 		GatewayConfigPath string                          `json:"gateway_config_path"`
@@ -599,12 +625,17 @@ func StartSandboxedGateway(configJSON *C.char) *C.char {
 		return C.CString(`{"success": false, "error": "sandbox-exec not supported", "sandbox_supported": false}`)
 	}
 
+	assetKey, displayName, err := resolveSandboxAssetIdentity(req.AssetName, req.AssetID)
+	if err != nil {
+		return errorCString(err)
+	}
+
 	policyDir := req.PolicyDir
 	if policyDir == "" {
 		policyDir = sandbox.GetDefaultPolicyDir()
 	}
 
-	manager := sandbox.GetSandboxManager(req.AssetName, policyDir)
+	manager := sandbox.GetSandboxManagerByKey(assetKey, policyDir)
 	if req.LogDir != "" {
 		manager.SetLogDir(req.LogDir)
 	} else {
@@ -615,7 +646,7 @@ func StartSandboxedGateway(configJSON *C.char) *C.char {
 	}
 
 	config := sandbox.SandboxConfig{
-		AssetName:         req.AssetName,
+		AssetName:         assetKey,
 		GatewayBinaryPath: req.GatewayBinaryPath,
 		GatewayConfigPath: req.GatewayConfigPath,
 		PathPermission:    req.PathPermission,
@@ -636,31 +667,38 @@ func StartSandboxedGateway(configJSON *C.char) *C.char {
 		"success":           true,
 		"managed_pid":       status.ManagedPID,
 		"policy_path":       status.PolicyPath,
-		"asset_name":        status.AssetName,
+		"asset_name":        displayName,
+		"asset_id":          assetKey,
 		"sandbox_supported": true,
 	})
 }
 
 //export StopSandboxedGateway
 func StopSandboxedGateway(assetName *C.char) *C.char {
-	name := C.GoString(assetName)
-	manager := sandbox.GetSandboxManager(name, sandbox.GetDefaultPolicyDir())
+	assetKey := strings.TrimSpace(C.GoString(assetName))
+	if assetKey == "" {
+		return errorCString(fmt.Errorf("asset_id is required"))
+	}
+	manager := sandbox.GetExistingSandboxManagerByKey(assetKey)
 	if manager == nil {
 		return C.CString(`{"success": true, "message": "no sandbox manager found"}`)
 	}
 
-	if err := manager.Stop(); err != nil {
-		return C.CString(fmt.Sprintf(`{"success": false, "error": "%v"}`, err))
-	}
-
-	sandbox.RemoveProcessMonitor(name)
+	sandbox.RemoveProcessMonitorByKey(assetKey)
+	sandbox.RemoveSandboxManagerByKey(assetKey)
 	return C.CString(`{"success": true}`)
 }
 
 //export GetSandboxStatus
 func GetSandboxStatus(assetName *C.char) *C.char {
-	name := C.GoString(assetName)
-	manager := sandbox.GetSandboxManager(name, sandbox.GetDefaultPolicyDir())
+	assetKey := strings.TrimSpace(C.GoString(assetName))
+	if assetKey == "" {
+		return errorCString(fmt.Errorf("asset_id is required"))
+	}
+	manager := sandbox.GetExistingSandboxManagerByKey(assetKey)
+	if manager == nil {
+		return errorCString(fmt.Errorf("sandbox manager not found for asset_id: %s", assetKey))
+	}
 	status := manager.GetStatus()
 	return jsonToCString(status)
 }
@@ -670,6 +708,7 @@ func EnableProcessMonitor(configJSON *C.char) *C.char {
 	jsonStr := C.GoString(configJSON)
 
 	var req struct {
+		AssetID        string `json:"asset_id"`
 		AssetName      string `json:"asset_name"`
 		GatewayPattern string `json:"gateway_pattern"`
 		CheckInterval  int    `json:"check_interval_seconds"`
@@ -679,9 +718,17 @@ func EnableProcessMonitor(configJSON *C.char) *C.char {
 		return C.CString(fmt.Sprintf(`{"success": false, "error": "invalid json: %v"}`, err))
 	}
 
-	manager := sandbox.GetSandboxManager(req.AssetName, sandbox.GetDefaultPolicyDir())
-	monitor := sandbox.GetProcessMonitor(req.AssetName, req.GatewayPattern)
+	assetKey, displayName, err := resolveSandboxAssetIdentity(req.AssetName, req.AssetID)
+	if err != nil {
+		return errorCString(err)
+	}
+
+	manager := sandbox.GetSandboxManagerByKey(assetKey, sandbox.GetDefaultPolicyDir())
+	monitor := sandbox.GetProcessMonitorByKey(assetKey, displayName, req.GatewayPattern)
 	monitor.SetSandboxManager(manager)
+	if req.CheckInterval > 0 {
+		monitor.SetCheckInterval(time.Duration(req.CheckInterval) * time.Second)
+	}
 	manager.SetMonitor(monitor)
 
 	if err := monitor.Start(); err != nil {
@@ -693,8 +740,11 @@ func EnableProcessMonitor(configJSON *C.char) *C.char {
 
 //export DisableProcessMonitor
 func DisableProcessMonitor(assetName *C.char) *C.char {
-	name := C.GoString(assetName)
-	sandbox.RemoveProcessMonitor(name)
+	assetKey := strings.TrimSpace(C.GoString(assetName))
+	if assetKey == "" {
+		return errorCString(fmt.Errorf("asset_id is required"))
+	}
+	sandbox.RemoveProcessMonitorByKey(assetKey)
 	return C.CString(`{"success": true}`)
 }
 

@@ -46,6 +46,7 @@ import '../widgets/skill_scan_results_dialog.dart';
 import '../widgets/processing_notice_card.dart';
 import '../widgets/protection_config_dialog.dart';
 import '../widgets/scan_result_view.dart';
+import '../widgets/titlebar_bypass_dialog_route.dart';
 import '../widgets/welcome_overlay.dart';
 import '../widgets/onboarding_completion_overlay.dart';
 import '../utils/locale_utils.dart';
@@ -53,90 +54,6 @@ import 'mixins/main_page_tray_mixin.dart';
 import 'mixins/main_page_version_mixin.dart';
 import 'mixins/main_page_window_mixin.dart';
 import 'mixins/main_page_data_mixin.dart';
-
-/// 退出时恢复配置弹窗的用户选择。
-enum _ExitRestoreAction {
-  cancel,
-  exitOnly,
-  restoreAndExit,
-}
-
-/// 标题栏以下生效的弹窗路由。
-/// 用于保留主窗口标题栏拖拽能力，同时在内容区展示模态对话框。
-class _TitlebarBypassDialogRoute<T> extends PopupRoute<T> {
-  _TitlebarBypassDialogRoute({
-    required this.builder,
-    required this.topInset,
-    Color? barrierColor,
-    bool barrierDismissible = true,
-    String? barrierLabel,
-  }) : _barrierColor = barrierColor ?? Colors.black54,
-       _barrierDismissible = barrierDismissible,
-       _barrierLabel = barrierLabel;
-
-  /// 对话框内容构建器。
-  final WidgetBuilder builder;
-
-  /// 标题栏高度，遮罩从该位置以下开始生效。
-  final double topInset;
-
-  final Color _barrierColor;
-  final bool _barrierDismissible;
-  final String? _barrierLabel;
-
-  @override
-  Duration get transitionDuration => const Duration(milliseconds: 180);
-
-  @override
-  bool get barrierDismissible => _barrierDismissible;
-
-  @override
-  Color? get barrierColor => _barrierColor;
-
-  @override
-  String? get barrierLabel => _barrierLabel;
-
-  @override
-  Widget buildPage(
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-  ) {
-    return builder(context);
-  }
-
-  @override
-  Widget buildTransitions(
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-    Widget child,
-  ) {
-    return FadeTransition(
-      opacity: CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-      child: child,
-    );
-  }
-
-  @override
-  Widget buildModalBarrier() {
-    return Stack(
-      children: [
-        Positioned(
-          top: topInset,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: ModalBarrier(
-            dismissible: barrierDismissible,
-            color: barrierColor,
-            semanticsLabel: barrierLabel,
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -156,7 +73,6 @@ class _MainPageState extends State<MainPage>
   /// 主窗口标题栏高度。
   double get _mainTitleBarHeight => Platform.isLinux ? 40 : 48;
 
-  // ============ 扫描状态 ============
   ScanState _scanState = ScanState.idle;
   final List<String> _logs = [];
   ScanResult? _result;
@@ -164,14 +80,12 @@ class _MainPageState extends State<MainPage>
   StreamSubscription<String>? _logSubscription;
   RescanAction _selectedRescanAction = RescanAction.securityDiscovery;
 
-  // ============ 防护状态 ============
   final Set<String> _protectedAssetIDs = {};
   final Map<String, String> _protectedAssetNamesByID = {};
 
   /// 启动时后台恢复防护中，期间防护监控按钮显示 loading，防护配置按钮禁用
   bool _isRestoringProtection = false;
 
-  // ============ 引导和欢迎状态 ============
   bool _hasConfigAccess = false;
   bool _showOnboarding = false;
   bool _showOnboardingCompletionOverlay = false;
@@ -186,12 +100,10 @@ class _MainPageState extends State<MainPage>
     'com.clawdbot.guard/app_exit',
   );
 
-  // ============ 开机启动 ============
   bool _launchAtStartupEnabled = false;
   int _scheduledScanIntervalSeconds = 0;
   Timer? _scheduledScanTimer;
 
-  // ============ API Server 状态 ============
   bool _apiServerEnabled = false;
   bool _isApiServerToggling = false;
   Timer? _externalStateRefreshTimer;
@@ -205,9 +117,6 @@ class _MainPageState extends State<MainPage>
   /// 待应用的扫描结果（在 welcome sequence 结束后应用）
   ScanResult? _pendingScanResult;
 
-  // ============ Mixin 接口实现 ============
-
-  // MainPageTrayMixin 需要的接口
   @override
   bool get launchAtStartupEnabled => _launchAtStartupEnabled;
   @override
@@ -219,7 +128,6 @@ class _MainPageState extends State<MainPage>
     await _requestAppExit();
   }
 
-  // MainPageDataMixin 需要的接口
   @override
   Set<String> get protectedAssets => _protectedAssetIDs;
   @override
@@ -256,8 +164,6 @@ class _MainPageState extends State<MainPage>
     return _showConfigAccessDialog();
   }
 
-  // ============ 生命周期方法 ============
-
   @override
   void initState() {
     super.initState();
@@ -280,23 +186,17 @@ class _MainPageState extends State<MainPage>
     await windowManager.setPreventClose(true);
     await initTray();
 
-    // 初始化开机启动
     await _initLaunchAtStartup();
 
-    // 默认访问标志（实际检查在欢迎屏幕后进行）
     _hasConfigAccess = !Platform.isMacOS || !BuildConfig.requiresDirectoryAuth;
     appLogger.info('[MainPage] Initial config access: $_hasConfigAccess');
-
-    // 重初始化改为欢迎层结束后再触发，避免启动首屏被重任务阻塞。
   }
 
   /// 执行重量级初始化任务（数据库、插件、扫描结果恢复）
   Future<void> _performHeavyInit() async {
     try {
-      // 1. 计算数据库路径
       await DatabaseService().init();
 
-      // 2. 优先恢复扫描结果，让主界面尽快展示可交互内容。
       final savedResult = await ScanDatabaseService().getLatestScanResult();
       if (savedResult != null) {
         _pendingScanResult = savedResult;
@@ -1140,10 +1040,10 @@ class _MainPageState extends State<MainPage>
     if (enabledConfigs.isNotEmpty) {
       await showWindow();
       final action = await _showExitRestoreDialog(enabledConfigs.length);
-      if (action == null || action == _ExitRestoreAction.cancel) {
+      if (action == null || action == ExitRestoreAction.cancel) {
         return;
       }
-      restoreConfig = action == _ExitRestoreAction.restoreAndExit;
+      restoreConfig = action == ExitRestoreAction.restoreAndExit;
     }
     await _requestAppExitWithOptions(
       interactive: true,
@@ -1319,9 +1219,9 @@ class _MainPageState extends State<MainPage>
   }
 
   /// 显示退出前恢复确认弹窗，支持仅退出不恢复。
-  Future<_ExitRestoreAction?> _showExitRestoreDialog(int protectedCount) {
+  Future<ExitRestoreAction?> _showExitRestoreDialog(int protectedCount) {
     final l10n = AppLocalizations.of(context)!;
-    return showDialog<_ExitRestoreAction>(
+    return showDialog<ExitRestoreAction>(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
@@ -1361,7 +1261,7 @@ class _MainPageState extends State<MainPage>
         actions: [
           TextButton(
             onPressed: () =>
-                Navigator.of(context).pop(_ExitRestoreAction.cancel),
+                Navigator.of(context).pop(ExitRestoreAction.cancel),
             child: Text(
               l10n.cancel,
               style: AppFonts.inter(color: Colors.white54),
@@ -1369,7 +1269,7 @@ class _MainPageState extends State<MainPage>
           ),
           OutlinedButton(
             onPressed: () =>
-                Navigator.of(context).pop(_ExitRestoreAction.exitOnly),
+                Navigator.of(context).pop(ExitRestoreAction.exitOnly),
             style: OutlinedButton.styleFrom(
               side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
               foregroundColor: Colors.white70,
@@ -1387,7 +1287,7 @@ class _MainPageState extends State<MainPage>
           ),
           ElevatedButton(
             onPressed: () =>
-                Navigator.of(context).pop(_ExitRestoreAction.restoreAndExit),
+                Navigator.of(context).pop(ExitRestoreAction.restoreAndExit),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFF59E0B),
               shape: RoundedRectangleBorder(
@@ -2322,9 +2222,11 @@ class _MainPageState extends State<MainPage>
     Asset asset, {
     required bool isEditMode,
   }) async {
-    final barrierLabel = MaterialLocalizations.of(context).modalBarrierDismissLabel;
+    final barrierLabel = MaterialLocalizations.of(
+      context,
+    ).modalBarrierDismissLabel;
     final result = await Navigator.of(context).push<ProtectionConfig>(
-      _TitlebarBypassDialogRoute<ProtectionConfig>(
+      TitlebarBypassDialogRoute<ProtectionConfig>(
         topInset: _mainTitleBarHeight,
         barrierDismissible: true,
         barrierLabel: barrierLabel,

@@ -18,6 +18,8 @@ import 'processing_notice_card.dart';
 import 'security_model_config_form.dart';
 import '../services/plugin_service.dart';
 
+part 'protection_config_dialog_network.dart';
+
 /// Token 单位枚举
 enum _TokenUnit {
   k(1000),
@@ -224,6 +226,18 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       }
       setState(() {});
     });
+  }
+
+  void _updateNetworkOutboundMode(PermissionMode mode) {
+    setState(() => _networkOutboundMode = mode);
+  }
+
+  void _removeNetworkOutboundAt(int index) {
+    setState(() => _networkOutboundList.removeAt(index));
+  }
+
+  void _appendNetworkAddress(List<String> list, String address) {
+    setState(() => list.add(address));
   }
 
   void _updateTabControllerForRequirement(bool requiresBotModelConfig) {
@@ -505,7 +519,9 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                   foregroundColor: Colors.white70,
                 ),
                 child: Text(
-                  AppLocalizations.of(dialogContext)!.modelConfigValidateConnection,
+                  AppLocalizations.of(
+                    dialogContext,
+                  )!.modelConfigValidateConnection,
                   style: AppFonts.inter(color: Colors.white70),
                 ),
               ),
@@ -1017,82 +1033,99 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           // Shepherd User Rules（标题 + 敏感操作，整体框起来）
           if (_showUserCustomRulesSection)
             Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.03),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      LucideIcons.shieldAlert,
-                      color: Color(0xFF6366F1),
-                      size: 18,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            l10n.shepherdRulesTitle,
-                            style: AppFonts.inter(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.03),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        LucideIcons.shieldAlert,
+                        color: Color(0xFF6366F1),
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.shepherdRulesTitle,
+                              style: AppFonts.inter(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              l10n.shepherdRulesDesc,
+                              style: AppFonts.inter(
+                                fontSize: 12,
+                                color: Colors.white54,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Input
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.1),
+                            ),
+                          ),
+                          child: TextField(
+                            controller: _sensitiveActionsInputController,
+                            style: AppFonts.firaCode(
+                              fontSize: 12,
                               color: Colors.white,
                             ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            l10n.shepherdRulesDesc,
-                            style: AppFonts.inter(
-                              fontSize: 12,
-                              color: Colors.white54,
+                            decoration: InputDecoration(
+                              hintText: l10n.shepherdSensitivePlaceholder,
+                              hintStyle: AppFonts.inter(
+                                fontSize: 11,
+                                color: Colors.white38,
+                              ),
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 10,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // Input
-                Row(
-                  children: [
-                    Expanded(
-                      child: Container(
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.1),
+                            onSubmitted: (_) {
+                              final val = _sensitiveActionsInputController.text
+                                  .trim();
+                              if (val.isNotEmpty &&
+                                  !_sensitiveActions.contains(val)) {
+                                setState(() => _sensitiveActions.add(val));
+                                _sensitiveActionsInputController.clear();
+                                _saveConfig(closeOnSave: false);
+                              }
+                            },
                           ),
                         ),
-                        child: TextField(
-                          controller: _sensitiveActionsInputController,
-                          style: AppFonts.firaCode(
-                            fontSize: 12,
-                            color: Colors.white,
-                          ),
-                          decoration: InputDecoration(
-                            hintText: l10n.shepherdSensitivePlaceholder,
-                            hintStyle: AppFonts.inter(
-                              fontSize: 11,
-                              color: Colors.white38,
-                            ),
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 10,
-                            ),
-                          ),
-                          onSubmitted: (_) {
+                      ),
+                      const SizedBox(width: 8),
+                      MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          onTap: () {
                             final val = _sensitiveActionsInputController.text
                                 .trim();
                             if (val.isNotEmpty &&
@@ -1102,107 +1135,93 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                               _saveConfig(closeOnSave: false);
                             }
                           },
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: GestureDetector(
-                        onTap: () {
-                          final val = _sensitiveActionsInputController.text
-                              .trim();
-                          if (val.isNotEmpty &&
-                              !_sensitiveActions.contains(val)) {
-                            setState(() => _sensitiveActions.add(val));
-                            _sensitiveActionsInputController.clear();
-                            _saveConfig(closeOnSave: false);
-                          }
-                        },
-                        child: Container(
-                          height: 36,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF6366F1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Icon(
-                            LucideIcons.plus,
-                            size: 16,
-                            color: Colors.white,
+                          child: Container(
+                            height: 36,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6366F1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Icon(
+                              LucideIcons.plus,
+                              size: 16,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
 
-                // Items
-                if (_sensitiveActions.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _sensitiveActions.asMap().entries.map((entry) {
-                      final localized = _localizeSensitiveActionForDisplay(
-                        entry.value,
-                        l10n,
-                      );
-                      final displayText = localized == entry.value
-                          ? entry.value
-                          : localized;
-                      return Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEF4444).withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(
+                  // Items
+                  if (_sensitiveActions.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _sensitiveActions.asMap().entries.map((entry) {
+                        final localized = _localizeSensitiveActionForDisplay(
+                          entry.value,
+                          l10n,
+                        );
+                        final displayText = localized == entry.value
+                            ? entry.value
+                            : localized;
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
                             color: const Color(
                               0xFFEF4444,
-                            ).withValues(alpha: 0.3),
+                            ).withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                              color: const Color(
+                                0xFFEF4444,
+                              ).withValues(alpha: 0.3),
+                            ),
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                displayText,
-                                style: AppFonts.firaCode(
-                                  fontSize: 11,
-                                  color: Colors.white,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  displayText,
+                                  style: AppFonts.firaCode(
+                                    fontSize: 11,
+                                    color: Colors.white,
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 6),
-                            MouseRegion(
-                              cursor: SystemMouseCursors.click,
-                              child: GestureDetector(
-                                onTap: () {
-                                  setState(
-                                    () => _sensitiveActions.removeAt(entry.key),
-                                  );
-                                  _saveConfig(closeOnSave: false);
-                                },
-                                child: const Icon(
-                                  LucideIcons.x,
-                                  size: 12,
-                                  color: Colors.white54,
+                              const SizedBox(width: 6),
+                              MouseRegion(
+                                cursor: SystemMouseCursors.click,
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(
+                                      () =>
+                                          _sensitiveActions.removeAt(entry.key),
+                                    );
+                                    _saveConfig(closeOnSave: false);
+                                  },
+                                  child: const Icon(
+                                    LucideIcons.x,
+                                    size: 12,
+                                    color: Colors.white54,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                  ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
 
           if (_showUserCustomRulesSection) const SizedBox(height: 16),
 
@@ -1287,12 +1306,8 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                   rawDesc,
                   l10n,
                 );
-                final name = localizedName == rawName
-                    ? rawName
-                    : localizedName;
-                final desc = localizedDesc == rawDesc
-                    ? rawDesc
-                    : localizedDesc;
+                final name = localizedName == rawName ? rawName : localizedName;
+                final desc = localizedDesc == rawDesc ? rawDesc : localizedDesc;
                 return Container(
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.all(12),
@@ -2242,106 +2257,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     );
   }
 
-  /// 构建网络权限设置区块（仅出栈）
-  Widget _buildNetworkPermissionSection(AppLocalizations l10n) {
-    final isMacSandbox = isRuntimeMacOS && _sandboxEnabled;
-    final placeholder = isMacSandbox
-        ? l10n.networkPermissionPlaceholderSandbox
-        : l10n.networkPermissionPlaceholder;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 总标题
-          Row(
-            children: [
-              const Icon(LucideIcons.globe, color: Color(0xFF6366F1), size: 16),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      l10n.networkPermissionTitle,
-                      style: AppFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                    Text(
-                      isMacSandbox
-                          ? l10n.networkPermissionDescSandbox
-                          : l10n.networkPermissionDesc,
-                      style: AppFonts.inter(
-                        fontSize: 11,
-                        color: Colors.white54,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // 出栈 (Outbound) 子区块
-          _buildDirectionalNetworkBlock(
-            title: l10n.networkOutboundTitle,
-            desc: l10n.networkOutboundDesc,
-            icon: LucideIcons.arrowUpRight,
-            mode: _networkOutboundMode,
-            onModeChanged: (mode) =>
-                setState(() => _networkOutboundMode = mode),
-            items: _networkOutboundList,
-            inputController: _networkOutboundInputController,
-            inputHint: placeholder,
-            onAdd: () => _addNetworkAddress(
-              _networkOutboundInputController,
-              _networkOutboundList,
-              l10n,
-            ),
-            onRemove: (index) =>
-                setState(() => _networkOutboundList.removeAt(index)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 添加网络地址的通用方法（含校验）
-  void _addNetworkAddress(
-    TextEditingController controller,
-    List<String> list,
-    AppLocalizations l10n,
-  ) {
-    final addr = controller.text.trim();
-    if (addr.isEmpty) return;
-    if (list.contains(addr)) return;
-    // 当 macOS 沙箱启用时，校验地址是否符合 sandbox-exec 限制
-    if (isRuntimeMacOS &&
-        _sandboxEnabled &&
-        !NetworkPermissionConfig.isValidSandboxAddress(addr)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(l10n.networkAddressInvalidForSandbox),
-          backgroundColor: const Color(0xFFEF4444),
-          duration: const Duration(seconds: 4),
-        ),
-      );
-      return;
-    }
-    setState(() => list.add(addr));
-    controller.clear();
-  }
-
   Future<void> _handlePathBrowse(AppLocalizations l10n) async {
     try {
       final result = await FilePicker.platform.getDirectoryPath(
@@ -2442,186 +2357,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     } finally {
       controller.dispose();
     }
-  }
-
-  /// 构建单方向的网络配置子区块
-  Widget _buildDirectionalNetworkBlock({
-    required String title,
-    required String desc,
-    required IconData icon,
-    required PermissionMode mode,
-    required Function(PermissionMode) onModeChanged,
-    required List<String> items,
-    required TextEditingController inputController,
-    required String inputHint,
-    required VoidCallback onAdd,
-    required Function(int) onRemove,
-  }) {
-    final l10n = AppLocalizations.of(context)!;
-
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 方向标题
-          Row(
-            children: [
-              Icon(icon, color: Colors.white70, size: 14),
-              const SizedBox(width: 6),
-              Text(
-                title,
-                style: AppFonts.inter(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  desc,
-                  style: AppFonts.inter(fontSize: 10, color: Colors.white38),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-
-          // 黑白名单切换
-          Row(
-            children: [
-              _buildModeButton(
-                label: l10n.blacklistMode,
-                isSelected: mode == PermissionMode.blacklist,
-                onTap: () => onModeChanged(PermissionMode.blacklist),
-              ),
-              const SizedBox(width: 8),
-              _buildModeButton(
-                label: l10n.whitelistMode,
-                isSelected: mode == PermissionMode.whitelist,
-                onTap: () => onModeChanged(PermissionMode.whitelist),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-
-          // 输入框
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.1),
-                    ),
-                  ),
-                  child: TextField(
-                    controller: inputController,
-                    style: AppFonts.firaCode(fontSize: 12, color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: inputHint,
-                      hintStyle: AppFonts.inter(
-                        fontSize: 11,
-                        color: Colors.white38,
-                      ),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 10,
-                      ),
-                    ),
-                    onSubmitted: (_) => onAdd(),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: onAdd,
-                  child: Container(
-                    height: 38,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF6366F1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Icon(
-                      LucideIcons.plus,
-                      size: 14,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          // 已添加的项
-          if (items.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: items.asMap().entries.map((entry) {
-                return Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: mode == PermissionMode.blacklist
-                        ? const Color(0xFFEF4444).withValues(alpha: 0.2)
-                        : const Color(0xFF22C55E).withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(
-                      color: mode == PermissionMode.blacklist
-                          ? const Color(0xFFEF4444).withValues(alpha: 0.3)
-                          : const Color(0xFF22C55E).withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          entry.value,
-                          style: AppFonts.firaCode(
-                            fontSize: 10,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: GestureDetector(
-                          onTap: () => onRemove(entry.key),
-                          child: const Icon(
-                            LucideIcons.x,
-                            size: 10,
-                            color: Colors.white54,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
-          ],
-        ],
-      ),
-    );
   }
 
   Widget _buildFooter(AppLocalizations l10n) {
