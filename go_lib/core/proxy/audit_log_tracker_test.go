@@ -292,3 +292,60 @@ func TestAuditChainTracker_PartialMatchKeepsPendingForUnresolvedToolCall(t *test
 		t.Fatalf("expected req_b tool result 'new', got %+v", logB.ToolCalls)
 	}
 }
+
+func TestAuditChainTracker_FinalizeReleasesRuntimeBindings(t *testing.T) {
+	tracker := NewAuditChainTracker()
+
+	msgs := buildMessagesFromRaw(t, `{
+	  "model":"gpt-test",
+	  "messages":[{"role":"user","content":"run cleanup"}]
+	}`)
+	tracker.StartFromRequest("req_start", "openclaw", "openclaw:a1", "gpt-test", msgs)
+	tracker.RecordToolCallsForRequest("req_start", "openclaw:a1", []openai.ChatCompletionMessageToolCall{
+		{
+			ID: "call_clean_1",
+			Function: openai.ChatCompletionMessageToolCallFunction{
+				Name:      "exec",
+				Arguments: "{\"command\":\"echo done\"}",
+			},
+		},
+	}, nil)
+
+	tracker.LinkRequestByToolResults("req_follow", "openclaw:a1", map[string]string{
+		"call_clean_1": "done",
+	})
+	tracker.RecordToolResults("openclaw:a1", map[string]string{
+		"call_clean_1": "done",
+	})
+	tracker.FinalizeRequestOutput("req_follow", "finished")
+
+	if len(tracker.toolCallToLog) != 0 {
+		t.Fatalf("expected toolCallToLog to be released after finalize, got %d", len(tracker.toolCallToLog))
+	}
+	if len(tracker.pendingRequestLinks) != 0 {
+		t.Fatalf("expected pendingRequestLinks to be released after finalize, got %d", len(tracker.pendingRequestLinks))
+	}
+
+	logID := ""
+	for _, binding := range tracker.requestToLog {
+		logID = binding.LogID
+		break
+	}
+	if logID == "" {
+		logs := tracker.GetAuditLogs(1, 0, false)
+		if len(logs) == 0 {
+			t.Fatalf("expected at least one log after finalize")
+		}
+		logID = logs[0].ID
+	}
+	state := tracker.logs[logID]
+	if state == nil {
+		t.Fatalf("expected state to still exist after finalize")
+	}
+	if state.ToolIndex != nil {
+		t.Fatalf("expected ToolIndex memory to be released after finalize")
+	}
+	if state.ToolSeq != nil {
+		t.Fatalf("expected ToolSeq memory to be released after finalize")
+	}
+}

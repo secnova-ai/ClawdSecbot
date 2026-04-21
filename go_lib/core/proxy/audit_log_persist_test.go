@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestToRepositoryAuditLog_ConvertsChainLog(t *testing.T) {
@@ -77,7 +78,7 @@ func TestToRepositoryAuditLog_RequiresID(t *testing.T) {
 
 func TestAuditLogPersistor_RememberLatestSeqSkipsOlderTask(t *testing.T) {
 	p := &auditLogPersistor{
-		latestSeq: make(map[string]int64),
+		latestSeq: make(map[string]auditPersistSeqState),
 	}
 
 	p.rememberLatestSeq("audit_1", 2)
@@ -114,6 +115,31 @@ func TestAuditLogPersistor_RememberLatestSeqSkipsOlderTask(t *testing.T) {
 	}
 	if latest != 2 {
 		t.Fatalf("expected latest seq=2, got %d", latest)
+	}
+}
+
+func TestAuditLogPersistor_CleanupLatestSeqTTL(t *testing.T) {
+	now := time.Now()
+	p := &auditLogPersistor{
+		latestSeq: map[string]auditPersistSeqState{
+			"audit_old": {
+				Seq:       1,
+				UpdatedAt: now.Add(-auditPersistLatestSeqTTL - time.Minute),
+			},
+			"audit_new": {
+				Seq:       2,
+				UpdatedAt: now,
+			},
+		},
+	}
+
+	p.cleanupLatestSeqLocked(now)
+
+	if _, ok := p.latestSeq["audit_old"]; ok {
+		t.Fatalf("expected expired latestSeq entry to be removed")
+	}
+	if _, ok := p.latestSeq["audit_new"]; !ok {
+		t.Fatalf("expected non-expired latestSeq entry to remain")
 	}
 }
 

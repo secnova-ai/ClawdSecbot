@@ -115,11 +115,12 @@ type auditPersistTask struct {
 }
 
 type auditLogPersistor struct {
-	queue chan auditPersistTask
-	mu    sync.Mutex
+	queue         chan auditPersistTask
+	overflowQueue chan auditPersistTask
+	mu            sync.Mutex
 	// latestSeq tracks the latest snapshot sequence observed for each log id.
 	// Any task with a smaller sequence is stale and must not be persisted.
-	latestSeq map[string]int64
+	latestSeq map[string]auditPersistSeqState
 }
 
 var (
@@ -265,10 +266,12 @@ func cloneAuditLog(log AuditLog) AuditLog {
 func getAuditLogPersistor() *auditLogPersistor {
 	auditPersistorOnce.Do(func() {
 		auditPersistorInst = &auditLogPersistor{
-			queue:     make(chan auditPersistTask, auditPersistQueueSize),
-			latestSeq: make(map[string]int64),
+			queue:         make(chan auditPersistTask, auditPersistQueueSize),
+			overflowQueue: make(chan auditPersistTask, auditPersistOverflowQueueSize),
+			latestSeq:     make(map[string]auditPersistSeqState),
 		}
 		go auditPersistorInst.loop()
+		go auditPersistorInst.loopOverflow()
 	})
 	return auditPersistorInst
 }
@@ -286,15 +289,7 @@ func (p *auditLogPersistor) retry(task auditPersistTask) {
 	}
 	nextTask := task
 	nextTask.Attempt++
-	go func(t auditPersistTask) {
-		time.Sleep(200 * time.Millisecond)
-		select {
-		case p.queue <- t:
-		default:
-			// Never block proxy path; fallback to direct async persist once.
-			p.processTask(t, "retry_fallback")
-		}
-	}(nextTask)
+	p.enqueuePersistTask(nextTask, "retry")
 }
 
 func (p *auditLogPersistor) rememberLatestSeq(logID string, seq int64) {
@@ -307,12 +302,21 @@ func (p *auditLogPersistor) rememberLatestSeq(logID string, seq int64) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.latestSeq == nil {
-		p.latestSeq = make(map[string]int64)
+	if p.latestSeq == nil || len(p.latestSeq) == 0 {
+		p.latestSeq = make(map[string]auditPersistSeqState)
 	}
-	if seq > p.latestSeq[logID] {
-		p.latestSeq[logID] = seq
+	now := time.Now()
+	current := p.latestSeq[logID]
+	if seq > current.Seq {
+		p.latestSeq[logID] = auditPersistSeqState{
+			Seq:       seq,
+			UpdatedAt: now,
+		}
+	} else {
+		current.UpdatedAt = now
+		p.latestSeq[logID] = current
 	}
+	p.cleanupLatestSeqLocked(now)
 }
 
 func (p *auditLogPersistor) isTaskStale(task auditPersistTask) (bool, int64) {
@@ -325,7 +329,8 @@ func (p *auditLogPersistor) isTaskStale(task auditPersistTask) (bool, int64) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	latest := p.latestSeq[logID]
+	p.cleanupLatestSeqLocked(time.Now())
+	latest := p.latestSeq[logID].Seq
 	return latest > 0 && task.Seq < latest, latest
 }
 
@@ -477,14 +482,7 @@ func enqueueAuditLogPersist(log AuditLog) {
 	}
 	persistor.rememberLatestSeq(logID, seq)
 	task := auditPersistTask{Log: log, Attempt: 0, Seq: seq}
-	select {
-	case persistor.queue <- task:
-	default:
-		logging.Warning("[AuditLog] Persist queue is full, fallback async persist: %s seq=%d", logID, seq)
-		go func(task auditPersistTask) {
-			persistor.processTask(task, "queue_full_fallback")
-		}(task)
-	}
+	persistor.enqueuePersistTask(task, "enqueue")
 }
 
 func (t *AuditChainTracker) cleanupExpiredLocked(now time.Time) {
@@ -1189,6 +1187,13 @@ func (t *AuditChainTracker) FinalizeRequestOutput(requestID, output string) {
 
 	state := t.getStateByRequestLocked(requestID)
 	if state == nil {
+		if _, pending := t.pendingRequestLinks[requestID]; !pending {
+			logging.Info(
+				"[AuditChain] finalize assistant output skipped: request_id=%s reason=request_not_bound_and_no_pending_link",
+				requestID,
+			)
+			return
+		}
 		t.storePendingFinalOutputLocked(requestID, output, now)
 		logging.Info(
 			"[AuditChain] finalize assistant output pending: request_id=%s output_len=%d",
@@ -1206,6 +1211,7 @@ func (t *AuditChainTracker) FinalizeRequestOutput(requestID, output string) {
 		len(strings.TrimSpace(output)),
 	)
 	t.touchStateLocked(state, now)
+	t.releaseCompletedChainResourcesLocked(state, requestID)
 }
 
 // GetAuditLogs returns newest-first snapshots with optional risk filter.

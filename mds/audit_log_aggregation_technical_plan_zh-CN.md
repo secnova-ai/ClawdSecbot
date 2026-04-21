@@ -13,10 +13,13 @@
 并满足以下约束：
 
 - 审计逻辑绝不阻断代理主流程（fail-open）
-- 支持并发请求、乱序到达、流式输出
+- 支持并发请求、跨回调时序差异、流式输出
 - 允许链路不完整（用户中断时无 tool_result / 无 final_output）
 - 不维护任务 `status` 字段作为完成判定前提
 - 不把 system prompt 作为 `request_content` 落库
+
+说明：正常主链路是 `start -> tool_call 绑定 -> tool_result 回填 -> finalize`。  
+文中“容错”均指绑定暂未就绪、异常或边界场景下的兜底，不代表协议语义正常情况下会反向到达。
 
 ## 2. 分层与调用链
 
@@ -24,7 +27,7 @@
 
 1. 实时聚合链（Go 进程内）
 - `ProxyProtection` -> `AuditChainTracker`（内存 SSOT）
-- 负责关联、聚合、乱序修复、并发隔离
+- 负责关联、聚合、绑定缺失容错修复、并发隔离
 
 2. 持久化与查询链（SQLite）
 - `AuditChainTracker` 快照异步入库 -> `repository.AuditLogRepository`
@@ -61,9 +64,9 @@
 
 - `requestToLog`: `request_id -> log_id`（TTL）
 - `toolCallToLog`: `asset_id|tool_call_id -> log_id`（TTL）
-- `pendingToolResults`: tool_result 先到、tool_call 绑定后到时的暂存
-- `pendingRequestLinks`: request 先到、tool_call 绑定后到时的暂存
-- `pendingFinalOutputs`: final output 先到、request 绑定后到时的暂存
+- `pendingToolResults`: tool_result 到达时 tool 绑定未就绪的暂存
+- `pendingRequestLinks`: request 到达时 tool 绑定未就绪的暂存
+- `pendingFinalOutputs`: final output 到达时 request 绑定未就绪的暂存
 
 TTL 常量：
 
@@ -134,7 +137,7 @@ TTL 常量：
 - 命中则更新对应 `ToolCalls[idx].Result`
 - 未命中则缓存到 `pendingToolResults`
 
-这样保证 tool_result 先到或后到都能最终关联。
+这样保证在绑定未就绪场景下最终仍可关联，不丢链。
 
 ## 4.5 终链：assistant 最终输出
 
@@ -158,7 +161,7 @@ TTL 常量：
 
 包括配额拦截、沙箱阻断、ShepherdGate 判定等场景。
 
-## 5. 并发与乱序安全设计
+## 5. 并发与绑定缺失容错设计
 
 ## 5.1 请求上下文绑定（避免并发串 request_id）
 
@@ -284,7 +287,7 @@ sequenceDiagram
   T->>DB: async upsert snapshots (by log_uuid)
 ```
 
-## 8.2 乱序链路（result/output 先到）
+## 8.2 绑定未就绪容错链路（result/output 暂存后回填）
 
 ```mermaid
 sequenceDiagram
@@ -319,7 +322,7 @@ sequenceDiagram
 - `audit_log_tracker_test.go`
   - last user 起链
   - request/tool/result 关联
-  - 乱序恢复（result 先到、final 先到）
+  - 绑定缺失容错恢复（result/final 暂存后回填）
   - ID 归一化匹配
   - partial match 场景
 
