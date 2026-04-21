@@ -52,6 +52,29 @@ func TestGetAuditLogsInternal_AggregatesWithoutPerTrackerTruncation(t *testing.T
 	}
 }
 
+// TestAuditChainTracker_GetAuditLogsSnapshotUsesSingleView 验证单次加锁快照会返回一致的 logs 和 total。
+func TestAuditChainTracker_GetAuditLogsSnapshotUsesSingleView(t *testing.T) {
+	tracker := NewAuditChainTracker()
+	tracker.StartFromRequest("req_1", "openclaw", "openclaw:a1", "gpt-test", []openai.ChatCompletionMessageParamUnion{
+		openai.UserMessage("task one"),
+	})
+	tracker.StartFromRequest("req_2", "openclaw", "openclaw:a1", "gpt-test", []openai.ChatCompletionMessageParamUnion{
+		openai.UserMessage("task two"),
+	})
+	tracker.SetRequestDecision("req_1", "BLOCK", "WARN", "risk", 80)
+
+	logs, total := tracker.getAuditLogsSnapshot(true)
+	if total != 1 {
+		t.Fatalf("expected total=1 for risk-only snapshot, got %d", total)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected logs length=1 for risk-only snapshot, got %d", len(logs))
+	}
+	if logs[0].RequestContent != "task one" {
+		t.Fatalf("expected risk snapshot to contain task one, got %q", logs[0].RequestContent)
+	}
+}
+
 // TestEnqueuePersistTask_DroppedTaskDoesNotAdvanceLatestSeq 验证入队失败时 latestSeq 不会被错误推进。
 func TestEnqueuePersistTask_DroppedTaskDoesNotAdvanceLatestSeq(t *testing.T) {
 	persistor := &auditLogPersistor{
