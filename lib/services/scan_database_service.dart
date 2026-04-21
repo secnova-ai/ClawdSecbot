@@ -112,8 +112,7 @@ class ScanDatabaseService {
     if (normalized != null && normalized.isNotEmpty) {
       return normalized;
     }
-    final fromArgs =
-        args?['source_plugin'] ?? args?['asset_name'] ?? args?['assetName'];
+    final fromArgs = args?['source_plugin'];
     final fallback = fromArgs?.toString().trim();
     if (fallback == null || fallback.isEmpty) {
       return null;
