@@ -189,8 +189,6 @@ class ProtectionMonitorService {
 
   void startProxyLogPolling() {
     _proxyLogPollTimer?.cancel();
-    // 200ms * 25 = 5s: 审计日志保持低频 DB 同步，减少写放大。
-    int auditSyncCounter = 25;
     // 200ms * 5 = 1s: 安全事件提升为近实时刷新。
     int securityEventSyncCounter = 5;
     _proxyLogPollTimer = Timer.periodic(const Duration(milliseconds: 200), (
@@ -198,11 +196,6 @@ class ProtectionMonitorService {
     ) {
       if (_proxySessionID != null && _isProxyRunning) {
         _pollProxyLogs(_proxySessionID!);
-        auditSyncCounter++;
-        if (auditSyncCounter >= 25) {
-          auditSyncCounter = 0;
-          syncPendingAuditLogs();
-        }
         securityEventSyncCounter++;
         if (securityEventSyncCounter >= 5) {
           securityEventSyncCounter = 0;
@@ -219,12 +212,11 @@ class ProtectionMonitorService {
   }
 
   /// 启动独立的 DB 同步定时器（5 秒周期），用于回调模式下拉取审计日志。
-  /// 安全事件已由 Go 层直接持久化并通过 Bridge 实时推送，无需定时拉取。
+  /// 审计日志与安全事件均由 Go 层直接持久化；这里只保留安全事件轮询兜底。
   void _startDbSyncTimer() {
     _dbSyncTimer?.cancel();
     _dbSyncTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (_proxySessionID != null && _isProxyRunning) {
-        syncPendingAuditLogs();
         syncPendingSecurityEvents();
       }
     });
@@ -294,8 +286,8 @@ class ProtectionMonitorService {
             });
         _proxyLogPollTimer?.cancel();
         _proxyLogPollTimer = null;
-        // 回调模式下日志/指标/安全事件由 MessageBridge 推送，
-        // 审计日志仍需定时从 Go 内存缓冲拉取并持久化到 SQLite。
+        // 回调模式下日志/指标/安全事件由 MessageBridge 推送；
+        // 审计日志已由 Go 层直接落库，不再由 Flutter 侧触发写库。
         _startDbSyncTimer();
         return true;
       }
@@ -324,9 +316,6 @@ class ProtectionMonitorService {
       if (_matchesTruthRecordAsset(record) &&
           !_truthRecordController.isClosed) {
         _truthRecordController.add(record);
-        if (record.isComplete) {
-          _persistCompletedRecord(record);
-        }
       }
     } catch (e) {
       appLogger.error('[ProtectionMonitor] Parse truth record error', e);
@@ -553,69 +542,6 @@ class ProtectionMonitorService {
     _seenSecurityEventIds.clear();
   }
 
-  /// 将已完成的 TruthRecord 转换为 AuditLog 并持久化到 SQLite（事件驱动，替代轮询）。
-  void _persistCompletedRecord(TruthRecordModel record) {
-    try {
-      final log = AuditLog(
-        id: record.requestId,
-        timestamp: record.startedAt,
-        requestId: record.requestId,
-        assetName: record.assetName,
-        assetID: record.assetID,
-        model: record.model,
-        requestContent: record.messages
-            .where((m) => m.role.toLowerCase() == 'user')
-            .map((m) => m.content)
-            .join('\n'),
-        toolCalls: record.toolCalls
-            .map(
-              (tc) => AuditToolCall(
-                name: tc.name,
-                arguments: tc.arguments,
-                result: tc.result,
-                isSensitive: tc.isSensitive,
-              ),
-            )
-            .toList(),
-        outputContent: record.outputContent,
-        hasRisk: record.hasRisk,
-        riskLevel: record.decision?.riskLevel ?? '',
-        riskReason: record.decision?.reason ?? '',
-        confidence: record.decision?.confidence ?? 0,
-        action: record.decision?.action ?? 'ALLOW',
-        promptTokens: record.promptTokens,
-        completionTokens: record.completionTokens,
-        totalTokens: record.totalTokens,
-        durationMs: record.durationMs,
-        messages: record.messages
-            .map(
-              (m) => AuditMessage(
-                index: m.index,
-                role: m.role,
-                content: m.content,
-              ),
-            )
-            .toList(),
-        messageCount: record.messageCount,
-      );
-      unawaited(
-        AuditLogDatabaseService().saveAuditLogsBatch([log]).catchError((
-          Object e,
-        ) {
-          appLogger.error(
-            '[ProtectionMonitor] Failed to persist completed record',
-            e,
-          );
-        }),
-      );
-    } catch (e) {
-      appLogger.error(
-        '[ProtectionMonitor] Failed to convert TruthRecord to AuditLog',
-        e,
-      );
-    }
-  }
-
   void _publishSecurityEvents(List<SecurityEvent> events) {
     if (_securityEventController.isClosed || events.isEmpty) {
       return;
@@ -780,9 +706,6 @@ class ProtectionMonitorService {
             if (!_truthRecordController.isClosed) {
               _truthRecordController.add(record);
             }
-            if (record.isComplete) {
-              _persistCompletedRecord(record);
-            }
           }
         }
       }
@@ -945,22 +868,8 @@ class ProtectionMonitorService {
   }
 
   Future<int> syncPendingAuditLogs() async {
-    try {
-      final transport = TransportRegistry.transport;
-      if (!transport.isReady) return 0;
-      final resultJson = transport.callRawNoArg('GetPendingAuditLogs');
-
-      final logsJson = jsonDecode(resultJson) as List<dynamic>;
-      if (logsJson.isEmpty) return 0;
-      final logs = logsJson
-          .map((e) => AuditLog.fromJson(e as Map<String, dynamic>))
-          .toList();
-      await AuditLogDatabaseService().saveAuditLogsBatch(logs);
-      return logs.length;
-    } catch (e) {
-      appLogger.error('[ProtectionMonitor] Sync audit logs failed', e);
-      return 0;
-    }
+    // Audit logs are persisted by Go directly. Flutter no longer triggers writes.
+    return 0;
   }
 
   void clearAuditLogsBuffer() {

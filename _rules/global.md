@@ -1,153 +1,110 @@
 # ClawSecbot 全局开发规范（精简版）
 
-> 适用范围：本文件仅保留长期稳定、跨模块共享的约束。实现细节请写入各模块文档。
+> 适用范围：本文件只定义跨模块、长期稳定、可执行的约束。模块内部实现细节写入模块文档。
+
+## 0. 规则优先级与执行口径
+
+- 本文件中的 `必须` / `禁止` 为硬约束；`建议` / `优先` 为软约束。
+- 若用户在当前任务中明确要求与本规范冲突，以用户要求为准，但必须在提交中同步更新本规范或模块文档，避免“代码已变、规则未变”。
+- 审查输出必须给出：`文件路径 + 触发规则 + 具体原因`，避免抽象结论。
+- 单个功能（如审计日志、某插件协议、某页面交互）的实现细则禁止长期堆在 `global.md`，必须拆分到独立规则文档并在此处维护索引。
 
 ## 1. 架构底线
 
 - 架构分层：Flutter Desktop（UI/状态）+ Go（业务）+ FFI（通信）。
 - Go 以 `c-shared` 构建单一动态库：`botsec.dylib` / `botsec.so` / `botsec.dll`。
-- 支持平台：macOS（arm64/x86_64）、Linux（arm64/x86_64）、Windows（x86_64）。
+- 支持平台：macOS（arm64/x86_64）、Linux（arm64/x86_64）、Windows（x86_64）、webui。
+- 任何改动都需要兼容desktop版本和webui版本的工作
 
 ## 2. 目录职责
 
 - `lib/`：UI、状态管理、FFI 调用封装。
-- `go_lib/main.go`：唯一 FFI 导出入口（所有 `//export` 函数放在 `package main`）。
+- `go_lib/main.go`：唯一 FFI 导出入口（所有 `//export` 函数在 `package main`）。
 - `go_lib/core/`：公共核心能力（`repository/service/scanner/sandbox/proxy/shepherd/skillscan/modelfactory/callback_bridge/logging`）。
 - `go_lib/plugins/`：插件实现（当前包含 `openclaw`、`nullclaw`）。
 - `go_lib/chatmodel-routing/`：LLM 协议适配与转发。
 
 ## 3. 代码规则
 
-- 日志和注释统一英文。
+- 日志与代码注释统一英文。
 - 禁止无用代码、重复实现、无需求依据的“提前设计”。
-- 优先在原有模块扩展，避免平行新实现造成语义分裂。
-- Go 业务改动需补充单元测试（至少覆盖 `service/repository` 相关逻辑）。
-- Flutter 生产日志统一使用 `appLogger`；Go 使用 `core/logging`。
-- 非明确需求不做隐式向前兼容与数据迁移。
-- 单文件代码不超过1500行
-- 涉及耗时操作的实现与评审必须遵循 [`_rules/ui_non_blocking_async.md`](ui_non_blocking_async.md)。
+- 优先在原有模块扩展，避免平行实现造成语义分裂。
+- Go 业务改动必须补充测试；至少覆盖改动涉及的核心逻辑（`service`/`repository`/`proxy`）。
+- Flutter 生产日志使用 `appLogger`；Go 使用 `core/logging`。
+- 非明确需求，不做隐式前向兼容和数据迁移。
+- 单文件行数硬上限：1500 行。对已超限文件，若继续改动，必须在同次提交中拆分或净减少体积；紧急修复可豁免一次，但后续必须补拆分。
+- 涉及耗时操作的实现与评审，必须遵循 [`_rules/ui_non_blocking_async.md`](ui_non_blocking_async.md)。
 
 ## 4. 分层与调用链
 
-- 统一调用链：`Flutter -> FFI(main.go) -> core/service -> core/repository -> SQLite`。
-- Flutter 禁止直接操作业务数据库文件，业务数据读写必须走 Go FFI。
-- 资产实例隔离统一以 `asset_id` 为主键；`asset_name` 仅用于资产类型标识。
+- 默认调用链：`Flutter -> FFI(main.go) -> core/service -> core/repository -> SQLite`。
+- Flutter 禁止直接操作业务数据库文件；业务数据读写必须经 Go FFI。
+- 允许的例外：`core/proxy` 在请求热路径中可异步写入 `core/repository`（仅限审计/安全事件这类旁路持久化），前提是：
+  - 失败不阻断代理主流程；
+  - 不新增第二套对外读取语义；
+  - 表结构与查询口径保持一致；
+  - 有明确日志与测试覆盖并发/乱序场景。
+- 资产实例隔离以 `asset_id` 为主键；`asset_name` 仅作类型标识。
 
 ## 5. FFI 通信规范
 
-- 统一 JSON 输入输出，响应格式固定为：
-  `{"success": bool, "data": any, "error": string|null}`。
-- Go 端必须使用 `json.Marshal` 序列化；禁止手工拼接 JSON。
+- FFI 输入输出统一 JSON。
+- 默认响应包络：`{"success": bool, "data": any, "error": string|null}`。
+- 对高频历史接口（如代理日志流/快照拉取）可返回裸 JSON，但必须在接口注释中明确返回结构，且同名接口不得混用两种格式。
+- Go 必须使用 `json.Marshal` 序列化；禁止手工拼接 JSON。
 - Go 返回的 C 字符串必须由 Dart 侧 `FreeString` 释放。
-- `NativeLibraryService` 是 Flutter 侧动态库加载唯一入口：
-  主 Isolate 复用缓存实例；后台 Isolate 通过 `libraryPath` 重新打开。
-- Go -> Dart 消息优先使用 FFI callback（`MessageBridgeService` + `NativeCallable.listener`），轮询仅作为降级路径。
-- 路径统一由 core 派生；Flutter 仅传基础目录，禁止分别传 db/log/version 等具体路径。
+- `NativeLibraryService` 是 Flutter 动态库加载唯一入口：主 Isolate 复用缓存实例；后台 Isolate 通过 `libraryPath` 重开。
+- Go -> Dart 消息优先 FFI callback（`MessageBridgeService` + `NativeCallable.listener`），轮询仅作降级。
+- 路径由 core 统一派生；Flutter 仅传基础目录，禁止传 db/log/version 等细粒度路径。
 
 ## 6. 插件与资产规范
 
-- 插件必须实现 `BotPlugin` 并在 `init()` 中注册到 `PluginManager`。
+- 插件必须实现 `BotPlugin` 并在 `init()` 注册到 `PluginManager`。
 - `BotPlugin` 关键方法组：
   `GetID/GetAssetName/GetManifest/GetAssetUISchema/ScanAssets/AssessRisks/MitigateRisk/StartProtection/StopProtection/GetProtectionStatus`。
 - 每个资产实例必须生成稳定 `asset_id`（由名称、配置路径、端口、进程路径等指纹计算）。
 - 运行时绑定关系：`1 asset_id : 1 plugin instance`。
 - 防护、事件、指标、状态查询必须按 `asset_id` 路由，避免跨实例串数据。
-- FFI 防护接口仅接受 `asset_id`，禁止传递 `asset_name`；Go 内部通过实例绑定解析插件名。
+- FFI 防护接口只接受 `asset_id`，禁止传 `asset_name`；Go 内部通过实例绑定解析插件名。
 
 ### 6.1 `asset_id` 生成规范
 
-- 统一调用 `core.ComputeAssetID(name, configPath, ports, processPaths)`，禁止插件私自实现另一套算法。
+- 统一调用 `core.ComputeAssetID(name, configPath, ports, processPaths)`，禁止插件自实现另一套算法。
 - 参与指纹字段：`name`、`config_path`、`ports`、`process_paths`。
-- 规范化与拼接顺序（必须一致）：
-  - `name` 转小写后写入：`name=<lowercase_name>`
-  - `config_path` 非空时写入：`config=<config_path>`
-  - `ports` 升序排序后写入：`ports=1,2,3`
-  - `process_paths` 字典序排序后写入：`paths=/a,/b`
-  - 使用 `|` 拼接为 canonical 字符串
-- 哈希算法：`sha256(canonical)`，取前 6 字节转十六进制（12 位）作为短哈希。
-- 输出格式：`<lowercase_name>:<12hex>`（示例：`openclaw:1a2b3c4d5e6f`）。
-- 语义要求：同一资产在字段不变时 `asset_id` 必须稳定；任一指纹字段变化必须触发 `asset_id` 变化。
+- 规范化顺序：
+  - `name` 小写：`name=<lowercase_name>`
+  - `config_path` 非空：`config=<config_path>`
+  - `ports` 升序：`ports=1,2,3`
+  - `process_paths` 字典序：`paths=/a,/b`
+  - 使用 `|` 拼接 canonical 字符串
+- 哈希算法：`sha256(canonical)`，取前 6 字节十六进制（12 位）。
+- 输出格式：`<lowercase_name>:<12hex>`（例：`openclaw:1a2b3c4d5e6f`）。
+- 字段不变则 `asset_id` 必须稳定；任一指纹字段变化必须触发 `asset_id` 变化。
 
 ### 6.2 `mitigation` 生成规范
 
-- 所有插件的 `mitigation.json` 必须为每条 `mitigation` 提供 `title` 和 `description`，禁止仅提供结构字段而缺少可读说明。
-- `mitigation.type` 仅允许两类：
-  - `form`：使用 `form_schema`，表示可执行修复；前端应提供修复按钮并收集表单参数后调用插件缓解能力。
-  - `suggestion`：使用 `suggestions`，表示需人工修复；前端应展示操作建议，不提供自动修复执行。
-- `form` 类型禁止使用 `suggestions` 作为主承载结构；`suggestion` 类型禁止使用 `form_schema` 作为主承载结构。
-- `title` 用于概括修复目标；`description` 用于说明风险背景、修复目的、影响范围或执行前提，内容必须可直接用于 UI 和导出展示。
+- 所有插件的 `mitigation.json` 每条 `mitigation` 必须有 `title` 与 `description`。
+- `mitigation.type` 仅允许：
+  - `form`：使用 `form_schema`，表示可执行修复。
+  - `suggestion`：使用 `suggestions`，表示人工修复建议。
+- `form` 禁止以 `suggestions` 为主承载；`suggestion` 禁止以 `form_schema` 为主承载。
+- `title` 概括目标；`description` 说明背景、目的、影响或前提，可直接用于 UI 与导出。
 
-## 7. 监控与审计 — TruthRecord SSOT 架构
+## 7. 监控与审计（高层约束）
 
-### 7.1 核心原则
-
-代理防护层（ProxyProtection）的核心数据实体为 **TruthRecord**（Single Source of Truth）。
-每个代理请求有且仅有一条 TruthRecord，从请求到达到响应完成渐进式更新。
-TruthRecord 同时服务于三个视图：
-
-1. **清晰视图卡片**：实时展示请求状态、摘要、工具调用、安全决策
-2. **审计日志**：已完成请求的持久化记录（SQLite）
-3. **安全事件过滤**：按风险等级筛选异常请求
-
-禁止为上述三个视图维护独立的数据结构或并行写入路径。
-
-### 7.2 数据模型
-
-**Go 侧** (`go_lib/core/proxy/truth_record.go`)：
-
-| 字段组 | 字段 | 说明 |
-|--------|------|------|
-| 身份 | `request_id`, `asset_name`, `asset_id` | 请求唯一标识与资产归属 |
-| 时间线 | `started_at`, `updated_at`, `completed_at` | RFC3339Nano 格式；`completed_at` 非空即表示已完成 |
-| 请求上下文 | `model`, `message_count`, `messages[]` | `messages` 仅含当前轮 |
-| 响应 | `phase`, `finish_reason`, `primary_content`, `primary_content_type`, `output_content` | `primary_content` 为卡片摘要；`output_content` 为审计全文 |
-| 工具链路 | `tool_calls[]` | 每项含 `name/arguments/result/source/is_sensitive` |
-| 安全决策 | `decision` | 子结构 `SecurityDecision{action, risk_level, reason, confidence}` |
-| Token | `prompt_tokens`, `completion_tokens` | `total_tokens` 由前端 getter 计算 |
-
-**Flutter 侧** (`lib/models/truth_record_model.dart`)：
-
-- `TruthRecordModel` 直接从 Go 快照映射，每次收到完整快照直接替换（不做 merge）。
-- 所有可推导属性通过 getter 计算：`isComplete`, `hasToolCall`, `toolCallCount`, `toolNames`, `totalTokens`, `durationMs`, `hasRisk`, `decisionBlocked` 等。
-
-### 7.3 数据流
-
-```
-Bot 请求 → ProxyProtection.onRequest()
-  → updateTruthRecord() 创建记录 (phase=starting)
-  → RecordStore.Upsert() → 快照入 pending 队列
-  → logTruthRecordSnapshot() → 写入视图日志
-  → sendTruthRecordToCallback() → FFI 推送 Flutter
-  → sendLog("protection_record_snapshot") → 原始日志流
-
-Provider 响应 → onResponse() / onStreamChunk()
-  → updateTruthRecord() 更新记录
-  → finalizeTruthRecord() 标记完成 (phase=completed)
-
-Flutter 侧
-  → MessageBridgeService.truthRecordStream 接收快照
-  → ProtectionMonitorService 分发到 truthRecordStream
-  → 卡片渲染：直接替换 requestGroups[requestId]
-  → 持久化：isComplete 时转换为 AuditLog 写入 SQLite
-```
-
-### 7.4 开发约束
-
-- **唯一写入入口**：handler 中更新请求数据必须通过 `updateTruthRecord()`，禁止绕过直接操作 `RecordStore`。
-- **禁止并行数据结构**：不允许新增 `RequestView`、`AuditLog`、`RequestSnapshot` 等平行实体。
-- **快照不可变**：`RecordStore.Upsert()` 返回的快照为深拷贝，外部持有者不可修改。
-- **安全决策内聚**：风险相关字段必须收敛在 `SecurityDecision` 子结构中，禁止在 TruthRecord 顶层散列安全字段。
-- **前端不做 merge**：每次收到快照直接替换，不与本地旧数据合并。
-- **FFI 兼容层**：`truthRecordsToAuditCompat()` 为过渡期兼容函数，最终应由 Flutter 直接使用 `TruthRecordModel`。
-- 安全事件（`SecurityEvent`）来自 ShepherdGate 分析和沙箱钩子，与 `TruthRecord.Decision` 是独立数据源，不合并。
+- 监控（实时态）与审计（持久态）允许采用不同数据结构，但必须边界清晰、职责不重叠。
+- 同一 UI 视图只允许一个主数据源，禁止在页面层混读两套语义相近的数据并做隐式合并。
+- 监控/审计相关实现必须满足：并发可关联、链路可追溯、写入幂等、失败不阻断主业务。
+- 详细实现规范见独立文档：
+  - [`_rules/audit_chain.md`](audit_chain.md)
 
 ## 8. 沙箱规范
 
 - 策略目录统一：
   - Unix：`~/.botsec/policies/`
-  - Windows：`%USERPROFILE%\.botsec\policies\`
+  - Windows：`%USERPROFILE%\\.botsec\\policies\\`
 - macOS：`sandbox-exec`（Seatbelt 策略）。
 - Linux：`LD_PRELOAD` + JSON policy（`SANDBOX_POLICY_FILE`）。
 - Windows：`sandbox_hook.dll` + MinHook 注入（失败必须 fail-close，不允许“伪保护”状态）。
-- 沙箱不可用时允许降级启动，但 UI/状态必须明确标识未启用沙箱防护。
-- 实现细节与代码路径见 [`_rules/config_system.md`](config_system.md)（含各平台沙箱策略与相关 Go 模块）。
+- 沙箱不可用时允许降级启动，但 UI/状态必须明确标识“未启用沙箱防护”。
+- 实现细节与代码路径见 [`_rules/config_system.md`](config_system.md)。

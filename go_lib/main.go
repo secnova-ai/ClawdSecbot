@@ -1294,26 +1294,26 @@ func GetAllTruthRecordSnapshots() *C.char {
 	return C.CString(proxy.GetAllTruthRecordSnapshotsInternal())
 }
 
-// ==================== Audit Log FFI (core/proxy — backed by TruthRecord) ====================
+// ==================== Audit Log FFI (core/proxy chain tracker) ====================
 
 //export GetAuditLogs
 func GetAuditLogs(limit, offset C.int, riskOnly C.int) *C.char {
-	return C.CString(proxy.GetTruthRecordsInternal(int(limit), int(offset), riskOnly != 0))
+	return C.CString(proxy.GetAuditLogsInternal(int(limit), int(offset), riskOnly != 0))
 }
 
 //export GetPendingAuditLogs
 func GetPendingAuditLogs() *C.char {
-	return C.CString(proxy.GetPendingTruthRecordsInternal())
+	return C.CString(proxy.GetPendingAuditLogsInternal())
 }
 
 //export ClearAuditLogs
 func ClearAuditLogs() *C.char {
-	return C.CString(proxy.ClearTruthRecordsInternal())
+	return C.CString(proxy.ClearAuditLogsInternal())
 }
 
 //export ClearAuditLogsWithFilter
 func ClearAuditLogsWithFilter(jsonC *C.char) *C.char {
-	return C.CString(proxy.ClearTruthRecordsWithFilterInternal(C.GoString(jsonC)))
+	return C.CString(proxy.ClearAuditLogsWithFilterInternal(C.GoString(jsonC)))
 }
 
 // ==================== Gateway Sandbox FFI (plugin capability dispatch) ====================
