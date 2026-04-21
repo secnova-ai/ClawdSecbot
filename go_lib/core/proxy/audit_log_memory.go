@@ -31,18 +31,26 @@ func (p *auditLogPersistor) enqueuePersistTask(task auditPersistTask, source str
 	}
 	logID := strings.TrimSpace(task.Log.ID)
 	now := time.Now()
+	status := "dropped"
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	select {
 	case p.queue <- task:
 		p.rememberLatestSeqLocked(logID, task.Seq, now)
-		return true
+		status = "queued"
 	default:
+		select {
+		case p.overflowQueue <- task:
+			p.rememberLatestSeqLocked(logID, task.Seq, now)
+			status = "overflow"
+		default:
+		}
 	}
+	p.mu.Unlock()
 
-	select {
-	case p.overflowQueue <- task:
-		p.rememberLatestSeqLocked(logID, task.Seq, now)
+	switch status {
+	case "queued":
+		return true
+	case "overflow":
 		logging.Warning(
 			"[AuditLog] Persist queue overflow, redirected task: log_id=%s seq=%d source=%s",
 			logID,

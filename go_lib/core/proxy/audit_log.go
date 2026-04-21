@@ -1272,6 +1272,43 @@ func (t *AuditChainTracker) GetAuditLogs(limit, offset int, riskOnly bool) []Aud
 	return out
 }
 
+// getAuditLogsSnapshot 在单次加锁内返回完整审计快照与总数，确保分页读取使用同一视图。
+func (t *AuditChainTracker) getAuditLogsSnapshot(riskOnly bool) ([]AuditLog, int) {
+	if t == nil {
+		return nil, 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := time.Now()
+	t.cleanupExpiredLocked(now)
+
+	items := make([]*auditLogState, 0, len(t.logs))
+	for _, state := range t.logs {
+		if riskOnly && !state.Log.HasRisk {
+			continue
+		}
+		items = append(items, state)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].Log.ID > items[j].Log.ID
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+
+	out := make([]AuditLog, 0, len(items))
+	for _, state := range items {
+		entry := state.Log
+		if len(state.Log.ToolCalls) > 0 {
+			entry.ToolCalls = make([]AuditToolCall, len(state.Log.ToolCalls))
+			copy(entry.ToolCalls, state.Log.ToolCalls)
+		}
+		out = append(out, entry)
+	}
+	return out, len(items)
+}
+
 // GetAuditLogCount returns count with optional risk filter.
 func (t *AuditChainTracker) GetAuditLogCount(riskOnly bool) int {
 	if t == nil {
@@ -1411,12 +1448,12 @@ func GetAuditLogsInternal(limit, offset int, riskOnly bool) string {
 	all := make([]AuditLog, 0)
 	total := 0
 	for _, tracker := range trackers {
-		trackerTotal := tracker.GetAuditLogCount(riskOnly)
+		trackerLogs, trackerTotal := tracker.getAuditLogsSnapshot(riskOnly)
 		total += trackerTotal
 		if trackerTotal <= 0 {
 			continue
 		}
-		all = append(all, tracker.GetAuditLogs(trackerTotal, 0, riskOnly)...)
+		all = append(all, trackerLogs...)
 	}
 
 	sort.Slice(all, func(i, j int) bool {
