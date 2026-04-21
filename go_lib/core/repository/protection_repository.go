@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"go_lib/core/logging"
@@ -79,6 +81,12 @@ type ProtectionRepository struct {
 const (
 	DefaultProtectionPolicyAssetID   = "__default_protection_policy__"
 	DefaultProtectionPolicyAssetName = "__default_protection_policy__"
+)
+
+var (
+	enabledConfigLogMu          sync.Mutex
+	lastEnabledConfigSignature  string
+	enabledConfigLogInitialized bool
 )
 
 func IsDefaultProtectionPolicyAssetID(assetID string) bool {
@@ -295,8 +303,72 @@ func (r *ProtectionRepository) GetEnabledProtectionConfigs() ([]*ProtectionConfi
 		configs = []*ProtectionConfig{}
 	}
 
-	logging.Info("Enabled protection configs count: %d", len(configs))
+	if shouldLogEnabledProtectionConfigs(configs) {
+		logging.Info("Enabled protection configs count: %d", len(configs))
+	}
 	return configs, nil
+}
+
+// shouldLogEnabledProtectionConfigs 仅在启用配置内容变化时返回 true。
+func shouldLogEnabledProtectionConfigs(configs []*ProtectionConfig) bool {
+	signature := buildEnabledProtectionConfigsSignature(configs)
+
+	enabledConfigLogMu.Lock()
+	defer enabledConfigLogMu.Unlock()
+
+	if enabledConfigLogInitialized && lastEnabledConfigSignature == signature {
+		return false
+	}
+	lastEnabledConfigSignature = signature
+	enabledConfigLogInitialized = true
+	return true
+}
+
+// buildEnabledProtectionConfigsSignature 构造启用配置的稳定签名，忽略查询结果顺序。
+func buildEnabledProtectionConfigsSignature(configs []*ProtectionConfig) string {
+	if len(configs) == 0 {
+		return "empty"
+	}
+
+	fingerprints := make([]string, 0, len(configs))
+	for _, config := range configs {
+		if config == nil {
+			fingerprints = append(fingerprints, "nil")
+			continue
+		}
+		fingerprints = append(fingerprints, buildProtectionConfigFingerprint(config))
+	}
+	sort.Strings(fingerprints)
+	return strings.Join(fingerprints, "||")
+}
+
+// buildProtectionConfigFingerprint 构造单个配置指纹，用于检测同数量下的内容变化。
+func buildProtectionConfigFingerprint(config *ProtectionConfig) string {
+	botModelConfig := ""
+	if config.BotModelConfig != nil {
+		if jsonBytes, err := json.Marshal(config.BotModelConfig); err == nil {
+			botModelConfig = string(jsonBytes)
+		}
+	}
+
+	return fmt.Sprintf(
+		"%s|%s|%t|%t|%t|%s|%s|%d|%d|%s|%s|%s|%s|%s|%s",
+		config.AssetID,
+		config.AssetName,
+		config.Enabled,
+		config.AuditOnly,
+		config.SandboxEnabled,
+		config.GatewayBinaryPath,
+		config.GatewayConfigPath,
+		config.SingleSessionTokenLimit,
+		config.DailyTokenLimit,
+		config.PathPermission,
+		config.NetworkPermission,
+		config.ShellPermission,
+		botModelConfig,
+		config.CreatedAt,
+		config.UpdatedAt,
+	)
 }
 
 // GetAllProtectionConfigs 获取所有保护配置
