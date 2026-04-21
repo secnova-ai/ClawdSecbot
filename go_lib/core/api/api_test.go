@@ -1857,6 +1857,65 @@ func TestRiskInfo_JSONStructure(t *testing.T) {
 	}
 }
 
+func TestRiskTitleKey_AliasAndKnownIDs(t *testing.T) {
+	cases := []struct {
+		riskID  string
+		wantKey string
+	}{
+		{riskID: "gateway_bind_unsafe", wantKey: "riskNonLoopbackBinding"},
+		{riskID: "riskNoAuth", wantKey: "riskNoAuth"},
+		{riskID: "gateway_auth_disabled", wantKey: "riskNoAuth"},
+		{riskID: "openclaw_1click_rce_vulnerability", wantKey: "riskOneClickRce"},
+		{riskID: "nullclaw_1click_rce_vulnerability", wantKey: "riskOneClickRce"},
+		{riskID: "model_base_url_public", wantKey: "riskModelBaseUrlPublic"},
+	}
+
+	for _, tc := range cases {
+		if got := riskTitleKey(tc.riskID); got != tc.wantKey {
+			t.Fatalf("riskTitleKey(%q) = %q, want %q", tc.riskID, got, tc.wantKey)
+		}
+	}
+}
+
+func TestRiskDescriptionKey_ExportMapping(t *testing.T) {
+	cases := []struct {
+		riskID  string
+		wantKey string
+	}{
+		{riskID: "gateway_bind_unsafe", wantKey: "riskNonLoopbackBindingDesc"},
+		{riskID: "riskNoAuth", wantKey: "riskNoAuthDesc"},
+		{riskID: "gateway_auth_disabled", wantKey: "riskNoAuthDesc"},
+		{riskID: "openclaw_1click_rce_vulnerability", wantKey: "riskOneClickRceDesc"},
+		{riskID: "nullclaw_1click_rce_vulnerability", wantKey: "riskOneClickRceDesc"},
+		{riskID: "terminal_backend_local", wantKey: "riskTerminalBackendLocalDesc"},
+	}
+
+	for _, tc := range cases {
+		if got := riskDescriptionKey(tc.riskID); got != tc.wantKey {
+			t.Fatalf("riskDescriptionKey(%q) = %q, want %q", tc.riskID, got, tc.wantKey)
+		}
+	}
+}
+
+func TestReplaceMitigationDescWithKey(t *testing.T) {
+	input := []MitigationInfo{
+		{Desc: "old-1", Command: "cmd-1"},
+		{Desc: "old-2", Command: "cmd-2"},
+	}
+	infos := replaceMitigationDescWithKey(input, "riskNonLoopbackBindingDesc")
+	if len(infos) != 2 {
+		t.Fatalf("len(infos) = %d, want 2", len(infos))
+	}
+	for i, info := range infos {
+		if info.Desc != "riskNonLoopbackBindingDesc" {
+			t.Fatalf("infos[%d].Desc = %q, want %q", i, info.Desc, "riskNonLoopbackBindingDesc")
+		}
+		if info.Command != input[i].Command {
+			t.Fatalf("infos[%d].Command = %q, want %q", i, info.Command, input[i].Command)
+		}
+	}
+}
+
 func TestSkillIssue_JSONStructure(t *testing.T) {
 	issue := SkillIssue{
 		Type:     "prompt_injection",
