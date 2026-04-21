@@ -346,3 +346,75 @@ func TestSaveHomeDirectoryPermission(t *testing.T) {
 		t.Errorf("Permission mismatch: authorized=%d, path=%s", authorized, path)
 	}
 }
+
+func TestShouldLogEnabledProtectionConfigs_ContentChangeWithSameCount(t *testing.T) {
+	enabledConfigLogMu.Lock()
+	lastEnabledConfigSignature = ""
+	enabledConfigLogInitialized = false
+	enabledConfigLogMu.Unlock()
+
+	base := []*ProtectionConfig{
+		{
+			AssetName:               "openclaw",
+			AssetID:                 "asset-1",
+			Enabled:                 true,
+			SandboxEnabled:          true,
+			SingleSessionTokenLimit: 1000,
+			DailyTokenLimit:         5000,
+			PathPermission:          `{"allowed":["/tmp"]}`,
+		},
+	}
+
+	if !shouldLogEnabledProtectionConfigs(base) {
+		t.Fatal("Expected first evaluation to require logging")
+	}
+
+	if shouldLogEnabledProtectionConfigs(base) {
+		t.Fatal("Expected same content to skip logging")
+	}
+
+	// 数量不变但配置内容变化，仍应触发日志。
+	changed := []*ProtectionConfig{
+		{
+			AssetName:               "openclaw",
+			AssetID:                 "asset-1",
+			Enabled:                 true,
+			SandboxEnabled:          true,
+			SingleSessionTokenLimit: 2000,
+			DailyTokenLimit:         5000,
+			PathPermission:          `{"allowed":["/tmp"]}`,
+		},
+	}
+
+	if !shouldLogEnabledProtectionConfigs(changed) {
+		t.Fatal("Expected content change with same count to require logging")
+	}
+}
+
+func TestBuildEnabledProtectionConfigsSignature_OrderInsensitive(t *testing.T) {
+	configA := &ProtectionConfig{
+		AssetName:      "openclaw",
+		AssetID:        "asset-a",
+		Enabled:        true,
+		PathPermission: `{"allowed":["/a"]}`,
+	}
+	configB := &ProtectionConfig{
+		AssetName:      "hermes",
+		AssetID:        "asset-b",
+		Enabled:        true,
+		PathPermission: `{"allowed":["/b"]}`,
+	}
+
+	signature1 := buildEnabledProtectionConfigsSignature([]*ProtectionConfig{
+		configA,
+		configB,
+	})
+	signature2 := buildEnabledProtectionConfigsSignature([]*ProtectionConfig{
+		configB,
+		configA,
+	})
+
+	if signature1 != signature2 {
+		t.Fatalf("Expected signature to be order-insensitive, got %q and %q", signature1, signature2)
+	}
+}

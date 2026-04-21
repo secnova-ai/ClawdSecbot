@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"testing"
 
@@ -284,6 +285,57 @@ func TestScanRepository_RiskWithMitigation(t *testing.T) {
 	}
 	if len(risk.Mitigation.Suggestions) != 1 {
 		t.Fatalf("Expected 1 suggestion group, got %d", len(risk.Mitigation.Suggestions))
+	}
+}
+
+// TestScanRepository_RetainLatestScans 验证仅保留最近固定数量的扫描记录及其关联数据
+func TestScanRepository_RetainLatestScans(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	repo := NewScanRepository(db)
+
+	const totalScans = 25
+	for i := 1; i <= totalScans; i++ {
+		record := &ScanRecord{
+			ConfigFound: i%2 == 0,
+			ConfigPath:  fmt.Sprintf("/tmp/scan-%d.json", i),
+			Assets: []core.Asset{
+				{
+					Name: fmt.Sprintf("asset-%d", i),
+					Type: "Service",
+				},
+			},
+			Risks: []core.Risk{},
+		}
+		if err := repo.SaveScanResult(record); err != nil {
+			t.Fatalf("SaveScanResult #%d failed: %v", i, err)
+		}
+	}
+
+	var scanCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM scans`).Scan(&scanCount); err != nil {
+		t.Fatalf("Failed to count scans: %v", err)
+	}
+	if scanCount != retainedScanCount {
+		t.Fatalf("Expected %d scans retained, got %d", retainedScanCount, scanCount)
+	}
+
+	var assetCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM assets`).Scan(&assetCount); err != nil {
+		t.Fatalf("Failed to count assets: %v", err)
+	}
+	if assetCount != retainedScanCount {
+		t.Fatalf("Expected %d assets retained, got %d", retainedScanCount, assetCount)
+	}
+
+	var oldestRetainedConfigPath string
+	if err := db.QueryRow(`SELECT config_path FROM scans ORDER BY id ASC LIMIT 1`).Scan(&oldestRetainedConfigPath); err != nil {
+		t.Fatalf("Failed to query oldest retained scan: %v", err)
+	}
+	expectedOldestRetained := "/tmp/scan-6.json"
+	if oldestRetainedConfigPath != expectedOldestRetained {
+		t.Fatalf("Expected oldest retained config_path %s, got %s", expectedOldestRetained, oldestRetainedConfigPath)
 	}
 }
 

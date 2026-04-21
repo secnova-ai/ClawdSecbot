@@ -10,6 +10,7 @@ import '../utils/app_logger.dart';
 /// Scan DB facade delegated to Go layer through transport.
 class ScanDatabaseService {
   static final ScanDatabaseService _instance = ScanDatabaseService._internal();
+  String? _lastLoadedScanSignature;
 
   factory ScanDatabaseService() => _instance;
 
@@ -77,8 +78,9 @@ class ScanDatabaseService {
         );
       }
 
-      appLogger.info(
-        '[ScanDB] Loaded latest scan via Go layer: ${assets.length} assets, ${risks.length} risks',
+      _logLoadedLatestScanIfChanged(
+        assetCount: assets.length,
+        riskCount: risks.length,
       );
       return ScanResult(
         config: configJSON != null
@@ -94,6 +96,32 @@ class ScanDatabaseService {
       appLogger.error('[ScanDB] Failed to parse latest scan result', e);
       return null;
     }
+  }
+
+  /// 仅在扫描结果发生变化时记录加载日志，避免重复日志占用磁盘空间。
+  void _logLoadedLatestScanIfChanged({
+    required int assetCount,
+    required int riskCount,
+  }) {
+    final signature = _buildLatestScanSignature(
+      assetCount: assetCount,
+      riskCount: riskCount,
+    );
+    if (_lastLoadedScanSignature == signature) {
+      return;
+    }
+    _lastLoadedScanSignature = signature;
+    appLogger.info(
+      '[ScanDB] Loaded latest scan via Go layer: $assetCount assets, $riskCount risks',
+    );
+  }
+
+  /// 构造最新扫描结果签名，用于判断数据是否变化。
+  String _buildLatestScanSignature({
+    required int assetCount,
+    required int riskCount,
+  }) {
+    return '$assetCount|$riskCount';
   }
 
   Future<Set<String>> getScannedSkillHashes() async {
