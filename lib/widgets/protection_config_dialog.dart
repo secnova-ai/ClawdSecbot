@@ -172,12 +172,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
   final TextEditingController _networkOutboundInputController =
       TextEditingController();
 
-  // 网络权限 - 入栈 (inbound)
-  PermissionMode _networkInboundMode = PermissionMode.blacklist;
-  final List<String> _networkInboundList = [];
-  final TextEditingController _networkInboundInputController =
-      TextEditingController();
-
   // Shell权限
   PermissionMode _shellMode = PermissionMode.blacklist;
   final List<String> _shellList = [];
@@ -279,7 +273,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     _dailyDisplayController.dispose();
     _pathInputController.dispose();
     _networkOutboundInputController.dispose();
-    _networkInboundInputController.dispose();
     _shellInputController.dispose();
     _sensitiveActionsInputController.dispose();
     super.dispose();
@@ -321,10 +314,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       _networkOutboundMode = _config.networkPermission.outbound.mode;
       _networkOutboundList.clear();
       _networkOutboundList.addAll(_config.networkPermission.outbound.addresses);
-      // 网络权限 - 入栈
-      _networkInboundMode = _config.networkPermission.inbound.mode;
-      _networkInboundList.clear();
-      _networkInboundList.addAll(_config.networkPermission.inbound.addresses);
 
       // Shell权限：前端仅保留黑名单模式
       _shellMode = PermissionMode.blacklist;
@@ -641,9 +630,10 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
             mode: _networkOutboundMode,
             addresses: List.from(_networkOutboundList),
           ),
+          // 网络入栈配置已下线：固定为空，避免继续写入无效规则。
           inbound: DirectionalNetworkConfig(
-            mode: _networkInboundMode,
-            addresses: List.from(_networkInboundList),
+            mode: PermissionMode.blacklist,
+            addresses: const [],
           ),
         ),
         shellPermission: ShellPermissionConfig(
@@ -1596,7 +1586,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                   ),
                   const SizedBox(height: 20),
 
-                  // 网络权限设置（出栈 + 入栈）
+                  // 网络权限设置（仅出栈）
                   _buildNetworkPermissionSection(l10n),
                   const SizedBox(height: 20),
 
@@ -2222,7 +2212,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     );
   }
 
-  /// 构建网络权限设置区块（出栈 + 入栈）
+  /// 构建网络权限设置区块（仅出栈）
   Widget _buildNetworkPermissionSection(AppLocalizations l10n) {
     final isMacSandbox = isRuntimeMacOS && _sandboxEnabled;
     final placeholder = isMacSandbox
@@ -2290,26 +2280,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
             ),
             onRemove: (index) =>
                 setState(() => _networkOutboundList.removeAt(index)),
-          ),
-          const SizedBox(height: 16),
-
-          // 入栈 (Inbound) 子区块
-          _buildDirectionalNetworkBlock(
-            title: l10n.networkInboundTitle,
-            desc: l10n.networkInboundDesc,
-            icon: LucideIcons.arrowDownLeft,
-            mode: _networkInboundMode,
-            onModeChanged: (mode) => setState(() => _networkInboundMode = mode),
-            items: _networkInboundList,
-            inputController: _networkInboundInputController,
-            inputHint: placeholder,
-            onAdd: () => _addNetworkAddress(
-              _networkInboundInputController,
-              _networkInboundList,
-              l10n,
-            ),
-            onRemove: (index) =>
-                setState(() => _networkInboundList.removeAt(index)),
           ),
         ],
       ),
