@@ -824,7 +824,7 @@ func appendTruthRecordAuditToExport(record proxy.TruthRecord) {
 	if server == nil {
 		return
 	}
-	record = proxy.BuildAuditDeltaTruthRecordForSink(record, "export_audit_jsonl")
+	// 使用当前审计链路的完成态 TruthRecord 快照直接导出，避免依赖已移除的增量转换函数。
 
 	toolCalls := make([]api.ToolCall, 0, len(record.ToolCalls))
 	for _, tc := range record.ToolCalls {
