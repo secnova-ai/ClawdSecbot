@@ -18,6 +18,12 @@ func setupTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
+	// SQLite 的 PRAGMA 是连接级设置，限制连接池为 1 以确保每次复用同一连接。
+	db.SetMaxOpenConns(1)
+	// 开启外键约束，与生产 InitDB 行为一致，保证 ON DELETE CASCADE 生效。
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatalf("Failed to enable foreign keys: %v", err)
+	}
 	if err := createAssetTables(db); err != nil {
 		t.Fatalf("Failed to create tables: %v", err)
 	}

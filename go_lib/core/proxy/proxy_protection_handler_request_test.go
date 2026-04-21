@@ -121,12 +121,17 @@ func TestExtractCurrentRoundRecordMessages_UsesLastUserAsRoundStart(t *testing.T
 }
 
 func TestOnRequest_QuotaBlockKeepsAuditRequestAndAssistantMessage(t *testing.T) {
+	// 构造会话延续场景：上一轮已累计 120 token（超过 100 限额），
+	// 且上一轮最近消息为 system 消息，当前请求在其后追加 user，
+	// detectConversationContinuation 应识别为延续并命中会话配额拦截。
 	pp := &ProxyProtection{
 		records:                       NewRecordStore(),
 		singleSessionTokenLimit:       100,
-		totalTokens:                   180,
-		baselineTotalTokens:           0,
-		currentConversationTokenUsage: 0,
+		currentConversationTokenUsage: 120,
+		lastRecentMessages: []NormalizedMessage{
+			{Role: "system", Content: "You are a secure assistant."},
+		},
+		lastRecentMessageCount: 1,
 	}
 
 	req, rawBody := mustParseChatRequest(t, `{

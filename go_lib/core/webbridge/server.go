@@ -279,7 +279,7 @@ func (s *Server) handleBootstrapInit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	initPathsResult, err := core.Initialize(req.WorkspaceDirPrefix, req.HomeDir)
+	initPathsResult, err := core.Initialize(req.WorkspaceDirPrefix, req.HomeDir, "")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
 		return
@@ -406,7 +406,7 @@ func (s *Server) dispatch(method string, req rpcRequest) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		result, callErr := core.Initialize(workspaceDir, homeDir)
+		result, callErr := core.Initialize(workspaceDir, homeDir, "")
 		if callErr != nil {
 			return toJSON(map[string]interface{}{"success": false, "error": callErr.Error()}), nil
 		}

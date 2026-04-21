@@ -45,6 +45,15 @@ func GetPluginManager() *PluginManager {
 	return globalPluginManager
 }
 
+// ResetForTest 清空插件管理器的注册与实例表，仅供测试使用。
+// 保留单例本身不重建，避免与外部持有的引用失配。
+func (pm *PluginManager) ResetForTest() {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.registeredPlugins = make(map[string]BotPlugin)
+	pm.instances = make(map[string]*AssetPluginInstance)
+}
+
 // Register 注册插件类型能力（按资产名称唯一）
 func (pm *PluginManager) Register(plugin BotPlugin) {
 	pm.mu.Lock()

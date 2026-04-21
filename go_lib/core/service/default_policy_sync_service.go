@@ -89,6 +89,13 @@ func SyncDefaultProtectionPolicyForAssets(assets []core.Asset) error {
 			config.AssetName = existingConfig.AssetName
 		}
 
+		// 新扫描到的资产（无历史配置）不携带 BotModelConfig：
+		// 用户尚未为该资产配置模型，继承默认策略的其他字段即可，模型留空待用户后续配置。
+		// 已标记 InheritsDefaultPolicy=true 的老资产，保留从默认克隆的全字段（含 BotModelConfig）。
+		if existingConfig == nil {
+			config.BotModelConfig = nil
+		}
+
 		// 资产继承默认策略时，保持默认策略的 Enabled/AuditOnly 语义。
 		// 这里不做“有模型即强制启用”的覆盖，避免默认策略为 disabled 时被误开启。
 
@@ -277,6 +284,13 @@ func applyProtectionPolicyRuntimeForSync(previousConfig, config *repository.Prot
 	oldSandboxEnabled := previousConfig != nil && previousConfig.SandboxEnabled
 
 	if !wasEnabled && config.Enabled {
+		// 没有 BotModelConfig 时静默跳过代理启动：
+		// 典型场景是新扫描资产继承默认策略但尚未配置模型，此时无法启动代理，
+		// 也不应把同步流程标记为失败（业务规则：不做有模型即强制启用的覆盖）。
+		if config.BotModelConfig == nil {
+			logging.Info("Default policy sync: skip starting proxy for asset %s/%s due to missing bot model config", config.AssetName, config.AssetID)
+			return nil
+		}
 		protectionConfig, err := buildPolicyProxyConfigForSync(config)
 		if err != nil {
 			return err
@@ -314,8 +328,10 @@ func applyProtectionPolicyRuntimeForSync(previousConfig, config *repository.Prot
 	}
 
 	if config.SandboxEnabled || oldSandboxEnabled {
+		// 沙箱同步失败不阻断策略下发：与 handler_protection 的运行时同步保持一致，
+		// 部分插件不提供 gateway_sandbox 能力属正常场景。
 		if syncResult := core.SyncGatewaySandboxByAssetAndPlugin(config.AssetName, config.AssetID); strings.Contains(syncResult, `"success":false`) {
-			return fmt.Errorf("failed to sync gateway sandbox for botId=%s: %s", config.AssetID, syncResult)
+			logging.Warning("Default policy sync: failed to sync gateway sandbox for asset %s/%s: %s", config.AssetName, config.AssetID, syncResult)
 		}
 	}
 	return nil
