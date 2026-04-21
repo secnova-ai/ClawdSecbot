@@ -935,11 +935,12 @@ run_build_stage() {
     for f in "$PROJECT_ROOT/plugins/"*.dylib "$PROJECT_ROOT/plugins/"*.h; do
         [[ -f "$f" ]] && cp "$f" "$APP_BUNDLE/Contents/Resources/plugins/"
     done
-    # 将卸载脚本复制到 app 可执行文件同级目录。
+    # 卸载脚本放在 Contents/Resources/ 下（不可放 Contents/MacOS/，否则
+    # codesign 会把其当作需要签名的可执行子组件，shell 脚本无法签名导致失败）。
     local uninstall_script="$PROJECT_ROOT/scripts/uninstall/uninstall_unix.sh"
     if [[ -f "$uninstall_script" ]]; then
-        cp "$uninstall_script" "$APP_BUNDLE/Contents/MacOS/uninstall.sh"
-        chmod +x "$APP_BUNDLE/Contents/MacOS/uninstall.sh"
+        cp "$uninstall_script" "$APP_BUNDLE/Contents/Resources/uninstall.sh"
+        chmod +x "$APP_BUNDLE/Contents/Resources/uninstall.sh"
     else
         warn "uninstall script not found, skip copy: $uninstall_script"
     fi
