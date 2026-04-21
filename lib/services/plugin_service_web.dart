@@ -241,8 +241,7 @@ class PluginService {
   }
 
   String? _resolveSourcePluginFromArgs(Map<String, Object>? args) {
-    final fromArgs =
-        args?['source_plugin'] ?? args?['asset_name'] ?? args?['assetName'];
+    final fromArgs = args?['source_plugin'];
     final normalized = fromArgs?.toString().trim();
     if (normalized == null || normalized.isEmpty) {
       return null;
