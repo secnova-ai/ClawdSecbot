@@ -38,5 +38,5 @@ type BotPlugin interface {
 ## Rules
 
 1. Do not remove legacy `asset_name` / `asset_id` fields in current APIs.
-2. `MitigateRisk` requests must include `source_plugin`; no multi-plugin fallback routing.
+2. `MitigateRisk` requests must include `asset_id`; routing is by asset instance, no plugin-name fallback traversal.
 3. No legacy fallback for old `asset_id=""` records in plugin runtime path.

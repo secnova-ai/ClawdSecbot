@@ -195,7 +195,7 @@ func AssessAllRisksFromString(scannedHashesJSON string) (map[string]interface{},
 // ========== 风险缓解路由函数 ==========
 
 // MitigateRiskByPlugin routes a mitigation request to the correct plugin via PluginManager.
-// riskInfoJSON must contain a "source_plugin" field to identify the target plugin.
+// riskInfoJSON must contain an "asset_id" field to identify the target asset instance.
 func MitigateRiskByPlugin(riskInfoJSON string) string {
 	pm := GetPluginManager()
 	return pm.MitigateRisk(riskInfoJSON)

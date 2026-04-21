@@ -67,6 +67,7 @@ class ScanDatabaseService {
           riskMap['source_plugin'] as String?,
           args,
         );
+        final assetID = _resolveAssetID(riskMap['asset_id'] as String?, args);
         risks.add(
           RiskInfo(
             id: riskMap['id'] ?? 'unknown',
@@ -75,6 +76,7 @@ class ScanDatabaseService {
             level: _parseRiskLevel(riskMap['level']),
             icon: _getIconForRisk(riskMap['level']),
             args: args,
+            assetID: assetID,
             mitigation: riskMap['mitigation'] != null
                 ? Mitigation.fromJson(riskMap['mitigation'])
                 : null,
@@ -113,6 +115,19 @@ class ScanDatabaseService {
       return normalized;
     }
     final fromArgs = args?['source_plugin'];
+    final fallback = fromArgs?.toString().trim();
+    if (fallback == null || fallback.isEmpty) {
+      return null;
+    }
+    return fallback;
+  }
+
+  String? _resolveAssetID(String? assetID, Map<String, Object>? args) {
+    final normalized = assetID?.trim();
+    if (normalized != null && normalized.isNotEmpty) {
+      return normalized;
+    }
+    final fromArgs = args?['asset_id'];
     final fallback = fromArgs?.toString().trim();
     if (fallback == null || fallback.isEmpty) {
       return null;

@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 
 	"go_lib/core"
 	"go_lib/core/logging"
@@ -35,6 +36,7 @@ func SaveScanResult(resultJSON string) map[string]interface{} {
 		}
 		risks = append(risks, risk)
 	}
+	backfillRiskAssetIDs(input.Assets, risks)
 
 	record := &repository.ScanRecord{
 		ConfigFound: input.ConfigFound,
@@ -69,8 +71,88 @@ func GetLatestScanResult() map[string]interface{} {
 	if record == nil {
 		return successDataResult(nil)
 	}
+	backfillRiskAssetIDs(record.Assets, record.Risks)
 
 	return successDataResult(record)
+}
+
+func backfillRiskAssetIDs(assets []core.Asset, risks []core.Risk) {
+	if len(assets) == 0 || len(risks) == 0 {
+		return
+	}
+
+	pluginAssetIDs := make(map[string][]string)
+	for _, asset := range assets {
+		assetID := strings.TrimSpace(asset.ID)
+		if assetID == "" {
+			continue
+		}
+
+		pluginKey := normalizePluginKey(asset.SourcePlugin)
+		if pluginKey == "" {
+			pluginKey = normalizePluginKey(asset.Name)
+		}
+		if pluginKey == "" {
+			continue
+		}
+
+		pluginAssetIDs[pluginKey] = appendUniqueString(pluginAssetIDs[pluginKey], assetID)
+	}
+
+	for i := range risks {
+		if strings.TrimSpace(risks[i].AssetID) != "" {
+			continue
+		}
+
+		if risks[i].Args != nil {
+			if existing := strings.TrimSpace(toString(risks[i].Args["asset_id"])); existing != "" {
+				risks[i].AssetID = existing
+				continue
+			}
+		}
+
+		pluginKey := normalizePluginKey(risks[i].SourcePlugin)
+		if pluginKey == "" && risks[i].Args != nil {
+			pluginKey = normalizePluginKey(toString(risks[i].Args["source_plugin"]))
+		}
+		if pluginKey == "" && risks[i].Args != nil {
+			pluginKey = normalizePluginKey(toString(risks[i].Args["asset_name"]))
+		}
+		if pluginKey == "" {
+			continue
+		}
+
+		ids := pluginAssetIDs[pluginKey]
+		if len(ids) != 1 {
+			continue
+		}
+
+		if risks[i].Args == nil {
+			risks[i].Args = map[string]interface{}{}
+		}
+		risks[i].AssetID = ids[0]
+		risks[i].Args["asset_id"] = ids[0]
+	}
+}
+
+func appendUniqueString(list []string, value string) []string {
+	for _, item := range list {
+		if item == value {
+			return list
+		}
+	}
+	return append(list, value)
+}
+
+func normalizePluginKey(v string) string {
+	return strings.ToLower(strings.TrimSpace(v))
+}
+
+func toString(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // ========== 技能扫描操作 ==========

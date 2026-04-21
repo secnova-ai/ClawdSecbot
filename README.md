@@ -299,7 +299,7 @@ Plugins auto-register via `init()` and are managed through the `PluginManager`. 
 - **Auto-registration with duplicate detection** — Plugins register themselves in `init()`, skipped if already registered
 - **Multi-instance asset support** — Protection methods accept `assetID` for per-instance state management
 - **Lifecycle hooks** — `ProtectionLifecycleHooks` interface for pre-start/post-stop customization
-- **Risk mitigation routing** — Risks are automatically tagged with `SourcePlugin` for proper routing to the originating plugin
+- **Risk mitigation routing** — Mitigation requests are routed by `asset_id` to the bound plugin instance
 
 Plugin adaptation guide for Openclaw-like bots:
 

@@ -99,3 +99,4 @@ go_lib/go_lib
 .gocache-windows
 AGENTS.md
 export/
+third_party/

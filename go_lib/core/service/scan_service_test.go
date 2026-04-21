@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"go_lib/core"
 	"go_lib/core/repository"
 )
 
@@ -88,6 +89,102 @@ func TestGetLatestScanResult_EmptyDB(t *testing.T) {
 	}
 	if result["data"] != nil {
 		t.Errorf("Expected nil data for empty DB, got: %v", result["data"])
+	}
+}
+
+func TestSaveScanResult_BackfillsRiskAssetIDBeforePersist(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	result := SaveScanResult(`{
+		"config_found": true,
+		"assets": [
+			{
+				"id": "openclaw:abc123",
+				"name": "Openclaw",
+				"source_plugin": "Openclaw",
+				"type": "Service"
+			}
+		],
+		"risks": [
+			{
+				"id": "config_dir_perm_unsafe",
+				"title": "Config Directory Permission Unsafe",
+				"level": "high",
+				"source_plugin": "Openclaw",
+				"args": {"asset_name": "Openclaw"}
+			}
+		]
+	}`)
+	if result["success"] != true {
+		t.Fatalf("Expected success=true, got: %v", result)
+	}
+
+	repo := repository.NewScanRepository(nil)
+	record, err := repo.GetLatestScanResult()
+	if err != nil {
+		t.Fatalf("GetLatestScanResult failed: %v", err)
+	}
+	if record == nil || len(record.Risks) != 1 {
+		t.Fatalf("Expected 1 risk, got %+v", record)
+	}
+
+	if got := record.Risks[0].AssetID; got != "openclaw:abc123" {
+		t.Fatalf("Expected persisted risk asset_id openclaw:abc123, got %q", got)
+	}
+	if got := record.Risks[0].Args["asset_id"]; got != "openclaw:abc123" {
+		t.Fatalf("Expected persisted args.asset_id openclaw:abc123, got %#v", got)
+	}
+}
+
+func TestGetLatestScanResult_BackfillsLegacyRiskAssetIDAtRead(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := repository.NewScanRepository(nil)
+	err := repo.SaveScanResult(&repository.ScanRecord{
+		ConfigFound: true,
+		Assets: []core.Asset{
+			{
+				ID:           "openclaw:abc123",
+				Name:         "Openclaw",
+				SourcePlugin: "Openclaw",
+				Type:         "Service",
+			},
+		},
+		Risks: []core.Risk{
+			{
+				ID:           "config_dir_perm_unsafe",
+				Title:        "Config Directory Permission Unsafe",
+				Level:        core.RiskLevelHigh,
+				SourcePlugin: "Openclaw",
+				Args: map[string]interface{}{
+					"asset_name": "Openclaw",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveScanResult via repository failed: %v", err)
+	}
+
+	result := GetLatestScanResult()
+	if result["success"] != true {
+		t.Fatalf("Expected success=true, got: %v", result)
+	}
+
+	record, ok := result["data"].(*repository.ScanRecord)
+	if !ok || record == nil {
+		t.Fatalf("Expected *ScanRecord data, got %T", result["data"])
+	}
+	if len(record.Risks) != 1 {
+		t.Fatalf("Expected 1 risk, got %d", len(record.Risks))
+	}
+	if got := record.Risks[0].AssetID; got != "openclaw:abc123" {
+		t.Fatalf("Expected read-time backfilled asset_id openclaw:abc123, got %q", got)
+	}
+	if got := record.Risks[0].Args["asset_id"]; got != "openclaw:abc123" {
+		t.Fatalf("Expected read-time backfilled args.asset_id openclaw:abc123, got %#v", got)
 	}
 }
 

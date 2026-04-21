@@ -26,8 +26,8 @@ Use deterministic `asset_id` for instance routing.
 
 Risk mitigation is strict:
 
-1. Every risk must contain `source_plugin`.
-2. Host routes mitigation only to the named plugin.
+1. Every mitigatable risk must contain `asset_id` (or provide it in `args.asset_id`).
+2. Host routes mitigation only by `asset_id` to the bound plugin instance.
 3. No fallback traversal across all plugins.
 
 ## 4. Testing

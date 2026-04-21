@@ -32,6 +32,7 @@
 - Go 业务改动必须补充测试；至少覆盖改动涉及的核心逻辑（`service`/`repository`/`proxy`）。
 - Flutter 生产日志使用 `appLogger`；Go 使用 `core/logging`。
 - 非明确需求，不做隐式前向兼容和数据迁移。
+- 涉及数据库迁移逻辑的改动，必须同步更新当前应用版本号（`pubspec.yaml`），禁止“迁移已改但版本未升”。
 - 单文件行数硬上限：1500 行。对已超限文件，若继续改动，必须在同次提交中拆分或净减少体积；紧急修复可豁免一次，但后续必须补拆分。
 - 涉及耗时操作的实现与评审，必须遵循 [`_rules/ui_non_blocking_async.md`](ui_non_blocking_async.md)。
 

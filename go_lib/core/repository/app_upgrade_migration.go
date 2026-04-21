@@ -55,6 +55,11 @@ var databaseVersionMigrations = []databaseVersionMigration{
 		toVersion:   "1.0.2",
 		run:         migrateDatabaseFrom1_0_1To1_0_2,
 	},
+	{
+		fromVersion: "1.0.2",
+		toVersion:   "1.0.3",
+		run:         migrateDatabaseFrom1_0_2To1_0_3,
+	},
 }
 
 func initializeDatabaseState(db *sql.DB, currentVersion, versionFilePath string) (*DBInitSummary, error) {
@@ -542,5 +547,43 @@ func parseVersionParts(version string) []int {
 func migrateDatabaseFrom1_0_1To1_0_2(db *sql.DB) error {
 	logging.Info("Migrating audit_logs table: adding TruthRecord columns")
 	ensureAuditLogTruthRecordColumns(db)
+	return nil
+}
+
+// migrateDatabaseFrom1_0_2To1_0_3 rebuilds audit and risk-detection tables.
+// Decision:
+//  1. audit_logs: schema and semantics changed, keep no legacy rows.
+//  2. risk detection (scans/assets/risks/skill_scans): no stable 1:1 mapping
+//     for the new runtime semantics, so destructive rebuild is safer.
+func migrateDatabaseFrom1_0_2To1_0_3(db *sql.DB) error {
+	logging.Info("Migrating database 1.0.2 -> 1.0.3: rebuilding audit and risk tables")
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin migration transaction failed: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Drop child tables before parent tables to avoid FK-order issues.
+	tablesToDrop := []string{
+		"audit_logs",
+		"assets",
+		"risks",
+		"scans",
+		"skill_scans",
+	}
+	for _, tableName := range tablesToDrop {
+		if _, err := tx.Exec(fmt.Sprintf(
+			"DROP TABLE IF EXISTS %s",
+			quoteSQLiteIdentifier(tableName),
+		)); err != nil {
+			return fmt.Errorf("drop table %s failed: %w", tableName, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration transaction failed: %w", err)
+	}
+
 	return nil
 }
