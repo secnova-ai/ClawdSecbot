@@ -60,6 +60,13 @@ class ScanDatabaseService {
       final risks = <RiskInfo>[];
       for (final r in (data['risks'] as List?) ?? const []) {
         final riskMap = r as Map<String, dynamic>;
+        final args = riskMap['args'] != null
+            ? Map<String, Object>.from(riskMap['args'])
+            : null;
+        final sourcePlugin = _resolveSourcePlugin(
+          riskMap['source_plugin'] as String?,
+          args,
+        );
         risks.add(
           RiskInfo(
             id: riskMap['id'] ?? 'unknown',
@@ -67,12 +74,11 @@ class ScanDatabaseService {
             description: riskMap['description'] ?? '',
             level: _parseRiskLevel(riskMap['level']),
             icon: _getIconForRisk(riskMap['level']),
-            args: riskMap['args'] != null
-                ? Map<String, Object>.from(riskMap['args'])
-                : null,
+            args: args,
             mitigation: riskMap['mitigation'] != null
                 ? Mitigation.fromJson(riskMap['mitigation'])
                 : null,
+            sourcePlugin: sourcePlugin,
           ),
         );
       }
@@ -88,12 +94,31 @@ class ScanDatabaseService {
         configFound: configFound,
         configPath: configPath,
         assets: assets,
-        scannedAt: scannedAtRaw != null ? DateTime.tryParse(scannedAtRaw) : null,
+        scannedAt: scannedAtRaw != null
+            ? DateTime.tryParse(scannedAtRaw)
+            : null,
       );
     } catch (e) {
       appLogger.error('[ScanDB] Failed to parse latest scan result', e);
       return null;
     }
+  }
+
+  String? _resolveSourcePlugin(
+    String? sourcePlugin,
+    Map<String, Object>? args,
+  ) {
+    final normalized = sourcePlugin?.trim();
+    if (normalized != null && normalized.isNotEmpty) {
+      return normalized;
+    }
+    final fromArgs =
+        args?['source_plugin'] ?? args?['asset_name'] ?? args?['assetName'];
+    final fallback = fromArgs?.toString().trim();
+    if (fallback == null || fallback.isEmpty) {
+      return null;
+    }
+    return fallback;
   }
 
   Future<Set<String>> getScannedSkillHashes() async {
@@ -138,7 +163,8 @@ class ScanDatabaseService {
       'skill_hash': data['skill_hash'],
       'scanned_at': data['scanned_at'],
       'safe': data['safe'] as bool? ?? false,
-      'issues': (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
+      'issues':
+          (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
           <String>[],
     };
   }
@@ -166,7 +192,8 @@ class ScanDatabaseService {
         'asset_id': data['asset_id'] ?? '',
         'scanned_at': data['scanned_at'],
         'safe': data['safe'] as bool? ?? false,
-        'issues': (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
+        'issues':
+            (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
             <String>[],
       };
     }).toList();
@@ -187,7 +214,8 @@ class ScanDatabaseService {
         'safe': data['safe'] as bool? ?? false,
         'risk_level': data['risk_level'] as String? ?? '',
         'trusted': data['trusted'] as bool? ?? false,
-        'issues': (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
+        'issues':
+            (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
             <String>[],
       };
     }).toList();

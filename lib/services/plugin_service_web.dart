@@ -198,7 +198,7 @@ class PluginService {
     RiskInfo risk,
     Map<String, dynamic> formData,
   ) async {
-    final sourcePlugin = _normalizeSourcePlugin(risk.sourcePlugin);
+    final sourcePlugin = _resolveMitigationSourcePlugin(risk);
     if (sourcePlugin == null) {
       return {
         'success': false,
@@ -215,23 +215,39 @@ class PluginService {
   }
 
   RiskInfo _parseRisk(Map<String, dynamic> json) {
-    final sourcePlugin = _normalizeSourcePlugin(
-      json['source_plugin'] as String?,
-    );
+    final args = json['args'] != null
+        ? Map<String, Object>.from(json['args'])
+        : null;
+    final sourcePlugin =
+        _normalizeSourcePlugin(json['source_plugin'] as String?) ??
+        _resolveSourcePluginFromArgs(args);
     return RiskInfo(
       id: json['id'] ?? 'unknown',
       title: json['title'] ?? 'Unknown Risk',
       description: json['description'] ?? '',
       level: _parseRiskLevel(json['level']),
       icon: _getIconForRisk(json['level']),
-      args: json['args'] != null
-          ? Map<String, Object>.from(json['args'])
-          : null,
+      args: args,
       mitigation: json['mitigation'] != null
           ? Mitigation.fromJson(json['mitigation'])
           : null,
       sourcePlugin: sourcePlugin,
     );
+  }
+
+  String? _resolveMitigationSourcePlugin(RiskInfo risk) {
+    return _normalizeSourcePlugin(risk.sourcePlugin) ??
+        _resolveSourcePluginFromArgs(risk.args);
+  }
+
+  String? _resolveSourcePluginFromArgs(Map<String, Object>? args) {
+    final fromArgs =
+        args?['source_plugin'] ?? args?['asset_name'] ?? args?['assetName'];
+    final normalized = fromArgs?.toString().trim();
+    if (normalized == null || normalized.isEmpty) {
+      return null;
+    }
+    return normalized;
   }
 
   String? _normalizeSourcePlugin(String? sourcePlugin) {
