@@ -57,6 +57,8 @@ class ProtectionConfigDialog extends StatefulWidget {
 
 class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     with SingleTickerProviderStateMixin {
+  static const String _defaultProtectionPolicyAssetID =
+      '__default_protection_policy__';
   static const String _dashboardReconnectHint =
       '在此期间Openclaw Dashboard页面会提示断开连接，稍后将恢复正常';
   static const String _defaultSavingMessage = '正在保存配置，请稍候...';
@@ -280,16 +282,38 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
 
   Future<void> _loadConfig() async {
     try {
-      final savedConfig = await ProtectionDatabaseService().getProtectionConfig(
+      final protectionDatabaseService = ProtectionDatabaseService();
+      final pluginService = PluginService();
+      final savedConfig = await protectionDatabaseService.getProtectionConfig(
         widget.assetName,
         widget.assetID,
       );
+      bool fallbackToDefaultPolicy = false;
       if (savedConfig != null) {
         _config = savedConfig;
       } else {
-        _config = ProtectionConfig.defaultConfig(
-          widget.assetName,
-        ).copyWith(assetID: widget.assetID);
+        final defaultPolicyConfig = await protectionDatabaseService
+            .getProtectionConfig(
+              widget.assetName,
+              _defaultProtectionPolicyAssetID,
+            );
+        if (defaultPolicyConfig != null) {
+          fallbackToDefaultPolicy = true;
+          _config = defaultPolicyConfig.copyWith(
+            assetName: widget.assetName,
+            assetID: widget.assetID.isNotEmpty
+                ? widget.assetID
+                : defaultPolicyConfig.assetID,
+          );
+          appLogger.info(
+            '[ProtectionConfig] Loaded default policy for dialog: '
+            'asset=${widget.assetName}, assetID=${widget.assetID}',
+          );
+        } else {
+          _config = ProtectionConfig.defaultConfig(
+            widget.assetName,
+          ).copyWith(assetID: widget.assetID);
+        }
       }
       if (widget.assetID.isNotEmpty && _config.assetID != widget.assetID) {
         _config = _config.copyWith(assetID: widget.assetID);
@@ -327,19 +351,25 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       _auditOnly = _config.auditOnly;
 
       // Load Shepherd Rules
-      final rules = await PluginService().loadAndSyncShepherdRules(
-        widget.assetName,
-        widget.assetID,
-      );
+      final rules = fallbackToDefaultPolicy
+          ? <String, List<String>>{
+              'sensitiveActions': await protectionDatabaseService
+                  .getShepherdSensitiveActions(widget.assetName, ''),
+            }
+          : await pluginService.loadAndSyncShepherdRules(
+              widget.assetName,
+              widget.assetID,
+            );
       _sensitiveActions.clear();
       _sensitiveActions.addAll(rules['sensitiveActions'] ?? const []);
 
       // Load bundled ReAct skills
-      _bundledSkills = PluginService().listBundledReActSkills();
+      _bundledSkills = pluginService.listBundledReActSkills();
 
       // Resolve whether this plugin requires bot model config.
-      final requiresBotModelConfig = await PluginService()
-          .requiresBotModelConfig(widget.assetName);
+      final requiresBotModelConfig = await pluginService.requiresBotModelConfig(
+        widget.assetName,
+      );
       _updateTabControllerForRequirement(requiresBotModelConfig);
 
       setState(() {
