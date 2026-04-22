@@ -2064,6 +2064,12 @@ abstract class AppLocalizations {
   /// **'百万'**
   String get tokenUnitM;
 
+  /// No description provided for @tokenUnitBase.
+  ///
+  /// In zh, this message translates to:
+  /// **'个'**
+  String get tokenUnitBase;
+
   /// No description provided for @tokenPresetLabel.
   ///
   /// In zh, this message translates to:

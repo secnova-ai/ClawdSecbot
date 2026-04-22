@@ -21,15 +21,27 @@ import '../services/plugin_service.dart';
 part 'protection_config_dialog_network.dart';
 
 /// Token 单位枚举
+///
+/// base 单位（multiplier=1）用于展示/编辑无法被 1000 整除的原始 token 值，
+/// 防止小于 1000 的 DB 值在 UI 上被整除为 0 而丢失显示。
 enum _TokenUnit {
+  base(1),
   k(1000),
   m(1000000);
 
   final int multiplier;
   const _TokenUnit(this.multiplier);
 
-  String label(AppLocalizations l10n) =>
-      this == k ? l10n.tokenUnitK : l10n.tokenUnitM;
+  String label(AppLocalizations l10n) {
+    switch (this) {
+      case _TokenUnit.base:
+        return l10n.tokenUnitBase;
+      case _TokenUnit.k:
+        return l10n.tokenUnitK;
+      case _TokenUnit.m:
+        return l10n.tokenUnitM;
+    }
+  }
 }
 
 /// Token 预设选项
@@ -2032,16 +2044,21 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
   }
 
   /// 原始 token 值转换为显示值（数字文本 + 单位）
+  ///
+  /// 选择能够无损表示 rawValue 的最大单位：
+  /// - 0 或负值 → 0 个（语义上等同不限制，_displayToRaw 会将 <=0 归零）
+  /// - 1000000 的整倍数 → M
+  /// - 1000 的整倍数 → K
+  /// - 其余一律使用 base 单位（个），避免被 K 整除后显示为 0 而丢失原值
   (String, _TokenUnit) _rawToDisplay(int rawValue) {
-    if (rawValue <= 0) return ('', _TokenUnit.k);
+    if (rawValue <= 0) return ('0', _TokenUnit.base);
     if (rawValue % 1000000 == 0) {
       return ('${rawValue ~/ 1000000}', _TokenUnit.m);
     }
     if (rawValue % 1000 == 0) {
       return ('${rawValue ~/ 1000}', _TokenUnit.k);
     }
-    // 兜底：以K为单位整除
-    return ('${rawValue ~/ 1000}', _TokenUnit.k);
+    return ('$rawValue', _TokenUnit.base);
   }
 
   /// 显示值转换为原始 token 值

@@ -739,6 +739,7 @@
   "tokenLimitTip": "When token usage exceeds the configured limit, the proxy will return an over-limit error and terminate the current session to prevent excessive resource consumption.",
   "tokenUnitK": "K",
   "tokenUnitM": "M",
+  "tokenUnitBase": "tokens",
   "tokenPresetLabel": "Quick select",
   "tokenNoLimit": "No limit",
   "tokenPreset50K": "50K",

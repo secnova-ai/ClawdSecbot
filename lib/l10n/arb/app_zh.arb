@@ -786,6 +786,7 @@
   "tokenLimitTip": "当Token使用超过设定上限时，代理会返回超限错误并终止当前会话，防止过度消耗资源。",
   "tokenUnitK": "千",
   "tokenUnitM": "百万",
+  "tokenUnitBase": "个",
   "tokenPresetLabel": "快捷选择",
   "tokenNoLimit": "不限制",
   "tokenPreset50K": "5万",

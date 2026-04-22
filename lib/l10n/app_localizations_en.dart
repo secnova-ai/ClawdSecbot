@@ -1203,6 +1203,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tokenUnitM => 'M';
 
   @override
+  String get tokenUnitBase => 'tokens';
+
+  @override
   String get tokenPresetLabel => 'Quick select';
 
   @override

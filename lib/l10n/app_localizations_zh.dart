@@ -1169,6 +1169,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get tokenUnitM => '百万';
 
   @override
+  String get tokenUnitBase => '个';
+
+  @override
   String get tokenPresetLabel => '快捷选择';
 
   @override
