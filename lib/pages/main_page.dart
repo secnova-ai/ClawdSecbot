@@ -2340,27 +2340,38 @@ class _MainPageState extends State<MainPage>
   }
 
   Future<void> _showSettingsDialog() async {
-    await showDialog(
-      context: context,
-      builder: (dialogContext) => SettingsDialog(
-        launchAtStartupEnabled: _launchAtStartupEnabled,
-        onSaveGeneralSettings: _saveGeneralSettings,
-        scheduledScanIntervalSeconds: _scheduledScanIntervalSeconds,
-        onClearData: () {
-          Navigator.of(dialogContext).pop();
-          showClearDataConfirmDialog();
-        },
-        onRestoreConfig: () {
-          Navigator.of(dialogContext).pop();
-          showRestoreConfigConfirmDialog();
-        },
-        onShowAbout: showAppAboutDialog,
-        onReauthorizeDirectory: () {
-          Navigator.of(dialogContext).pop();
-          reauthorizeDirectory();
-        },
-        apiServerEnabled: _apiServerEnabled,
-        onToggleApiServer: _toggleApiServer,
+    final barrierLabel = MaterialLocalizations.of(
+      context,
+    ).modalBarrierDismissLabel;
+    await Navigator.of(context).push<void>(
+      TitlebarBypassDialogRoute<void>(
+        topInset: _mainTitleBarHeight,
+        barrierDismissible: true,
+        barrierLabel: barrierLabel,
+        barrierColor: Colors.black.withValues(alpha: 0.45),
+        builder: (dialogContext) => Padding(
+          padding: EdgeInsets.only(top: _mainTitleBarHeight),
+          child: SettingsDialog(
+            launchAtStartupEnabled: _launchAtStartupEnabled,
+            onSaveGeneralSettings: _saveGeneralSettings,
+            scheduledScanIntervalSeconds: _scheduledScanIntervalSeconds,
+            onClearData: () {
+              Navigator.of(dialogContext).pop();
+              showClearDataConfirmDialog();
+            },
+            onRestoreConfig: () {
+              Navigator.of(dialogContext).pop();
+              showRestoreConfigConfirmDialog();
+            },
+            onShowAbout: showAppAboutDialog,
+            onReauthorizeDirectory: () {
+              Navigator.of(dialogContext).pop();
+              reauthorizeDirectory();
+            },
+            apiServerEnabled: _apiServerEnabled,
+            onToggleApiServer: _toggleApiServer,
+          ),
+        ),
       ),
     );
   }
