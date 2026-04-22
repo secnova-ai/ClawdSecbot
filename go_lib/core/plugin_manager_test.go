@@ -159,43 +159,6 @@ func TestPluginManager_ScanAssets_BindsInstanceByAssetID(t *testing.T) {
 	}
 }
 
-func TestPluginManager_ScanAssets_PrunesStaleInstancesForPlugin(t *testing.T) {
-	pm := &PluginManager{
-		registeredPlugins: make(map[string]BotPlugin),
-		instances:         make(map[string]*AssetPluginInstance),
-	}
-
-	p := newTestPlugin("Openclaw")
-	p.assets = []Asset{
-		{ID: "openclaw:old001", Name: "Openclaw", SourcePlugin: "Openclaw"},
-	}
-	pm.Register(p)
-
-	if _, err := pm.ScanAllAssets(); err != nil {
-		t.Fatalf("first ScanAllAssets failed: %v", err)
-	}
-	if got := pm.GetPluginByAssetID("openclaw:old001"); got == nil {
-		t.Fatal("expected old asset instance after first scan")
-	}
-
-	p.assets = []Asset{
-		{ID: "openclaw:new002", Name: "Openclaw", SourcePlugin: "Openclaw"},
-	}
-	if _, err := pm.ScanAllAssets(); err != nil {
-		t.Fatalf("second ScanAllAssets failed: %v", err)
-	}
-
-	if got := pm.GetPluginByAssetID("openclaw:old001"); got != nil {
-		t.Fatal("expected stale old asset instance to be pruned")
-	}
-	if got := pm.GetPluginByAssetID("openclaw:new002"); got == nil {
-		t.Fatal("expected new asset instance after second scan")
-	}
-	if got := pm.GetAssetInstanceCount(); got != 1 {
-		t.Fatalf("expected exactly 1 active asset instance, got %d", got)
-	}
-}
-
 func TestPluginManager_GetProtectionStatus_ResolvedByAssetID(t *testing.T) {
 	pm := &PluginManager{
 		registeredPlugins: make(map[string]BotPlugin),
@@ -217,7 +180,7 @@ func TestPluginManager_GetProtectionStatus_ResolvedByAssetID(t *testing.T) {
 	}
 }
 
-func TestPluginManager_MitigateRisk_RejectsAssetIDInvalid(t *testing.T) {
+func TestPluginManager_MitigateRisk_RejectsSourcePluginInvalid(t *testing.T) {
 	pm := &PluginManager{
 		registeredPlugins: make(map[string]BotPlugin),
 		instances:         make(map[string]*AssetPluginInstance),
@@ -226,21 +189,15 @@ func TestPluginManager_MitigateRisk_RejectsAssetIDInvalid(t *testing.T) {
 		testPlugin:    *newTestPlugin("Openclaw"),
 		handledRiskID: "logging_redact_off",
 	}
-	p.assets = []Asset{
-		{ID: "openclaw:abc123", Name: "Openclaw", SourcePlugin: "Openclaw"},
-	}
 	pm.Register(p)
-	if _, err := pm.ScanAllAssets(); err != nil {
-		t.Fatalf("ScanAllAssets failed: %v", err)
-	}
 
-	result := pm.MitigateRisk(`{"id":"logging_redact_off","asset_id":"openclaw:missing"}`)
+	result := pm.MitigateRisk(`{"id":"logging_redact_off","source_plugin":"core"}`)
 	if !strings.Contains(result, `"success":false`) {
-		t.Fatalf("expected strict failure for unknown asset_id, got: %s", result)
+		t.Fatalf("expected strict failure for unknown source plugin, got: %s", result)
 	}
 }
 
-func TestPluginManager_MitigateRisk_RejectsAssetIDMissing(t *testing.T) {
+func TestPluginManager_MitigateRisk_RejectsSourcePluginMissing(t *testing.T) {
 	pm := &PluginManager{
 		registeredPlugins: make(map[string]BotPlugin),
 		instances:         make(map[string]*AssetPluginInstance),
@@ -252,12 +209,12 @@ func TestPluginManager_MitigateRisk_RejectsAssetIDMissing(t *testing.T) {
 	pm.Register(p)
 
 	result := pm.MitigateRisk(`{"id":"logging_redact_off"}`)
-	if !strings.Contains(result, `"asset_id is required"`) {
-		t.Fatalf("expected strict asset_id required error, got: %s", result)
+	if !strings.Contains(result, `"source_plugin is required"`) {
+		t.Fatalf("expected strict source_plugin required error, got: %s", result)
 	}
 }
 
-func TestPluginManager_MitigateRisk_RoutesByAssetID(t *testing.T) {
+func TestPluginManager_MitigateRisk_RoutesBySourcePlugin(t *testing.T) {
 	pm := &PluginManager{
 		registeredPlugins: make(map[string]BotPlugin),
 		instances:         make(map[string]*AssetPluginInstance),
@@ -266,40 +223,11 @@ func TestPluginManager_MitigateRisk_RoutesByAssetID(t *testing.T) {
 		testPlugin:    *newTestPlugin("Openclaw"),
 		handledRiskID: "logging_redact_off",
 	}
-	p.assets = []Asset{
-		{ID: "openclaw:abc123", Name: "Openclaw", SourcePlugin: "Openclaw"},
-	}
 	pm.Register(p)
-	if _, err := pm.ScanAllAssets(); err != nil {
-		t.Fatalf("ScanAllAssets failed: %v", err)
-	}
 
-	result := pm.MitigateRisk(`{"id":"logging_redact_off","source_plugin":"core","asset_id":"openclaw:abc123"}`)
+	result := pm.MitigateRisk(`{"id":"logging_redact_off","source_plugin":"openclaw"}`)
 	if !strings.Contains(result, `"success":true`) {
-		t.Fatalf("expected mitigation routed by asset_id, got: %s", result)
-	}
-}
-
-func TestPluginManager_MitigateRisk_UsesArgsAssetIDWhenTopLevelMissing(t *testing.T) {
-	pm := &PluginManager{
-		registeredPlugins: make(map[string]BotPlugin),
-		instances:         make(map[string]*AssetPluginInstance),
-	}
-	p := &mitigationAwarePlugin{
-		testPlugin:    *newTestPlugin("Openclaw"),
-		handledRiskID: "logging_redact_off",
-	}
-	p.assets = []Asset{
-		{ID: "openclaw:abc123", Name: "Openclaw", SourcePlugin: "Openclaw"},
-	}
-	pm.Register(p)
-	if _, err := pm.ScanAllAssets(); err != nil {
-		t.Fatalf("ScanAllAssets failed: %v", err)
-	}
-
-	result := pm.MitigateRisk(`{"id":"logging_redact_off","args":{"asset_id":"openclaw:abc123"}}`)
-	if !strings.Contains(result, `"success":true`) {
-		t.Fatalf("expected mitigation routed by args.asset_id, got: %s", result)
+		t.Fatalf("expected mitigation routed by source_plugin, got: %s", result)
 	}
 }
 
@@ -338,7 +266,7 @@ func TestPluginManager_GetAllPluginInfos_IncludesManifestAndSchema(t *testing.T)
 	}
 }
 
-func TestPluginManager_AssessAllRisks_IncludesAssetNameAndAssetIDInArgs(t *testing.T) {
+func TestPluginManager_AssessAllRisks_IncludesAssetNameInArgs(t *testing.T) {
 	pm := &PluginManager{
 		registeredPlugins: make(map[string]BotPlugin),
 		instances:         make(map[string]*AssetPluginInstance),
@@ -357,18 +285,11 @@ func TestPluginManager_AssessAllRisks_IncludesAssetNameAndAssetIDInArgs(t *testi
 				Level: RiskLevelHigh,
 				Args: map[string]interface{}{
 					"asset_name": "custom_asset",
-					"asset_id":   "custom:id",
 				},
 			},
 		},
 	}
-	p.assets = []Asset{
-		{ID: "openclaw:abc123", Name: "Openclaw", SourcePlugin: "Openclaw"},
-	}
 	pm.Register(p)
-	if _, err := pm.ScanAllAssets(); err != nil {
-		t.Fatalf("ScanAllAssets failed: %v", err)
-	}
 
 	risks, err := pm.AssessAllRisks(nil)
 	if err != nil {
@@ -384,16 +305,7 @@ func TestPluginManager_AssessAllRisks_IncludesAssetNameAndAssetIDInArgs(t *testi
 	if got := risks[0].Args["asset_name"]; got != "Openclaw" {
 		t.Fatalf("expected injected asset_name Openclaw, got %#v", got)
 	}
-	if got := risks[0].AssetID; got != "openclaw:abc123" {
-		t.Fatalf("expected injected asset_id openclaw:abc123, got %#v", got)
-	}
-	if got := risks[0].Args["asset_id"]; got != "openclaw:abc123" {
-		t.Fatalf("expected injected args.asset_id openclaw:abc123, got %#v", got)
-	}
 	if got := risks[1].Args["asset_name"]; got != "custom_asset" {
 		t.Fatalf("expected existing asset_name to be kept, got %#v", got)
-	}
-	if got := risks[1].AssetID; got != "custom:id" {
-		t.Fatalf("expected existing asset_id to be kept, got %#v", got)
 	}
 }

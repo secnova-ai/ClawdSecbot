@@ -450,7 +450,6 @@ func (a *ToolCallReActAnalyzer) Analyze(ctx context.Context, contextMessages []C
 		traceGuard(session.ID, "ADK", "output parse failed")
 		return nil, fmt.Errorf("ADK agent output not parseable")
 	}
-	parsed = normalizeReactRiskDecisionConsistency(parsed)
 	parsed.Skill = "progressive_guard"
 	parsed.Usage = &Usage{
 		PromptTokens:     estimateStringTokens(systemPrompt + userMessage),
@@ -507,14 +506,6 @@ Return a JSON decision`)
 			sb.WriteString("\n")
 		}
 	}
-
-	sb.WriteString(`
-
-## Output Decision Policy (strict)
-- If risk_level is "low", you MUST return allowed=true.
-- Do NOT output low-risk + blocked decision. In ShepherdGate, allowed=false maps to NEEDS_CONFIRMATION.
-- Use allowed=false only when risk_level is medium/high/critical, or when explicit user-defined sensitive action rules are violated.
-`)
 
 	sb.WriteString("\n\n## Output Format\nReturn strict JSON only:\n")
 	sb.WriteString(`{"allowed":boolean,"reason":"string","risk_level":"low|medium|high|critical","confidence":0-100,"action_desc":"brief description of the tool action in user's language","risk_type":"risk category in user's language, empty string if safe"}`)
@@ -690,40 +681,6 @@ func parseReactRiskDecision(output string) (*ReactRiskDecision, bool) {
 		ActionDesc: strings.TrimSpace(r.ActionDesc),
 		RiskType:   strings.TrimSpace(r.RiskType),
 	}, true
-}
-
-// normalizeReactRiskDecisionConsistency 统一修正模型输出中的低风险判定一致性。
-func normalizeReactRiskDecisionConsistency(decision *ReactRiskDecision) *ReactRiskDecision {
-	if decision == nil {
-		return nil
-	}
-
-	if decision.RiskLevel == "low" && !decision.Allowed && !isSensitiveRuleBlockDecision(decision) {
-		decision.Allowed = true
-		if strings.TrimSpace(decision.Reason) == "" {
-			decision.Reason = "Low-risk decisions should be allowed."
-		} else {
-			decision.Reason = decision.Reason + " [normalized: low-risk decision forced to allow]"
-		}
-	}
-
-	return decision
-}
-
-// isSensitiveRuleBlockDecision 判断当前拦截是否由用户敏感规则触发。
-func isSensitiveRuleBlockDecision(decision *ReactRiskDecision) bool {
-	if decision == nil {
-		return false
-	}
-	text := strings.ToLower(strings.TrimSpace(decision.Reason + " " + decision.RiskType))
-	if text == "" {
-		return false
-	}
-	return strings.Contains(text, "sensitive action") ||
-		strings.Contains(text, "user-defined sensitive") ||
-		strings.Contains(text, "sensitive rule") ||
-		strings.Contains(text, "敏感操作") ||
-		strings.Contains(text, "敏感规则")
 }
 
 // ==================== Helper functions ====================

@@ -28,7 +28,7 @@ class SecurityModelConfigService {
       provider: 'ollama',
       endpoint: 'http://localhost:11434',
       apiKey: '',
-      model: '',
+      model: 'llama3',
     );
   }
 
@@ -59,10 +59,7 @@ class SecurityModelConfigService {
     };
 
     try {
-      return transport.callOneArg(
-        'TestModelConnectionFFI',
-        jsonEncode(request),
-      );
+      return transport.callOneArg('TestModelConnectionFFI', jsonEncode(request));
     } catch (e) {
       appLogger.error('[SecurityModelConfig] Failed to test connection', e);
       return {'success': false, 'error': e.toString()};
@@ -77,9 +74,6 @@ class SecurityModelConfigService {
 
 /// Bot model config service.
 class BotModelConfigService {
-  static const String _defaultProtectionPolicyAssetID =
-      '__default_protection_policy__';
-
   BotModelConfigService({required this.assetName, this.assetID = ''});
 
   final String assetName;
@@ -88,26 +82,7 @@ class BotModelConfigService {
   Future<BotModelConfig?> loadConfig() async {
     try {
       final dbService = ModelConfigDatabaseService();
-      final config = await dbService.getBotModelConfig(assetName, assetID);
-      if (config != null) {
-        return config;
-      }
-      if (assetID.isEmpty || assetID == _defaultProtectionPolicyAssetID) {
-        return null;
-      }
-
-      final defaultConfig = await dbService.getBotModelConfig(
-        assetName,
-        _defaultProtectionPolicyAssetID,
-      );
-      if (defaultConfig == null) {
-        return null;
-      }
-      appLogger.info(
-        '[BotModelConfig] Fallback to default policy config: '
-        'asset=$assetName, assetID=$assetID',
-      );
-      return defaultConfig.copyWith(assetName: assetName, assetID: assetID);
+      return await dbService.getBotModelConfig(assetName, assetID);
     } catch (e) {
       appLogger.error('[BotModelConfig] Failed to load config', e);
       return null;
@@ -149,10 +124,7 @@ class BotModelConfigService {
     };
 
     try {
-      return transport.callOneArg(
-        'TestModelConnectionFFI',
-        jsonEncode(request),
-      );
+      return transport.callOneArg('TestModelConnectionFFI', jsonEncode(request));
     } catch (e) {
       appLogger.error('[BotModelConfig] Failed to test connection', e);
       return {'success': false, 'error': e.toString()};

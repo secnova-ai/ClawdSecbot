@@ -111,15 +111,37 @@ mixin ProtectionMonitorLogProcessorMixin on State<ProtectionMonitorPage> {
       return;
     }
 
-    final existed = requestGroups.containsKey(requestId);
+    var existed = requestGroups.containsKey(requestId);
+    String? mergedKey;
+
+    if (!existed && record.isComplete) {
+      for (final entry in requestGroups.entries) {
+        final existing = entry.value;
+        final sameAsset = existing.assetID == record.assetID;
+        final sameModel = existing.model == record.model;
+        final sameContent =
+            existing.primaryContent.isNotEmpty &&
+            existing.primaryContent == record.primaryContent;
+        final closeInTime =
+            existing.startedAt.difference(record.startedAt).abs().inSeconds <=
+            10;
+        final inFlight = !existing.isComplete;
+        if (sameAsset && sameModel && sameContent && closeInTime && inFlight) {
+          mergedKey = entry.key;
+          break;
+        }
+      }
+    }
+
+    final targetKey = mergedKey ?? requestId;
     if (kDebugMode) {
       appLogger.debug(
-        '[TruthRecord] process request_id=$requestId existed=$existed phase=${record.phase} type=${record.primaryContentType} complete=${record.isComplete}',
+        '[TruthRecord] process request_id=$requestId target_key=$targetKey existed=$existed phase=${record.phase} type=${record.primaryContentType} complete=${record.isComplete}',
       );
     }
-    requestGroups[requestId] = record;
-    if (!requestOrder.contains(requestId)) {
-      requestOrder.add(requestId);
+    requestGroups[targetKey] = record;
+    if (!requestOrder.contains(targetKey)) {
+      requestOrder.add(targetKey);
     }
   }
 

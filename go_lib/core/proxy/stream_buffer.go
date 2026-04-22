@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"encoding/json"
-	"strings"
 	"sync"
 
 	"github.com/openai/openai-go"
@@ -17,7 +16,6 @@ type StreamBuffer struct {
 	toolCalls       []openai.ChatCompletionMessageToolCall // Accumulated tool calls
 	toolsRaw        json.RawMessage                        // Tools definitions from request (raw JSON for token estimation)
 	loggedToolCalls map[int]bool                           // Tool calls already emitted to UI during streaming
-	generatedIDs    map[int]string                         // Generated tool_call_id per stream tool index
 	started         bool                                   // Whether monitor_upstream_stream_started has been emitted
 
 	// Token usage for current request (set when usage is received in stream)
@@ -37,7 +35,6 @@ func NewStreamBuffer() *StreamBuffer {
 		contentChunks:   make([]string, 0),
 		toolCalls:       make([]openai.ChatCompletionMessageToolCall, 0),
 		loggedToolCalls: make(map[int]bool),
-		generatedIDs:    make(map[int]string),
 	}
 }
 
@@ -82,11 +79,10 @@ func (sb *StreamBuffer) AppendContent(content string) {
 	sb.contentChunks = append(sb.contentChunks, content)
 }
 
-// MergeStreamToolCall merges incremental stream tool call data from a chunk delta.
-// It also ensures each tool call has a stable ID even if upstream omits it.
-func (sb *StreamBuffer) MergeStreamToolCall(stc openai.ChatCompletionChunkChoiceDeltaToolCall) string {
+// MergeStreamToolCall merges incremental stream tool call data from a chunk delta
+func (sb *StreamBuffer) MergeStreamToolCall(stc openai.ChatCompletionChunkChoiceDeltaToolCall) {
 	if sb == nil {
-		return ""
+		return
 	}
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
@@ -99,34 +95,8 @@ func (sb *StreamBuffer) MergeStreamToolCall(stc openai.ChatCompletionChunkChoice
 	}
 
 	tc := &sb.toolCalls[idx]
-	if sb.generatedIDs == nil {
-		sb.generatedIDs = make(map[int]string)
-	}
-	id := strings.TrimSpace(stc.ID)
-	if id != "" {
-		tc.ID = id
-		sb.generatedIDs[idx] = id
-	} else if tc.ID != "" {
-		// Keep accumulated ID.
-	} else if sb.generatedIDs[idx] != "" {
-		tc.ID = sb.generatedIDs[idx]
-	} else {
-		existing := make(map[string]struct{}, len(sb.toolCalls)+len(sb.generatedIDs))
-		for _, call := range sb.toolCalls {
-			callID := strings.TrimSpace(call.ID)
-			if callID != "" {
-				existing[callID] = struct{}{}
-			}
-		}
-		for _, generated := range sb.generatedIDs {
-			generated = strings.TrimSpace(generated)
-			if generated != "" {
-				existing[generated] = struct{}{}
-			}
-		}
-		generatedID := nextProxyToolCallID(existing)
-		sb.generatedIDs[idx] = generatedID
-		tc.ID = generatedID
+	if stc.ID != "" {
+		tc.ID = stc.ID
 	}
 	if stc.Type != "" {
 		tc.Type = "function"
@@ -137,7 +107,6 @@ func (sb *StreamBuffer) MergeStreamToolCall(stc openai.ChatCompletionChunkChoice
 	if stc.Function.Arguments != "" {
 		tc.Function.Arguments += stc.Function.Arguments
 	}
-	return tc.ID
 }
 
 // ConsumeNewlyReadyToolCalls returns tool calls whose names became available
@@ -188,7 +157,6 @@ func (sb *StreamBuffer) Clear() {
 	sb.toolCalls = make([]openai.ChatCompletionMessageToolCall, 0)
 	sb.requestMessages = make([]ConversationMessage, 0)
 	sb.loggedToolCalls = make(map[int]bool)
-	sb.generatedIDs = make(map[int]string)
 	sb.promptTokens = 0
 	sb.completionTokens = 0
 	sb.totalTokens = 0
@@ -208,7 +176,6 @@ func (sb *StreamBuffer) ClearAll() {
 	sb.toolCalls = make([]openai.ChatCompletionMessageToolCall, 0)
 	sb.toolsRaw = nil
 	sb.loggedToolCalls = make(map[int]bool)
-	sb.generatedIDs = make(map[int]string)
 	sb.promptTokens = 0
 	sb.completionTokens = 0
 	sb.totalTokens = 0

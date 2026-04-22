@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../utils/app_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../l10n/app_localizations.dart';
 import '../models/llm_config_model.dart';
-import '../services/app_settings_database_service.dart';
 import '../services/model_config_service.dart';
 import '../services/protection_service.dart';
 import '../services/provider_service.dart';
@@ -14,7 +12,7 @@ import '../utils/locale_utils.dart';
 
 /// 安全模型配置表单（纯表单组件）
 /// 用于 ShepherdGate 风险检测的 LLM 配置
-/// 表单本体不包含保存按钮，保存动作由调用方通过 GlobalKey 触发 saveConfig()
+/// 不包含任何按钮，调用方需通过 GlobalKey 调用 saveConfig() 方法保存
 class SecurityModelConfigForm extends StatefulWidget {
   /// Creates a security model configuration form.
   const SecurityModelConfigForm({
@@ -36,14 +34,8 @@ class SecurityModelConfigForm extends StatefulWidget {
 
 /// State for security model configuration form.
 class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
-  /// 安全模型按供应商草稿缓存的设置键。
-  static const String _providerDraftSettingKey =
-      'security_model_provider_drafts_v1';
-
   late SecurityModelConfigService _service;
   final ProviderService _providerService = ProviderService();
-  final AppSettingsDatabaseService _appSettingsService =
-      AppSettingsDatabaseService();
   bool _loading = true;
   bool _saving = false;
   bool _testing = false;
@@ -54,7 +46,6 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
   final TextEditingController _modelController = TextEditingController();
   final TextEditingController _secretKeyController = TextEditingController();
   String _selectedType = 'ollama';
-  final Map<String, SecurityModelConfig> _providerDrafts = {};
 
   /// Dynamically loaded providers from Go layer.
   List<ProviderInfo> _providers = [];
@@ -130,25 +121,25 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
     // Use initialConfig if provided (reuse scenario)
     if (widget.initialConfig != null) {
       final config = widget.initialConfig!;
-      _providerDrafts[config.provider] = config;
       setState(() {
         _selectedType = _normalizeSelectedType(config.provider);
-        _applyConfigToControllers(config);
+        _endpointController.text = config.endpoint;
+        _apiKeyController.text = config.apiKey;
+        _modelController.text = config.model;
+        _secretKeyController.text = config.secretKey;
         _loading = false;
       });
       return;
     }
 
     try {
-      await _loadProviderDrafts();
       final config = await _service.loadConfig();
-      _providerDrafts[config.provider] = config;
-      final selectedType = _normalizeSelectedType(config.provider);
-      final selectedConfig =
-          _providerDrafts[selectedType] ?? _createEmptyConfig(selectedType);
       setState(() {
-        _selectedType = selectedType;
-        _applyConfigToControllers(selectedConfig);
+        _selectedType = _normalizeSelectedType(config.provider);
+        _endpointController.text = config.endpoint;
+        _apiKeyController.text = config.apiKey;
+        _modelController.text = config.model;
+        _secretKeyController.text = config.secretKey;
         _loading = false;
       });
     } catch (e) {
@@ -159,32 +150,52 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
     }
   }
 
-  /// 保存配置并返回保存结果。
-  /// 按需调用验证按钮进行连通性测试，保存流程不做额外连接校验。
+  /// Saves configuration after testing connectivity and returns success status.
   /// This is the public method that should be called by parent widgets.
   Future<bool> saveConfig() async {
     final l10n = AppLocalizations.of(context)!;
     setState(() {
       _saving = true;
+      _testing = true;
       _error = null;
     });
 
-    final config = _buildCurrentConfig();
+    final config = SecurityModelConfig(
+      provider: _selectedType,
+      endpoint: _endpointController.text.trim(),
+      apiKey: _apiKeyController.text.trim(),
+      model: _modelController.text.trim(),
+      secretKey: _secretKeyController.text.trim(),
+    );
 
-    if (!_hasRequiredFields(config)) {
+    if (!config.isValid) {
       setState(() {
         _error = l10n.modelConfigFillRequired;
         _saving = false;
+        _testing = false;
       });
       return false;
     }
 
     try {
+      final testResult = await _service.testConnection(config);
+      if (testResult['success'] != true) {
+        setState(() {
+          _error = l10n.modelConfigTestFailed(
+            testResult['error'] ?? 'Unknown error',
+          );
+          _saving = false;
+          _testing = false;
+        });
+        return false;
+      }
+
+      setState(() {
+        _testing = false;
+      });
+
       final success = await _service.saveConfig(config);
       if (success) {
-        _captureCurrentProviderDraft();
-        await _persistProviderDrafts();
-
         // 保存后热更新 ShepherdGate
         try {
           final protectionService = ProtectionService();
@@ -215,180 +226,9 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
       setState(() {
         _error = e.toString();
         _saving = false;
+        _testing = false;
       });
       return false;
-    }
-  }
-
-  /// 手动验证当前配置连通性，不触发持久化。
-  Future<bool> validateConnection() async {
-    final l10n = AppLocalizations.of(context)!;
-    final config = _buildCurrentConfig();
-    if (!_hasRequiredFields(config)) {
-      setState(() {
-        _error = l10n.modelConfigFillRequired;
-      });
-      return false;
-    }
-
-    setState(() {
-      _testing = true;
-      _error = null;
-    });
-    try {
-      final testResult = await _service.testConnection(config);
-      if (testResult['success'] == true) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(l10n.modelConfigTestSuccess),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-        return true;
-      }
-
-      setState(() {
-        _error = l10n.modelConfigTestFailed(
-          testResult['error'] ?? 'Unknown error',
-        );
-      });
-      return false;
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-      });
-      return false;
-    } finally {
-      if (mounted) {
-        setState(() {
-          _testing = false;
-        });
-      }
-    }
-  }
-
-  /// 构建当前表单配置对象。
-  SecurityModelConfig _buildCurrentConfig() {
-    return SecurityModelConfig(
-      provider: _selectedType,
-      endpoint: _endpointController.text.trim(),
-      apiKey: _apiKeyController.text.trim(),
-      model: _modelController.text.trim(),
-      secretKey: _secretKeyController.text.trim(),
-    );
-  }
-
-  /// 根据当前 provider 能力检查必填字段。
-  bool _hasRequiredFields(SecurityModelConfig config) {
-    final providerInfo = _getSelectedProviderInfo();
-    final needsEndpoint = providerInfo?.needsEndpoint ?? true;
-    final needsApiKey = providerInfo?.needsAPIKey ?? true;
-    final needsSecretKey = providerInfo?.needsSecretKey ?? false;
-    if (needsEndpoint && config.endpoint.isEmpty) {
-      return false;
-    }
-    if (needsApiKey && config.apiKey.isEmpty) {
-      return false;
-    }
-    if (needsSecretKey && config.secretKey.isEmpty) {
-      return false;
-    }
-    if (config.model.isEmpty) {
-      return false;
-    }
-    return true;
-  }
-
-  /// 将配置应用到当前输入控件。
-  void _applyConfigToControllers(SecurityModelConfig config) {
-    _endpointController.text = config.endpoint;
-    _apiKeyController.text = config.apiKey;
-    _modelController.text = config.model;
-    _secretKeyController.text = config.secretKey;
-  }
-
-  /// 创建空白配置，用于首次切换到新 provider。
-  SecurityModelConfig _createEmptyConfig(String providerName) {
-    return SecurityModelConfig(
-      provider: providerName,
-      endpoint: '',
-      apiKey: '',
-      model: '',
-      secretKey: '',
-    );
-  }
-
-  /// 记录当前 provider 的草稿。
-  void _captureCurrentProviderDraft() {
-    _providerDrafts[_selectedType] = _buildCurrentConfig();
-  }
-
-  /// 切换 provider 时加载其对应草稿，避免输入被清空。
-  Future<void> _handleProviderSelected(ProviderInfo provider) async {
-    _captureCurrentProviderDraft();
-    final targetConfig =
-        _providerDrafts[provider.name] ?? _createEmptyConfig(provider.name);
-    if (!mounted) return;
-    setState(() {
-      _selectedType = provider.name;
-      _applyConfigToControllers(targetConfig);
-      _error = null;
-    });
-    await _persistProviderDrafts();
-  }
-
-  /// 从应用设置加载 provider 草稿缓存。
-  Future<void> _loadProviderDrafts() async {
-    final raw = await _appSettingsService.getSetting(_providerDraftSettingKey);
-    if (raw.isEmpty) {
-      return;
-    }
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic>) {
-        return;
-      }
-      decoded.forEach((provider, value) {
-        if (value is! Map) {
-          return;
-        }
-        final data = Map<String, dynamic>.from(value);
-        _providerDrafts[provider] = SecurityModelConfig(
-          provider: provider,
-          endpoint: (data['endpoint'] as String?) ?? '',
-          apiKey: (data['api_key'] as String?) ?? '',
-          model: (data['model'] as String?) ?? '',
-          secretKey: (data['secret_key'] as String?) ?? '',
-        );
-      });
-    } catch (e) {
-      appLogger.warning(
-        '[SecurityModelConfigForm] Failed to parse provider drafts: $e',
-      );
-    }
-  }
-
-  /// 持久化 provider 草稿缓存。
-  Future<void> _persistProviderDrafts() async {
-    final payload = <String, dynamic>{};
-    _providerDrafts.forEach((provider, config) {
-      payload[provider] = {
-        'endpoint': config.endpoint,
-        'api_key': config.apiKey,
-        'model': config.model,
-        'secret_key': config.secretKey,
-      };
-    });
-    final saved = await _appSettingsService.saveSetting(
-      _providerDraftSettingKey,
-      jsonEncode(payload),
-    );
-    if (!saved) {
-      appLogger.warning(
-        '[SecurityModelConfigForm] Failed to persist provider drafts',
-      );
     }
   }
 
@@ -453,7 +293,20 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
               isSelected: isSelected,
               onTap: widget.readOnly
                   ? null
-                  : () => unawaited(_handleProviderSelected(provider)),
+                  : () {
+                      setState(() {
+                        _selectedType = provider.name;
+                        // 切换 provider 时清空密钥并设置推荐模型
+                        _apiKeyController.clear();
+                        _secretKeyController.clear();
+                        if (provider.defaultModel.isNotEmpty) {
+                          _modelController.text = provider.defaultModel;
+                        }
+                        if (provider.defaultBaseURL.isNotEmpty) {
+                          _endpointController.text = _resolveBaseURL(provider);
+                        }
+                      });
+                    },
             );
           }).toList(),
         ),

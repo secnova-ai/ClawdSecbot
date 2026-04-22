@@ -310,7 +310,7 @@ func (p *DintalclawPlugin) RestoreBotDefaultState(assetID string) string {
 	backupDir := ""
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
-		backupDir = core.ResolveBackupDir(homeDir)
+		backupDir = filepath.Join(homeDir, ".botsec", "backups")
 	}
 	result := RestoreToInitialConfigByAsset(backupDir, assetID)
 	payload, err := json.Marshal(result)
@@ -327,7 +327,7 @@ func (p *DintalclawPlugin) OnBeforeProxyStop(ctx *core.ProtectionContext) {
 	backupDir := ctx.BackupDir
 	if backupDir == "" {
 		homeDir, _ := os.UserHomeDir()
-		backupDir = core.ResolveBackupDir(homeDir)
+		backupDir = filepath.Join(homeDir, ".botsec", "backups")
 	}
 
 	result := RestoreToInitialConfigByAsset(backupDir, ctx.AssetID)

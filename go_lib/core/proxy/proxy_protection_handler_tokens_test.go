@@ -52,12 +52,10 @@ func TestOnResponse_EstimatesUsageWhenMissing(t *testing.T) {
 
 func TestOnResponse_UsesStableRequestIDForTruthRecordCompletion(t *testing.T) {
 	pp := &ProxyProtection{
-		streamBuffer:     &StreamBuffer{requestID: "req-newer"},
+		streamBuffer:     &StreamBuffer{requestID: "req-finished"},
 		records:          NewRecordStore(),
 		currentRequestID: "req-newer",
 	}
-	ctx := context.WithValue(context.Background(), "k", "v")
-	pp.bindRequestContext(ctx, "req-finished")
 
 	pp.updateTruthRecord("req-finished", func(r *TruthRecord) {
 		r.Model = "gpt-test"
@@ -81,7 +79,7 @@ func TestOnResponse_UsesStableRequestIDForTruthRecordCompletion(t *testing.T) {
 		},
 	}
 
-	if !pp.onResponse(ctx, resp) {
+	if !pp.onResponse(context.Background(), resp) {
 		t.Fatalf("expected onResponse to pass")
 	}
 
@@ -238,16 +236,13 @@ func TestOnStreamChunk_EmitsRealtimeContentAndToolLogs(t *testing.T) {
 	}
 }
 
-// TestOnStreamChunk_UsesStableRequestIDForCompletion verifies stream completion
-// uses context-bound request_id even if global/request buffer points elsewhere.
+// TestOnStreamChunk_UsesStableRequestIDForCompletion 验证流式收尾时 TruthRecord 绑定在 streamBuffer 的稳定 request_id 上。
 func TestOnStreamChunk_UsesStableRequestIDForCompletion(t *testing.T) {
 	pp := &ProxyProtection{
-		streamBuffer:     &StreamBuffer{requestID: "req-newer"},
+		streamBuffer:     &StreamBuffer{requestID: "req-stream"},
 		records:          NewRecordStore(),
 		currentRequestID: "req-newer",
 	}
-	ctx := context.WithValue(context.Background(), "k", "v")
-	pp.bindRequestContext(ctx, "req-stream")
 
 	pp.updateTruthRecord("req-stream", func(r *TruthRecord) {
 		r.Phase = advanceRecordPhase(r.Phase, RecordPhaseStarting)
@@ -265,7 +260,7 @@ func TestOnStreamChunk_UsesStableRequestIDForCompletion(t *testing.T) {
 		},
 	}
 
-	if !pp.onStreamChunk(ctx, chunk) {
+	if !pp.onStreamChunk(context.Background(), chunk) {
 		t.Fatalf("expected onStreamChunk to pass")
 	}
 
@@ -340,182 +335,5 @@ func TestOnResponse_EmitsMonitorCompletionAndReturn(t *testing.T) {
 	}
 	if !sawReturned {
 		t.Fatalf("expected monitor response returned log")
-	}
-}
-
-func TestOnResponse_AssignsMissingToolCallIDAndRecordsAudit(t *testing.T) {
-	tracker := NewAuditChainTracker()
-	pp := &ProxyProtection{
-		streamBuffer:     NewStreamBuffer(),
-		auditTracker:     tracker,
-		currentRequestID: "req-missing-id",
-		assetID:          "openclaw:a1",
-	}
-
-	req, _ := mustParseChatRequest(t, `{
-	  "model":"gpt-test",
-	  "messages":[
-	    {"role":"user","content":"run one tool"}
-	  ]
-	}`)
-	tracker.StartFromRequest("req-missing-id", "openclaw", "openclaw:a1", "gpt-test", req.Messages)
-
-	resp := &openai.ChatCompletion{
-		Model: "gpt-test",
-		Choices: []openai.ChatCompletionChoice{
-			{
-				Message: openai.ChatCompletionMessage{
-					ToolCalls: []openai.ChatCompletionMessageToolCall{
-						{
-							Function: openai.ChatCompletionMessageToolCallFunction{
-								Name:      "search_files",
-								Arguments: `{"pattern":"TODO"}`,
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	if !pp.onResponse(context.Background(), resp) {
-		t.Fatalf("expected onResponse to pass")
-	}
-
-	gotID := strings.TrimSpace(resp.Choices[0].Message.ToolCalls[0].ID)
-	if gotID == "" {
-		t.Fatalf("expected injected tool_call_id")
-	}
-
-	logs := tracker.GetAuditLogs(10, 0, false)
-	if len(logs) != 1 {
-		t.Fatalf("expected 1 audit log, got %d", len(logs))
-	}
-	if len(logs[0].ToolCalls) != 1 {
-		t.Fatalf("expected 1 tool call in audit log, got %d", len(logs[0].ToolCalls))
-	}
-	if logs[0].ToolCalls[0].Name != "search_files" {
-		t.Fatalf("expected tool name search_files, got %s", logs[0].ToolCalls[0].Name)
-	}
-}
-
-func TestOnStreamChunk_AssignsStableToolCallIDWhenMissing(t *testing.T) {
-	pp := &ProxyProtection{
-		streamBuffer: NewStreamBuffer(),
-	}
-
-	chunk1 := &openai.ChatCompletionChunk{
-		Choices: []openai.ChatCompletionChunkChoice{
-			{
-				Delta: openai.ChatCompletionChunkChoiceDelta{
-					ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
-						{
-							Index: 0,
-							Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
-								Name: "search_files",
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-	chunk2 := &openai.ChatCompletionChunk{
-		Choices: []openai.ChatCompletionChunkChoice{
-			{
-				Delta: openai.ChatCompletionChunkChoiceDelta{
-					ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
-						{
-							Index: 0,
-							Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
-								Arguments: `{"pattern":"main.go"}`,
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	if !pp.onStreamChunk(context.Background(), chunk1) {
-		t.Fatalf("expected first stream chunk to pass")
-	}
-	if !pp.onStreamChunk(context.Background(), chunk2) {
-		t.Fatalf("expected second stream chunk to pass")
-	}
-
-	id1 := strings.TrimSpace(chunk1.Choices[0].Delta.ToolCalls[0].ID)
-	id2 := strings.TrimSpace(chunk2.Choices[0].Delta.ToolCalls[0].ID)
-	if id1 == "" {
-		t.Fatalf("expected first chunk to receive generated tool_call_id")
-	}
-	if id2 == "" {
-		t.Fatalf("expected second chunk to keep tool_call_id")
-	}
-	if id1 != id2 {
-		t.Fatalf("expected stable tool_call_id across chunks, got %s vs %s", id1, id2)
-	}
-}
-
-func TestOnStreamChunk_BindsToolCallBeforeFinishForFollowupLinking(t *testing.T) {
-	tracker := NewAuditChainTracker()
-	pp := &ProxyProtection{
-		streamBuffer: NewStreamBuffer(),
-		auditTracker: tracker,
-		assetID:      "openclaw:a1",
-	}
-
-	req, _ := mustParseChatRequest(t, `{
-	  "model":"gpt-test",
-	  "messages":[
-	    {"role":"user","content":"run one tool"}
-	  ]
-	}`)
-	tracker.StartFromRequest("req_stream", "openclaw", "openclaw:a1", "gpt-test", req.Messages)
-
-	ctx := context.WithValue(context.Background(), "k", "stream")
-	pp.bindRequestContext(ctx, "req_stream")
-
-	chunk := &openai.ChatCompletionChunk{
-		Choices: []openai.ChatCompletionChunkChoice{
-			{
-				Delta: openai.ChatCompletionChunkChoiceDelta{
-					ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
-						{
-							Index: 0,
-							ID:    "call_early_1",
-							Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
-								Name:      "exec",
-								Arguments: `{"command":"echo 9"}`,
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-	if !pp.onStreamChunk(ctx, chunk) {
-		t.Fatalf("expected stream delta to pass")
-	}
-
-	// Follow-up request should be able to link immediately via tool_call_id,
-	// without waiting for stream finish.
-	toolResults := map[string]string{"call_early_1": "9"}
-	tracker.LinkRequestByToolResults("req_follow", "openclaw:a1", toolResults)
-	tracker.RecordToolResults("openclaw:a1", toolResults)
-	tracker.FinalizeRequestOutput("req_follow", "done")
-
-	logs := tracker.GetAuditLogs(10, 0, false)
-	if len(logs) != 1 {
-		t.Fatalf("expected 1 audit log, got %d", len(logs))
-	}
-	if len(logs[0].ToolCalls) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(logs[0].ToolCalls))
-	}
-	if logs[0].ToolCalls[0].Result != "9" {
-		t.Fatalf("expected tool result=9, got %q", logs[0].ToolCalls[0].Result)
-	}
-	if logs[0].OutputContent != "done" {
-		t.Fatalf("expected output=done, got %q", logs[0].OutputContent)
 	}
 }

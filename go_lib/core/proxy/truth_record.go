@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -461,7 +462,7 @@ func advanceRecordPhase(current, next string) string {
 	return next
 }
 
-// ==================== TruthRecord Snapshot FFI Helpers ====================
+// ==================== FFI 兼容层（替代原 audit_log.go 的 FFI 函数） ====================
 
 // getAllActiveRecordStores 返回所有活跃 proxy handler 的 RecordStore（含去重的 legacy 实例）。
 // 调用方必须已持有 proxyInstanceMu 或在安全上下文中调用。
@@ -497,4 +498,181 @@ func GetAllTruthRecordSnapshotsInternal() string {
 		return "[]"
 	}
 	return string(jsonBytes)
+}
+
+// GetTruthRecordsInternal 从所有活跃 proxy 实例获取已完成记录（兼容原 GetAuditLogsInternal）。
+func GetTruthRecordsInternal(limit, offset int, riskOnly bool) string {
+	proxyInstanceMu.Lock()
+	stores := getAllActiveRecordStores()
+	proxyInstanceMu.Unlock()
+
+	var allRecords []TruthRecord
+	totalCount := 0
+	for _, store := range stores {
+		allRecords = append(allRecords, store.GetCompletedRecords(0, 0, riskOnly)...)
+		totalCount += store.GetCompletedCount(riskOnly)
+	}
+
+	// Sort by started_at descending, then apply limit/offset
+	sort.Slice(allRecords, func(i, j int) bool {
+		return allRecords[i].StartedAt > allRecords[j].StartedAt
+	})
+	if offset > 0 && offset < len(allRecords) {
+		allRecords = allRecords[offset:]
+	} else if offset >= len(allRecords) {
+		allRecords = nil
+	}
+	if limit > 0 && limit < len(allRecords) {
+		allRecords = allRecords[:limit]
+	}
+
+	result := map[string]interface{}{
+		"logs":  truthRecordsToAuditCompat(allRecords),
+		"total": totalCount,
+	}
+
+	jsonBytes, err := json.Marshal(result)
+	if err != nil {
+		return `{"logs":[],"total":0,"error":"` + err.Error() + `"}`
+	}
+	return string(jsonBytes)
+}
+
+// GetPendingTruthRecordsInternal 获取并清空所有活跃 proxy 实例的已完成记录
+// （兼容原 GetPendingAuditLogsInternal）。
+func GetPendingTruthRecordsInternal() string {
+	proxyInstanceMu.Lock()
+	stores := getAllActiveRecordStores()
+	proxyInstanceMu.Unlock()
+
+	var allCompleted []TruthRecord
+	for _, store := range stores {
+		allCompleted = append(allCompleted, store.CompletedPending()...)
+	}
+	compat := truthRecordsToAuditCompat(allCompleted)
+
+	jsonBytes, err := json.Marshal(compat)
+	if err != nil {
+		return "[]"
+	}
+	return string(jsonBytes)
+}
+
+// ClearTruthRecordsInternal 清空所有活跃 proxy 实例的记录（兼容原 ClearAuditLogsInternal）。
+func ClearTruthRecordsInternal() string {
+	proxyInstanceMu.Lock()
+	stores := getAllActiveRecordStores()
+	proxyInstanceMu.Unlock()
+
+	for _, store := range stores {
+		store.ClearAll()
+	}
+	return `{"success":true}`
+}
+
+// ClearTruthRecordsWithFilterInternal 按 asset 过滤清除记录。
+func ClearTruthRecordsWithFilterInternal(filterJSON string) string {
+	var input struct {
+		AssetName string `json:"asset_name,omitempty"`
+		AssetID   string `json:"asset_id,omitempty"`
+	}
+	if filterJSON != "" {
+		if err := json.Unmarshal([]byte(filterJSON), &input); err != nil {
+			return `{"success":false,"error":"invalid JSON"}`
+		}
+	}
+
+	proxyInstanceMu.Lock()
+	stores := getAllActiveRecordStores()
+	proxyInstanceMu.Unlock()
+
+	for _, store := range stores {
+		store.ClearWithFilter(input.AssetName, input.AssetID)
+	}
+	return `{"success":true}`
+}
+
+// truthRecordsToAuditCompat 将 TruthRecord 列表转换为兼容旧 AuditLog JSON 格式，
+// 确保 Flutter 审计日志页在过渡期间无需立即改造。
+func truthRecordsToAuditCompat(records []TruthRecord) []map[string]interface{} {
+	if len(records) == 0 {
+		return []map[string]interface{}{}
+	}
+	out := make([]map[string]interface{}, 0, len(records))
+	for _, r := range records {
+		durationMs := int64(0)
+		if r.CompletedAt != "" && r.StartedAt != "" {
+			if start, err := time.Parse(time.RFC3339Nano, r.StartedAt); err == nil {
+				if end, err := time.Parse(time.RFC3339Nano, r.CompletedAt); err == nil {
+					durationMs = end.Sub(start).Milliseconds()
+				}
+			}
+		}
+
+		action := "ALLOW"
+		riskLevel := ""
+		riskReason := ""
+		confidence := 0
+		hasRisk := false
+		if r.Decision != nil {
+			action = r.Decision.Action
+			riskLevel = r.Decision.RiskLevel
+			riskReason = r.Decision.Reason
+			confidence = r.Decision.Confidence
+			hasRisk = isRecordRisky(&r)
+		}
+
+		toolCalls := make([]map[string]interface{}, 0, len(r.ToolCalls))
+		for _, tc := range r.ToolCalls {
+			toolCalls = append(toolCalls, map[string]interface{}{
+				"name":         tc.Name,
+				"arguments":    tc.Arguments,
+				"result":       tc.Result,
+				"is_sensitive": tc.IsSensitive,
+			})
+		}
+
+		requestContent := ""
+		for _, msg := range r.Messages {
+			if strings.EqualFold(msg.Role, "user") {
+				requestContent = msg.Content
+				break
+			}
+		}
+
+		// 序列化完整 messages 供审计持久化
+		messagesJSON := "[]"
+		if len(r.Messages) > 0 {
+			if b, err := json.Marshal(r.Messages); err == nil {
+				messagesJSON = string(b)
+			}
+		}
+
+		entry := map[string]interface{}{
+			"id":                  r.RequestID,
+			"timestamp":           r.StartedAt,
+			"request_id":          r.RequestID,
+			"asset_name":          r.AssetName,
+			"asset_id":            r.AssetID,
+			"model":               r.Model,
+			"request_content":     requestContent,
+			"tool_calls":          toolCalls,
+			"output_content":      r.OutputContent,
+			"has_risk":            hasRisk,
+			"risk_level":          riskLevel,
+			"risk_reason":         riskReason,
+			"confidence":          confidence,
+			"action":              action,
+			"prompt_tokens":       r.PromptTokens,
+			"completion_tokens":   r.CompletionTokens,
+			"conversation_tokens": r.ConversationTokens,
+			"daily_tokens":        r.DailyTokens,
+			"total_tokens":        r.PromptTokens + r.CompletionTokens,
+			"duration_ms":         durationMs,
+			"messages":            messagesJSON,
+			"message_count":       r.MessageCount,
+		}
+		out = append(out, entry)
+	}
+	return out
 }

@@ -158,16 +158,12 @@ func assertErrorCode(t *testing.T, resp *APIResponse, wantCode int) {
 func setupPolicyRuntimeTestDB(t *testing.T) {
 	t.Helper()
 
-	// 清理全局 PluginManager 单例残留的注册信息，避免跨用例状态泄漏。
-	core.GetPluginManager().ResetForTest()
-
 	dbPath := filepath.Join(t.TempDir(), "policy_runtime_test.db")
 	if err := repository.InitDB(dbPath); err != nil {
 		t.Fatalf("InitDB failed: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = repository.CloseDB()
-		core.GetPluginManager().ResetForTest()
 	})
 }
 
@@ -1190,6 +1186,16 @@ func TestHandleScan_AppliesDefaultPolicyToNewAssets(t *testing.T) {
 
 	registerScannedAPITestAsset(t, "PolicyScanAutoApply", "policy-scan-auto-apply")
 
+	var startPayload string
+	originalStart := startProtectionProxyForPolicy
+	startProtectionProxyForPolicy = func(configJSON string) string {
+		startPayload = configJSON
+		return `{"success":true}`
+	}
+	t.Cleanup(func() {
+		startProtectionProxyForPolicy = originalStart
+	})
+
 	_, ts, token := setupTestServer(t)
 	defer ts.Close()
 
@@ -1209,12 +1215,8 @@ func TestHandleScan_AppliesDefaultPolicyToNewAssets(t *testing.T) {
 	if !config.Enabled || !config.AuditOnly || !config.SandboxEnabled {
 		t.Fatalf("expected config to inherit default policy, got %+v", config)
 	}
-	// 新扫描资产不继承默认策略的 BotModelConfig，待用户后续单独配置。
-	if config.BotModelConfig != nil {
-		t.Fatalf("expected new scanned asset to have no bot model config, got %+v", config.BotModelConfig)
-	}
-	if !config.InheritsDefaultPolicy {
-		t.Fatalf("expected new asset to be marked as inheriting default policy, got %+v", config)
+	if config.BotModelConfig == nil || config.BotModelConfig.Model != "gpt-4.1" {
+		t.Fatalf("expected bot model to inherit default policy, got %+v", config.BotModelConfig)
 	}
 
 	rules, found, err := repo.GetShepherdSensitiveActions("PolicyScanAutoApply", "policy-scan-auto-apply")
@@ -1224,11 +1226,13 @@ func TestHandleScan_AppliesDefaultPolicyToNewAssets(t *testing.T) {
 	if !found || len(rules) != 1 || rules[0] != "confirm-delete" {
 		t.Fatalf("expected inherited user rules, got found=%v rules=%v", found, rules)
 	}
+
+	if startPayload == "" {
+		t.Fatal("expected scan to start protection for the new asset")
+	}
 }
 
 func TestHandleScan_AutoEnablesProtectionForNewAssetsWhenDefaultBotModelExists(t *testing.T) {
-	// 业务规则调整后：新扫描资产不继承默认策略的 BotModelConfig，
-	// 也不做"有模型即强制启用"的覆盖。默认策略为 disabled 时，新资产也继承 disabled。
 	setupPolicyRuntimeTestDB(t)
 
 	repo := repository.NewProtectionRepository(nil)
@@ -1258,6 +1262,16 @@ func TestHandleScan_AutoEnablesProtectionForNewAssetsWhenDefaultBotModelExists(t
 
 	registerScannedAPITestAsset(t, "PolicyScanAutoEnable", "policy-scan-auto-enable")
 
+	var startPayload string
+	originalStart := startProtectionProxyForPolicy
+	startProtectionProxyForPolicy = func(configJSON string) string {
+		startPayload = configJSON
+		return `{"success":true}`
+	}
+	t.Cleanup(func() {
+		startProtectionProxyForPolicy = originalStart
+	})
+
 	_, ts, token := setupTestServer(t)
 	defer ts.Close()
 
@@ -1274,15 +1288,17 @@ func TestHandleScan_AutoEnablesProtectionForNewAssetsWhenDefaultBotModelExists(t
 	if config == nil {
 		t.Fatal("expected scan to create asset-specific protection config")
 	}
-	if config.Enabled {
-		t.Fatalf("expected new asset protection to inherit disabled default, got %+v", config)
+	if !config.Enabled {
+		t.Fatalf("expected new asset protection to auto-enable when default bot model exists, got %+v", config)
 	}
-	// 新扫描资产不携带 BotModelConfig。
-	if config.BotModelConfig != nil {
-		t.Fatalf("expected new scanned asset to have no bot model config, got %+v", config.BotModelConfig)
+	if config.AuditOnly {
+		t.Fatalf("expected auto-enabled protection to run in active mode, got %+v", config)
 	}
-	if !config.InheritsDefaultPolicy {
-		t.Fatalf("expected new asset to be marked as inheriting default policy, got %+v", config)
+	if config.BotModelConfig == nil || config.BotModelConfig.Model != "gpt-4.1" {
+		t.Fatalf("expected bot model to inherit default config, got %+v", config.BotModelConfig)
+	}
+	if startPayload == "" {
+		t.Fatal("expected scan to start protection for the new asset")
 	}
 }
 

@@ -290,8 +290,6 @@ func (m *SandboxManager) SetMonitor(monitor *ProcessMonitor) {
 var (
 	sandboxManagers = make(map[string]*SandboxManager)
 	sandboxMu       sync.RWMutex
-	defaultPolicyMu sync.RWMutex
-	defaultPolicy   string
 )
 
 // GetSandboxManager gets or creates a sandbox manager for an asset
@@ -377,13 +375,6 @@ func ParseSandboxConfigJSON(jsonStr string) (*SandboxConfig, error) {
 // GetDefaultPolicyDir returns the default policy directory
 // This is a fallback - prefer passing explicit policyDir from Dart layer
 func GetDefaultPolicyDir() string {
-	defaultPolicyMu.RLock()
-	overridden := defaultPolicy
-	defaultPolicyMu.RUnlock()
-	if overridden != "" {
-		return overridden
-	}
-
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		wd, wdErr := os.Getwd()
@@ -395,11 +386,4 @@ func GetDefaultPolicyDir() string {
 
 	// Use ~/.botsec/policies (matches Dart layer SandboxService)
 	return filepath.Join(homeDir, ".botsec", "policies")
-}
-
-// SetDefaultPolicyDir sets a process-wide default policy directory.
-func SetDefaultPolicyDir(policyDir string) {
-	defaultPolicyMu.Lock()
-	defer defaultPolicyMu.Unlock()
-	defaultPolicy = policyDir
 }

@@ -39,12 +39,6 @@ class _ModelConfigDialogState extends State<ModelConfigDialog> {
     }
   }
 
-  /// 处理手动验证连通性动作。
-  Future<void> _handleValidateConnection() async {
-    if (_saving) return;
-    await _formKey.currentState?.validateConnection();
-  }
-
   void _handleCancel() {
     if (_saving) return;
     if (Navigator.of(context).canPop()) {
@@ -116,25 +110,6 @@ class _ModelConfigDialogState extends State<ModelConfigDialog> {
                     style: AppFonts.inter(
                       fontSize: 14,
                       color: _saving ? Colors.white24 : Colors.white54,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                OutlinedButton(
-                  onPressed: _saving ? null : _handleValidateConnection,
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
-                    foregroundColor: _saving ? Colors.white24 : Colors.white70,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                  ),
-                  child: Text(
-                    l10n.modelConfigValidateConnection,
-                    style: AppFonts.inter(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),

@@ -4,41 +4,29 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/cloudwego/eino/schema"
 )
 
-func TestFormatSecurityMessage_AlwaysEnglish(t *testing.T) {
+func TestFormatSecurityMessage_Localized(t *testing.T) {
 	sg := &ShepherdGate{language: "zh"}
 
 	msg := sg.FormatSecurityMessage(&ShepherdDecision{
 		Status: "NEEDS_CONFIRMATION",
 		Reason: "script execution requires confirmation",
 	})
-	// FormatSecurityMessage 始终返回英文，翻译由 TranslateForUser 按需完成
-	if !strings.Contains(msg, "Status") {
-		t.Fatalf("expected English status label, got: %s", msg)
+	if !strings.Contains(msg, "状态: 需要确认") {
+		t.Fatalf("expected localized status label, got: %s", msg)
 	}
 	if !strings.Contains(msg, "script execution requires confirmation") {
 		t.Fatalf("expected original English reason preserved, got: %s", msg)
 	}
+	if strings.Contains(msg, "继续可回复：") {
+		t.Fatalf("did not expect reply guide inside ShepherdGate analysis block, got: %s", msg)
+	}
 }
 
-func TestEvaluateRecoveryIntent_ParseAndNormalize(t *testing.T) {
+func TestEvaluateRecoveryIntent_ConfirmByKeyword(t *testing.T) {
 	sg := &ShepherdGate{
 		language: "zh",
-		chatModel: &stubChatModel{
-			generateResp: &schema.Message{
-				Content: `{"intent":"confirm","reason":"用户已确认。","usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12}}`,
-				Extra: map[string]interface{}{
-					"usage": map[string]interface{}{
-						"prompt_tokens":     8,
-						"completion_tokens": 4,
-						"total_tokens":      12,
-					},
-				},
-			},
-		},
 	}
 
 	got, err := sg.EvaluateRecoveryIntent(context.Background(),
@@ -58,8 +46,104 @@ func TestEvaluateRecoveryIntent_ParseAndNormalize(t *testing.T) {
 	if got.Intent != "CONFIRM" {
 		t.Fatalf("expected CONFIRM intent, got=%s", got.Intent)
 	}
-	if got.Usage == nil || got.Usage.TotalTokens != 12 {
-		t.Fatalf("expected usage total=12, got=%+v", got.Usage)
+	if got.Usage != nil {
+		t.Fatalf("expected nil usage for keyword-based decision, got=%+v", got.Usage)
+	}
+}
+
+func TestEvaluateRecoveryIntent_RejectHasPriority(t *testing.T) {
+	sg := &ShepherdGate{
+		language: "zh",
+	}
+
+	got, err := sg.EvaluateRecoveryIntent(context.Background(),
+		[]ConversationMessage{
+			{Role: "assistant", Content: "[ShepherdGate] 状态: NEEDS_CONFIRMATION"},
+			{Role: "user", Content: "不要继续，取消执行"},
+		},
+		[]ToolCallInfo{{Name: "bash_execute", RawArgs: `{"command":"rm -rf /tmp/x"}`}},
+		"script requires confirmation",
+	)
+	if err != nil {
+		t.Fatalf("EvaluateRecoveryIntent returned error: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("expected non-nil decision")
+	}
+	if got.Intent != "REJECT" {
+		t.Fatalf("expected REJECT intent, got=%s", got.Intent)
+	}
+}
+
+func TestEvaluateRecoveryIntent_MultilingualKeywords(t *testing.T) {
+	sg := &ShepherdGate{
+		language: "en",
+	}
+
+	got, err := sg.EvaluateRecoveryIntent(context.Background(),
+		[]ConversationMessage{
+			{Role: "assistant", Content: "[ShepherdGate] Status: NEEDS_CONFIRMATION"},
+			{Role: "user", Content: "好的，继续"},
+		},
+		nil,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("EvaluateRecoveryIntent returned error: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("expected non-nil decision")
+	}
+	if got.Intent != "CONFIRM" {
+		t.Fatalf("expected CONFIRM for multilingual keyword, got=%s", got.Intent)
+	}
+}
+
+func TestEvaluateRecoveryIntent_NoProblemShouldConfirm(t *testing.T) {
+	sg := &ShepherdGate{
+		language: "en",
+	}
+
+	got, err := sg.EvaluateRecoveryIntent(context.Background(),
+		[]ConversationMessage{
+			{Role: "assistant", Content: "[ShepherdGate] Status: NEEDS_CONFIRMATION"},
+			{Role: "user", Content: "no problem, continue"},
+		},
+		nil,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("EvaluateRecoveryIntent returned error: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("expected non-nil decision")
+	}
+	if got.Intent != "CONFIRM" {
+		t.Fatalf("expected CONFIRM for 'no problem, continue', got=%s", got.Intent)
+	}
+}
+
+func TestEvaluateRecoveryIntent_OutOfScopeShouldBeNone(t *testing.T) {
+	sg := &ShepherdGate{
+		language: "en",
+	}
+
+	got, err := sg.EvaluateRecoveryIntent(context.Background(),
+		[]ConversationMessage{
+			{Role: "assistant", Content: "normal assistant reply"},
+			{Role: "user", Content: "ok, please summarize this file"},
+		},
+		[]ToolCallInfo{{Name: "bash_execute", RawArgs: `{"command":"rm -rf /tmp/x"}`}},
+		"script requires confirmation",
+	)
+	if err != nil {
+		t.Fatalf("EvaluateRecoveryIntent returned error: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("expected non-nil decision")
+	}
+	if got.Intent != "NONE" {
+		t.Fatalf("expected NONE for out-of-scope user message, got=%s", got.Intent)
 	}
 }
 

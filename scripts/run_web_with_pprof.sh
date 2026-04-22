@@ -84,8 +84,8 @@ if is_port_in_use "$PPROF_PORT"; then
     echo "pprof may fail to start; set BOTSEC_PPROF_PORT to another port if needed"
 fi
 
-echo "[1/4] Build plugin..."
-"$PROJECT_ROOT/scripts/build_openclaw_plugin.sh"
+echo "[1/4] Build Go shared library..."
+"$PROJECT_ROOT/scripts/build_go.sh"
 echo ""
 
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then

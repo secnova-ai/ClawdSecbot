@@ -9,7 +9,6 @@ import '../utils/app_logger.dart';
 class ProtectionDatabaseService {
   static final ProtectionDatabaseService _instance =
       ProtectionDatabaseService._internal();
-  String? _lastEnabledConfigsSignature;
 
   factory ProtectionDatabaseService() => _instance;
 
@@ -132,7 +131,9 @@ class ProtectionDatabaseService {
         appLogger.warning('[ProtectionDB] Failed to parse config: $e');
       }
     }
-    _logEnabledProtectionConfigsIfChanged(configs);
+    appLogger.info(
+      '[ProtectionDB] Enabled protection configs count: ${configs.length}',
+    );
     return configs;
   }
 
@@ -373,50 +374,5 @@ class ProtectionDatabaseService {
           ? DateTime.parse(map['updated_at'] as String)
           : null,
     );
-  }
-
-  /// 仅在启用配置发生变化时记录数量日志，避免重复写入。
-  void _logEnabledProtectionConfigsIfChanged(List<ProtectionConfig> configs) {
-    final signature = _buildEnabledConfigsSignature(configs);
-    if (_lastEnabledConfigsSignature == signature) {
-      return;
-    }
-    _lastEnabledConfigsSignature = signature;
-    appLogger.info(
-      '[ProtectionDB] Enabled protection configs count: ${configs.length}',
-    );
-  }
-
-  /// 构建启用配置签名，用于判断配置数据是否发生变化。
-  String _buildEnabledConfigsSignature(List<ProtectionConfig> configs) {
-    if (configs.isEmpty) {
-      return 'empty';
-    }
-
-    final fingerprints = configs
-        .map((config) => _buildProtectionConfigFingerprint(config))
-        .toList()
-      ..sort();
-    return fingerprints.join('||');
-  }
-
-  /// 构建单个启用配置指纹，用于识别同数量下的内容变化。
-  String _buildProtectionConfigFingerprint(ProtectionConfig config) {
-    return [
-      config.assetID,
-      config.assetName,
-      config.enabled ? '1' : '0',
-      config.auditOnly ? '1' : '0',
-      config.sandboxEnabled ? '1' : '0',
-      config.gatewayBinaryPath ?? '',
-      config.gatewayConfigPath ?? '',
-      config.singleSessionTokenLimit.toString(),
-      config.dailyTokenLimit.toString(),
-      jsonEncode(config.pathPermission.toJson()),
-      jsonEncode(config.networkPermission.toJson()),
-      jsonEncode(config.shellPermission.toJson()),
-      config.createdAt?.toIso8601String() ?? '',
-      config.updatedAt?.toIso8601String() ?? '',
-    ].join('|');
   }
 }

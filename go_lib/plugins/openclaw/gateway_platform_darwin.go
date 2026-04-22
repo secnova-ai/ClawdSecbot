@@ -87,7 +87,7 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 	logging.Info("[GatewayManager] Step 4: Syncing sandbox config, sandboxEnabled=%v, plist=%s", req.SandboxEnabled, plistPath)
 	policyDir := req.PolicyDir
 	if policyDir == "" {
-		policyDir = core.ResolvePolicyDir(homeDir)
+		policyDir = filepath.Join(homeDir, ".botsec", "policies")
 	}
 	_ = os.MkdirAll(policyDir, 0755)
 

@@ -35,8 +35,6 @@ Only call extra tools when context is insufficient.
 - Block critical secret/system patterns.
 - Block traversal or scope escalation.
 - Allow only when path scope is explicit, minimal, and user-authorized.
-- If risk is low and scope is compliant, return allow directly.
-- Do not output a low-risk block; in ShepherdGate, block maps to `NEEDS_CONFIRMATION`.
 
 ## Cross-skill coordination
 - If files are being sent externally, load `data_exfiltration_guard`.

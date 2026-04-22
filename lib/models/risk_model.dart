@@ -8,7 +8,6 @@ enum RiskLevel { low, medium, high, critical }
 class RiskInfo {
   final String id; // 用于国际化的 Key
   final Map<String, Object>? args; // 动态参数
-  final String? assetID;
   final String title; // 默认/日志标题
   final String description; // 默认/日志描述
   final RiskLevel level;
@@ -19,7 +18,6 @@ class RiskInfo {
   RiskInfo({
     required this.id,
     this.args,
-    this.assetID,
     required this.title,
     required this.description,
     required this.level,
@@ -45,7 +43,6 @@ class RiskInfo {
     return {
       'id': id,
       'args': args,
-      'asset_id': assetID,
       'title': title,
       'description': description,
       'level': level.name, // 使用字符串名称与Go端兼容
@@ -80,10 +77,6 @@ class RiskInfo {
     return RiskInfo(
       id: json['id'],
       args: (json['args'] as Map?)?.cast<String, Object>(),
-      assetID: _parseAssetID(
-        json['asset_id'],
-        (json['args'] as Map?)?.cast<String, Object>(),
-      ),
       title: json['title'],
       description: json['description'],
       level: parseLevel(json['level']),
@@ -97,18 +90,6 @@ class RiskInfo {
           : null,
       sourcePlugin: json['source_plugin'],
     );
-  }
-
-  static String? _parseAssetID(dynamic rawAssetID, Map<String, Object>? args) {
-    final direct = rawAssetID?.toString().trim();
-    if (direct != null && direct.isNotEmpty) {
-      return direct;
-    }
-    final fromArgs = args?['asset_id']?.toString().trim();
-    if (fromArgs == null || fromArgs.isEmpty) {
-      return null;
-    }
-    return fromArgs;
   }
 }
 

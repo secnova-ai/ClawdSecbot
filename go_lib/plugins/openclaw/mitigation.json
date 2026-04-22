@@ -264,6 +264,88 @@
     }
   },
   {
+    "risk_id": "openclaw_insecure_or_dangerous_flags",
+    "mitigation": {
+      "type": "suggestion",
+      "title": "Disable dangerous gateway flags",
+      "description": "This risk requires manual hardening. Insecure and dangerous flags reduce auth and origin protections and should not stay enabled in normal deployments.",
+      "suggestions": [
+        {
+          "priority": "P0",
+          "category": "Immediate actions",
+          "items": [
+            {
+              "action": "Disable dangerous control UI flags",
+              "detail": "Set gateway.controlUi.allowInsecureAuth=false and gateway.controlUi.dangerouslyDisableDeviceAuth=false."
+            },
+            {
+              "action": "Disable host header origin fallback",
+              "detail": "Set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback=false to avoid trusting spoofable host headers."
+            },
+            {
+              "action": "Avoid wildcard browser origins",
+              "detail": "Remove '*' from gateway.controlUi.allowedOrigins and keep an explicit allowlist."
+            }
+          ]
+        },
+        {
+          "priority": "P1",
+          "category": "Network trust hardening",
+          "items": [
+            {
+              "action": "Disable real IP fallback",
+              "detail": "Set gateway.allowRealIpFallback=false unless you have a verified reverse-proxy trust chain."
+            },
+            {
+              "action": "Validate trusted-proxy auth prerequisites",
+              "detail": "If gateway.auth.mode is trusted-proxy, configure gateway.trustedProxies with explicit proxy addresses."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "risk_id": "openclaw_config_patch_outdated",
+    "mitigation": {
+      "type": "suggestion",
+      "title": "Upgrade OpenClaw to patched security release",
+      "description": "This risk is tied to published OpenClaw configuration-security advisories. Upgrade to the required patched version and re-run security audit.",
+      "suggestions": [
+        {
+          "priority": "P0",
+          "category": "Patch management",
+          "items": [
+            {
+              "action": "Check current version",
+              "detail": "Run the version command and verify it meets the required patched version.",
+              "command": "openclaw --version"
+            },
+            {
+              "action": "Upgrade to required release or newer",
+              "detail": "Install the patched OpenClaw release shown by the risk details, then restart gateway and clients."
+            }
+          ]
+        },
+        {
+          "priority": "P1",
+          "category": "Post-upgrade validation",
+          "items": [
+            {
+              "action": "Run built-in security audit",
+              "detail": "Execute deep audit after upgrade to confirm config-security findings are cleared.",
+              "command": "openclaw security audit --deep"
+            },
+            {
+              "action": "Rotate authentication material",
+              "detail": "Rotate gateway and provider credentials if the instance ran on vulnerable versions in untrusted environments."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
     "risk_id": "openclaw_1click_rce_vulnerability",
     "mitigation": {
       "type": "suggestion",

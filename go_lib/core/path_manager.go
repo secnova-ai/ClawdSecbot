@@ -18,13 +18,11 @@ type PathManager struct {
 	// Base paths provided or inferred at startup.
 	workspaceDir string
 	homeDir      string
-	sandboxDir   string
 
 	// Derived paths owned by core.
 	logDir          string
 	backupDir       string
 	policyDir       string
-	sandboxLogDir   string
 	reactSkillDir   string
 	scanSkillDir    string
 	dbPath          string
@@ -47,11 +45,6 @@ func GetPathManager() *PathManager {
 // Initialize configures the path manager from a single app data base
 // directory and the user home directory.
 func (pm *PathManager) Initialize(workspaceDir, homeDir string) error {
-	return pm.InitializeWithSandbox(workspaceDir, homeDir, "")
-}
-
-// InitializeWithSandbox configures the path manager with an explicit sandbox root.
-func (pm *PathManager) InitializeWithSandbox(workspaceDir, homeDir, sandboxDir string) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -62,13 +55,11 @@ func (pm *PathManager) InitializeWithSandbox(workspaceDir, homeDir, sandboxDir s
 
 	pm.workspaceDir = workspaceDir
 	pm.homeDir = homeDir
-	pm.sandboxDir = resolveSandboxRoot(homeDir, sandboxDir)
 
 	// Derive all runtime-owned paths from the shared base directory.
 	pm.logDir = filepath.Join(workspaceDir, "logs")
-	pm.backupDir = filepath.Join(pm.sandboxDir, "backups")
-	pm.policyDir = filepath.Join(pm.sandboxDir, "policies")
-	pm.sandboxLogDir = filepath.Join(pm.sandboxDir, "logs")
+	pm.backupDir = filepath.Join(workspaceDir, "backups")
+	pm.policyDir = filepath.Join(homeDir, ".botsec", "policies")
 	pm.reactSkillDir = filepath.Join(workspaceDir, "skills", "shepherd_gate")
 	pm.scanSkillDir = filepath.Join(workspaceDir, "skills", "skill_scanner")
 	pm.dbPath = filepath.Join(workspaceDir, "bot_sec_manager.db")
@@ -91,21 +82,13 @@ func (pm *PathManager) InitializeWithSandbox(workspaceDir, homeDir, sandboxDir s
 		pm.versionFilePath,
 	)
 	logging.Info("Derived paths (skills): reactSkillDir=%s, scanSkillDir=%s", pm.reactSkillDir, pm.scanSkillDir)
-	logging.Info("Derived paths (sandbox): sandboxDir=%s, sandboxLogDir=%s", pm.sandboxDir, pm.sandboxLogDir)
 
 	return nil
 }
 
 // ensureDirectories creates required runtime directories.
 func (pm *PathManager) ensureDirectories() error {
-	dirs := []string{
-		pm.logDir,
-		pm.backupDir,
-		pm.policyDir,
-		pm.sandboxLogDir,
-		pm.reactSkillDir,
-		pm.scanSkillDir,
-	}
+	dirs := []string{pm.logDir, pm.backupDir, pm.policyDir, pm.reactSkillDir, pm.scanSkillDir}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
@@ -137,25 +120,11 @@ func (pm *PathManager) GetHomeDir() string {
 	return pm.homeDir
 }
 
-// GetSandboxDir returns the sandbox root directory.
-func (pm *PathManager) GetSandboxDir() string {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
-	return pm.sandboxDir
-}
-
 // GetLogDir returns the derived logs directory.
 func (pm *PathManager) GetLogDir() string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.logDir
-}
-
-// GetSandboxLogDir returns the derived sandbox logs directory.
-func (pm *PathManager) GetSandboxLogDir() string {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
-	return pm.sandboxLogDir
 }
 
 // GetBackupDir returns the derived backups directory.
@@ -207,11 +176,9 @@ func (pm *PathManager) ResetForTest(workspaceDir, homeDir string) error {
 	pm.initialized = false
 	pm.workspaceDir = ""
 	pm.homeDir = ""
-	pm.sandboxDir = ""
 	pm.logDir = ""
 	pm.backupDir = ""
 	pm.policyDir = ""
-	pm.sandboxLogDir = ""
 	pm.reactSkillDir = ""
 	pm.scanSkillDir = ""
 	pm.dbPath = ""
@@ -223,43 +190,6 @@ func (pm *PathManager) ResetForTest(workspaceDir, homeDir string) error {
 	}
 
 	return pm.Initialize(workspaceDir, homeDir)
-}
-
-// ResolvePolicyDir resolves policy directory with PathManager first.
-func ResolvePolicyDir(homeDir string) string {
-	pm := GetPathManager()
-	if pm.IsInitialized() {
-		return pm.GetPolicyDir()
-	}
-	return filepath.Join(resolveSandboxRoot(homeDir, ""), "policies")
-}
-
-// ResolveBackupDir resolves backup directory with PathManager first.
-func ResolveBackupDir(homeDir string) string {
-	pm := GetPathManager()
-	if pm.IsInitialized() {
-		return pm.GetBackupDir()
-	}
-	return filepath.Join(resolveSandboxRoot(homeDir, ""), "backups")
-}
-
-// ResolveSandboxLogDir resolves sandbox log directory with PathManager first.
-func ResolveSandboxLogDir(homeDir string) string {
-	pm := GetPathManager()
-	if pm.IsInitialized() {
-		return pm.GetSandboxLogDir()
-	}
-	return filepath.Join(resolveSandboxRoot(homeDir, ""), "logs")
-}
-
-func resolveSandboxRoot(homeDir, sandboxDir string) string {
-	if sandboxDir != "" {
-		return sandboxDir
-	}
-	if homeDir != "" {
-		return filepath.Join(homeDir, ".botsec")
-	}
-	return filepath.Join(".", ".botsec")
 }
 
 // ========== Path helpers ==========

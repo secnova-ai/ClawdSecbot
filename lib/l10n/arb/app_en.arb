@@ -269,8 +269,6 @@
   "modelConfigSaveFailed": "Failed to save configuration",
   "modelConfigRequired": "Please configure AI model to continue",
   "modelConfigTesting": "Testing...",
-  "modelConfigValidateConnection": "Validate Connectivity",
-  "modelConfigTestSuccess": "Connectivity validation succeeded",
   "modelConfigSaving": "Saving...",
   "modelConfigTestFailed": "Connection test failed: {error}",
   "@modelConfigTestFailed": {
@@ -1012,7 +1010,7 @@
     }
   },
   "exitRestoreConfirm": "Restore and Exit",
-  "exitRestoreExitOnly": "Exit Only",
+  "exitWithoutRestoreConfirm": "Exit Without Restoring",
   "exitRestoreInProgress": "Restoring the Bot's default service. Please wait...",
   "exitRestoreFailedTitle": "Restore Failed, Exit Cancelled",
   "exitRestoreFailedMessage": "The following assets could not be restored, so the app will stay open to avoid leaving the Bot unusable after exit:\n\n{details}",

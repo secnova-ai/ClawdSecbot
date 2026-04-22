@@ -38,8 +38,6 @@ Only call extra tools when context is insufficient.
 - Block critical patterns.
 - Block when visited domain/action is outside explicit user scope and impact is high.
 - Allow only when domain, purpose, and follow-up actions are explicit, bounded, and consistent.
-- If risk is low and intent is aligned, return allow directly.
-- Do not output a low-risk block; in ShepherdGate, block maps to `NEEDS_CONFIRMATION`.
 
 ## Cross-skill coordination
 - If webpage flow causes file upload or outbound transfer, load `data_exfiltration_guard`.

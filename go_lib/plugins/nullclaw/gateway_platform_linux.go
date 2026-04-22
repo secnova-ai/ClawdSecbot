@@ -84,10 +84,10 @@ func restartNullclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 	logging.Info("[GatewayManager] Step 4: Syncing sandbox config, sandboxEnabled=%v, unit=%s", req.SandboxEnabled, unitPath)
 	policyDir := req.PolicyDir
 	if policyDir == "" {
-		policyDir = core.ResolvePolicyDir(homeDir)
+		policyDir = filepath.Join(homeDir, ".botsec", "policies")
 	}
 	_ = os.MkdirAll(policyDir, 0755)
-	logDir := core.ResolveSandboxLogDir(homeDir)
+	logDir := filepath.Join(homeDir, ".botsec", "logs")
 	_ = os.MkdirAll(logDir, 0755)
 
 	var modified bool

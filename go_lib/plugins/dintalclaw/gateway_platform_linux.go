@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"go_lib/core"
 	"go_lib/core/cmdutil"
 	"go_lib/core/logging"
 	"go_lib/core/sandbox"
@@ -320,10 +319,10 @@ func restartDintalclawProcess(req *GatewayRestartRequest) (map[string]interface{
 	if req.SandboxEnabled {
 		policyDir := req.PolicyDir
 		if policyDir == "" {
-			policyDir = core.ResolvePolicyDir(homeDir)
+			policyDir = filepath.Join(homeDir, ".botsec", "policies")
 		}
 		_ = os.MkdirAll(policyDir, 0755)
-		logDir := core.ResolveSandboxLogDir(homeDir)
+		logDir := filepath.Join(homeDir, ".botsec", "logs")
 		_ = os.MkdirAll(logDir, 0755)
 		sandboxLogPath = filepath.Join(logDir, fmt.Sprintf("botsec_%s_hook.log",
 			sandbox.SanitizeAssetNamePublic(instanceKey)))

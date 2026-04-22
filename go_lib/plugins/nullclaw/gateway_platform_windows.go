@@ -79,7 +79,7 @@ func restartNullclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 func restartWithSandbox(req *GatewayRestartRequest, binaryPath, homeDir string) (map[string]interface{}, error) {
 	policyDir := req.PolicyDir
 	if policyDir == "" {
-		policyDir = core.ResolvePolicyDir(homeDir)
+		policyDir = filepath.Join(homeDir, ".botsec", "policies")
 	}
 
 	logDir := policyDir

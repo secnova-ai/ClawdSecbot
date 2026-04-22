@@ -14,8 +14,6 @@ type Risk struct {
 	ID string `json:"id"`
 	// SourcePlugin identifies which plugin produced this risk (auto-injected by PluginManager)
 	SourcePlugin string `json:"source_plugin,omitempty"`
-	// AssetID identifies the concrete asset instance for mitigation routing.
-	AssetID string `json:"asset_id,omitempty"`
 	// Title 风险标题（默认英文,UI可根据ID覆盖）
 	Title string `json:"title"`
 	// Description 风险描述

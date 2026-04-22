@@ -30,43 +30,37 @@ class AppLogger {
   /// Get the logs directory path (for sharing with Go)
   String? get logDir => _logDir;
 
-  /// 初始化日志器，必须在使用日志方法前调用。
+  /// Initialize the logger. Must be called before using any log methods.
   ///
-  /// [windowName] 用于生成日志文件名。
-  /// [customLogDir] 不为空时优先使用该目录写日志，失败则自动回退默认目录。
-  Future<void> init({String windowName = 'main', String? customLogDir}) async {
+  /// The window name will be used in the log file name.
+  Future<void> init({String windowName = 'main'}) async {
     if (_initialized) return;
 
     try {
       final safeWindowName = _sanitizeWindowName(windowName);
-      final preferredLogDir = _resolveCustomLogDir(customLogDir);
+      _logDir = await _resolveLogDir();
+      final logsDir = Directory(_logDir!);
 
-      if (preferredLogDir != null) {
-        try {
-          await _setupFileLogger(
-            logDir: preferredLogDir,
-            safeWindowName: safeWindowName,
-          );
-          _initialized = true;
-          info('Flutter logger initialized, log dir: $_logDir');
-          return;
-        } catch (e) {
-          // Keep English for key runtime logs.
-          debugPrint(
-            '[AppLogger] Failed to initialize custom log dir: $preferredLogDir, error: $e',
-          );
-        }
+      if (!await logsDir.exists()) {
+        await logsDir.create(recursive: true);
       }
 
-      final defaultLogDir = await _resolveDefaultLogDir();
-      await _setupFileLogger(
-        logDir: defaultLogDir,
-        safeWindowName: safeWindowName,
+      _logFileName = '$flutterLogFilePrefix$safeWindowName.log';
+      _logFile = File(p.join(_logDir!, _logFileName!));
+      await _rotateIfNeeded();
+
+      _logSink = _logFile!.openWrite(mode: FileMode.append);
+
+      _logger = Logger(
+        printer: _FileLogPrinter(),
+        output: _FileLogOutput(_logSink!),
+        level: kReleaseMode ? Level.info : Level.debug,
       );
+
       _initialized = true;
       info('Flutter logger initialized, log dir: $_logDir');
     } catch (e) {
-      // 文件日志初始化失败时回退为仅控制台日志。
+      // Fallback to console-only logging if file init fails
       _logger = Logger(
         printer: PrettyPrinter(
           methodCount: 0,
@@ -78,47 +72,10 @@ class AppLogger {
     }
   }
 
-  /// 解析默认日志目录（应用数据目录下的 logs）。
-  Future<String> _resolveDefaultLogDir() async {
+  /// Resolve the shared log directory under the app data base directory.
+  Future<String> _resolveLogDir() async {
     final dir = await getApplicationSupportDirectory();
     return p.join(dir.path, 'logs');
-  }
-
-  /// 解析并规范化自定义日志目录。
-  String? _resolveCustomLogDir(String? customLogDir) {
-    if (customLogDir == null) {
-      return null;
-    }
-    final trimmed = customLogDir.trim();
-    if (trimmed.isEmpty) {
-      return null;
-    }
-    final absolutePath = p.isAbsolute(trimmed) ? trimmed : p.absolute(trimmed);
-    return p.normalize(absolutePath);
-  }
-
-  /// 按指定目录创建文件日志输出能力。
-  Future<void> _setupFileLogger({
-    required String logDir,
-    required String safeWindowName,
-  }) async {
-    _logDir = logDir;
-    final logsDir = Directory(_logDir!);
-
-    if (!await logsDir.exists()) {
-      await logsDir.create(recursive: true);
-    }
-
-    _logFileName = '$flutterLogFilePrefix$safeWindowName.log';
-    _logFile = File(p.join(_logDir!, _logFileName!));
-    await _rotateIfNeeded();
-    _logSink = _logFile!.openWrite(mode: FileMode.append);
-
-    _logger = Logger(
-      printer: _FileLogPrinter(),
-      output: _FileLogOutput(_logSink!),
-      level: kReleaseMode ? Level.info : Level.debug,
-    );
   }
 
   /// Sanitize window name for file naming.

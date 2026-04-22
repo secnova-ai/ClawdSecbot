@@ -31,20 +31,6 @@ func TestPlanDatabaseVersionMigrations_MultiStep(t *testing.T) {
 	}
 }
 
-func TestPlanDatabaseVersionMigrations_GlobalRegistryTo1_0_3(t *testing.T) {
-	plan, err := planDatabaseVersionMigrations("1.0.0", "1.0.3", databaseVersionMigrations)
-	if err != nil {
-		t.Fatalf("Expected global migration plan to succeed, got error: %v", err)
-	}
-
-	if len(plan) != 3 {
-		t.Fatalf("Expected 3 migration steps, got %d", len(plan))
-	}
-	if plan[2].fromVersion != "1.0.2" || plan[2].toVersion != "1.0.3" {
-		t.Fatalf("Expected final step 1.0.2 -> 1.0.3, got %+v", plan[2])
-	}
-}
-
 func TestInitDBWithVersion_FreshInstallWritesVersionState(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "fresh.db")
@@ -187,81 +173,6 @@ func TestInitDBWithVersion_RejectsDowngrade(t *testing.T) {
 	}
 }
 
-func TestInitDBWithVersion_UpgradesFrom1_0_2To1_0_3_RebuildsAuditAndRiskTables(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "upgrade_102_to_103.db")
-	versionFilePath := filepath.Join(tempDir, "bot_sec_manager.version")
-
-	if err := os.WriteFile(versionFilePath, []byte("1.0.2\n"), 0644); err != nil {
-		t.Fatalf("Failed to seed version file: %v", err)
-	}
-
-	prepareSQLiteFile(t, dbPath, func(db *sql.DB) {
-		if _, err := db.Exec(`CREATE TABLE audit_logs (id TEXT PRIMARY KEY, legacy_col TEXT)`); err != nil {
-			t.Fatalf("Failed to create legacy audit_logs: %v", err)
-		}
-		if _, err := db.Exec(`INSERT INTO audit_logs (id, legacy_col) VALUES ('audit_1', 'legacy')`); err != nil {
-			t.Fatalf("Failed to seed legacy audit_logs: %v", err)
-		}
-
-		if _, err := db.Exec(`CREATE TABLE scans (id INTEGER PRIMARY KEY AUTOINCREMENT, legacy_col TEXT)`); err != nil {
-			t.Fatalf("Failed to create legacy scans: %v", err)
-		}
-		if _, err := db.Exec(`INSERT INTO scans (legacy_col) VALUES ('legacy')`); err != nil {
-			t.Fatalf("Failed to seed legacy scans: %v", err)
-		}
-
-		if _, err := db.Exec(`CREATE TABLE assets (id INTEGER PRIMARY KEY AUTOINCREMENT, scan_id INTEGER, data TEXT)`); err != nil {
-			t.Fatalf("Failed to create legacy assets: %v", err)
-		}
-		if _, err := db.Exec(`INSERT INTO assets (scan_id, data) VALUES (1, '{"legacy":true}')`); err != nil {
-			t.Fatalf("Failed to seed legacy assets: %v", err)
-		}
-
-		if _, err := db.Exec(`CREATE TABLE risks (id INTEGER PRIMARY KEY AUTOINCREMENT, scan_id INTEGER, data TEXT)`); err != nil {
-			t.Fatalf("Failed to create legacy risks: %v", err)
-		}
-		if _, err := db.Exec(`INSERT INTO risks (scan_id, data) VALUES (1, '{"legacy":true}')`); err != nil {
-			t.Fatalf("Failed to seed legacy risks: %v", err)
-		}
-
-		if _, err := db.Exec(`CREATE TABLE skill_scans (id INTEGER PRIMARY KEY AUTOINCREMENT, skill_name TEXT)`); err != nil {
-			t.Fatalf("Failed to create legacy skill_scans: %v", err)
-		}
-		if _, err := db.Exec(`INSERT INTO skill_scans (skill_name) VALUES ('legacy_skill')`); err != nil {
-			t.Fatalf("Failed to seed legacy skill_scans: %v", err)
-		}
-	})
-
-	summary, err := InitDBWithVersion(dbPath, "1.0.3", versionFilePath)
-	if err != nil {
-		t.Fatalf("InitDBWithVersion failed: %v", err)
-	}
-	defer CloseDB()
-
-	if !summary.Upgraded {
-		t.Fatalf("Expected database upgraded=true, got %+v", summary)
-	}
-	if summary.PreviousVersion != "1.0.2" {
-		t.Fatalf("Expected previous version 1.0.2, got %s", summary.PreviousVersion)
-	}
-
-	assertVersionFileContent(t, versionFilePath, "1.0.3\n")
-	assertMetadataVersion(t, GetDB(), "1.0.3")
-
-	assertTableExists(t, GetDB(), "audit_logs")
-	assertTableExists(t, GetDB(), "scans")
-	assertTableExists(t, GetDB(), "assets")
-	assertTableExists(t, GetDB(), "risks")
-	assertTableExists(t, GetDB(), "skill_scans")
-
-	assertTableRowCount(t, GetDB(), "audit_logs", 0)
-	assertTableRowCount(t, GetDB(), "scans", 0)
-	assertTableRowCount(t, GetDB(), "assets", 0)
-	assertTableRowCount(t, GetDB(), "risks", 0)
-	assertTableRowCount(t, GetDB(), "skill_scans", 0)
-}
-
 func prepareSQLiteFile(t *testing.T, dbPath string, setup func(db *sql.DB)) {
 	t.Helper()
 
@@ -298,29 +209,5 @@ func assertMetadataVersion(t *testing.T, db *sql.DB, expected string) {
 	}
 	if version != expected {
 		t.Fatalf("Expected metadata version %q, got %q", expected, version)
-	}
-}
-
-func assertTableExists(t *testing.T, db *sql.DB, tableName string) {
-	t.Helper()
-
-	exists, err := tableExists(db, tableName)
-	if err != nil {
-		t.Fatalf("Failed to check table %s existence: %v", tableName, err)
-	}
-	if !exists {
-		t.Fatalf("Expected table %s to exist", tableName)
-	}
-}
-
-func assertTableRowCount(t *testing.T, db *sql.DB, tableName string, expected int) {
-	t.Helper()
-
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(1) FROM ` + quoteSQLiteIdentifier(tableName)).Scan(&count); err != nil {
-		t.Fatalf("Failed to count rows in %s: %v", tableName, err)
-	}
-	if count != expected {
-		t.Fatalf("Expected %d rows in %s, got %d", expected, tableName, count)
 	}
 }

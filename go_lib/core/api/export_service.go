@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -40,15 +39,13 @@ type ExportServiceImpl struct {
 	// Status file
 	statusFile string
 	// Audit log file
-	auditFile          string
-	auditExportStartAt string
+	auditFile string
 	// Events file
 	eventsFile string
 
 	// File write locks
-	auditFileMu         sync.Mutex
-	exportedAuditLogIDs map[string]struct{}
-	eventsFileMu        sync.Mutex
+	auditFileMu  sync.Mutex
+	eventsFileMu sync.Mutex
 
 	// Background goroutine control
 	stopChan chan struct{}
@@ -63,9 +60,9 @@ func NewExportService() *ExportServiceImpl {
 // Start initializes and starts the export service.
 func (s *ExportServiceImpl) Start() error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if s.running {
-		s.mu.Unlock()
 		return nil
 	}
 
@@ -73,28 +70,21 @@ func (s *ExportServiceImpl) Start() error {
 	pm := core.GetPathManager()
 	workspaceDir := pm.GetWorkspaceDir()
 	if workspaceDir == "" {
-		s.mu.Unlock()
 		return &exportError{"PathManager not initialized, cannot determine export directory"}
 	}
 
 	s.exportDir = filepath.Join(workspaceDir, exportDirName)
 	if err := os.MkdirAll(s.exportDir, 0755); err != nil {
-		s.mu.Unlock()
 		return &exportError{"failed to create export directory: " + err.Error()}
 	}
 
 	s.statusFile = filepath.Join(s.exportDir, statusFileName)
 	s.auditFile = filepath.Join(s.exportDir, auditFileName)
 	s.eventsFile = filepath.Join(s.exportDir, eventsFileName)
-	s.auditExportStartAt = time.Now().Format(time.RFC3339Nano)
 
 	s.stopChan = make(chan struct{})
 	s.running = true
-	s.mu.Unlock()
 
-	if err := s.InitializeExportedAuditLogIDs(); err != nil {
-		logging.Warning("Export: failed to initialize exported audit log ids: %v", err)
-	}
 	// Start background status refresh goroutine
 	s.wg.Add(1)
 	go s.statusRefreshLoop()
@@ -115,9 +105,6 @@ func (s *ExportServiceImpl) Stop() error {
 	s.mu.Unlock()
 
 	s.wg.Wait()
-	if err := s.AppendMissingAuditLogsFromRepository(); err != nil {
-		logging.Warning("Export: failed to append final audit logs: %v", err)
-	}
 	s.writeStatusFile()
 
 	s.mu.Lock()
@@ -163,18 +150,8 @@ type ExportStatusInfo struct {
 	EventsFile string `json:"eventsFile"`
 }
 
-// WriteAuditLog appends persisted audit logs that have not been exported yet.
-// The entry argument is kept for the legacy completion callback path, but
-// audit.jsonl is generated only from rows already persisted in audit_logs.
+// WriteAuditLog appends an audit log entry to the audit.jsonl file.
 func (s *ExportServiceImpl) WriteAuditLog(log *AuditLogEntry) error {
-	if log == nil {
-		return nil
-	}
-	return s.AppendCompletedAuditLogsFromRepository()
-}
-
-// InitializeExportedAuditLogIDs reads existing audit.jsonl log IDs for de-dupe.
-func (s *ExportServiceImpl) InitializeExportedAuditLogIDs() error {
 	s.mu.Lock()
 	if !s.running {
 		s.mu.Unlock()
@@ -183,74 +160,13 @@ func (s *ExportServiceImpl) InitializeExportedAuditLogIDs() error {
 	auditFile := s.auditFile
 	s.mu.Unlock()
 
-	s.auditFileMu.Lock()
-	defer s.auditFileMu.Unlock()
-
-	ids, err := readExportedAuditLogIDs(auditFile)
+	data, err := json.Marshal(log)
 	if err != nil {
-		return &exportError{"failed to read audit file: " + err.Error()}
+		return &exportError{"failed to marshal audit log: " + err.Error()}
 	}
-	s.exportedAuditLogIDs = ids
-	return nil
-}
-
-// AppendMissingAuditLogsFromRepository appends audit_logs rows not yet present in audit.jsonl.
-func (s *ExportServiceImpl) AppendMissingAuditLogsFromRepository() error {
-	return s.appendAuditLogsFromRepository(false)
-}
-
-// AppendCompletedAuditLogsFromRepository appends only finished audit_logs rows.
-func (s *ExportServiceImpl) AppendCompletedAuditLogsFromRepository() error {
-	return s.appendAuditLogsFromRepository(true)
-}
-
-func (s *ExportServiceImpl) appendAuditLogsFromRepository(completedOnly bool) error {
-	s.mu.Lock()
-	if !s.running {
-		s.mu.Unlock()
-		return &exportError{"export service not running"}
-	}
-	auditFile := s.auditFile
-	startTime := s.auditExportStartAt
-	s.mu.Unlock()
 
 	s.auditFileMu.Lock()
 	defer s.auditFileMu.Unlock()
-
-	if s.exportedAuditLogIDs == nil {
-		ids, err := readExportedAuditLogIDs(auditFile)
-		if err != nil {
-			return &exportError{"failed to read audit file: " + err.Error()}
-		}
-		s.exportedAuditLogIDs = ids
-	}
-
-	logs, err := loadRepositoryAuditLogsForExport(startTime)
-	if err != nil {
-		return &exportError{"failed to load audit logs: " + err.Error()}
-	}
-
-	missing := make([]*AuditLogEntry, 0)
-	for _, log := range logs {
-		if log == nil {
-			continue
-		}
-		logID := strings.TrimSpace(log.ID)
-		if logID == "" {
-			continue
-		}
-		if completedOnly && strings.TrimSpace(log.OutputContent) == "" {
-			continue
-		}
-		if _, ok := s.exportedAuditLogIDs[logID]; ok {
-			continue
-		}
-		missing = append(missing, mapRepositoryAuditLogToExportEntry(log))
-	}
-	if len(missing) == 0 {
-		return nil
-	}
-	reverseAuditLogEntries(missing)
 
 	f, err := os.OpenFile(auditFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -258,16 +174,10 @@ func (s *ExportServiceImpl) appendAuditLogsFromRepository(completedOnly bool) er
 	}
 	defer f.Close()
 
-	for _, entry := range missing {
-		data, err := json.Marshal(entry)
-		if err != nil {
-			return &exportError{"failed to marshal audit log: " + err.Error()}
-		}
-		if _, err := f.Write(append(data, '\n')); err != nil {
-			return &exportError{"failed to write audit log: " + err.Error()}
-		}
-		s.exportedAuditLogIDs[strings.TrimSpace(entry.LogID)] = struct{}{}
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		return &exportError{"failed to write audit log: " + err.Error()}
 	}
+
 	return nil
 }
 
@@ -379,127 +289,6 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 
 	cleanupTmp = false
 	return nil
-}
-
-func loadRepositoryAuditLogsForExport(startTime string) ([]*repository.AuditLog, error) {
-	repo := repository.NewAuditLogRepository(nil)
-
-	const pageSize = 1000
-	entries := make([]*repository.AuditLog, 0)
-	for offset := 0; ; offset += pageSize {
-		logs, err := repo.GetAuditLogs(&repository.AuditLogFilter{
-			Limit:     pageSize,
-			Offset:    offset,
-			StartTime: strings.TrimSpace(startTime),
-		})
-		if err != nil {
-			return nil, err
-		}
-		entries = append(entries, logs...)
-		if len(logs) < pageSize {
-			break
-		}
-	}
-	return entries, nil
-}
-
-func reverseAuditLogEntries(entries []*AuditLogEntry) {
-	for left, right := 0, len(entries)-1; left < right; left, right = left+1, right-1 {
-		entries[left], entries[right] = entries[right], entries[left]
-	}
-}
-
-func readExportedAuditLogIDs(path string) (map[string]struct{}, error) {
-	ids := make(map[string]struct{})
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return ids, nil
-		}
-		return nil, err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var entry AuditLogEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			logging.Warning("Export: skip invalid audit.jsonl line: %v", err)
-			continue
-		}
-		if logID := strings.TrimSpace(entry.LogID); logID != "" {
-			ids[logID] = struct{}{}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return ids, nil
-}
-
-func mapRepositoryAuditLogToExportEntry(log *repository.AuditLog) *AuditLogEntry {
-	if log == nil {
-		return nil
-	}
-	toolCalls := parseExportToolCalls(log.ToolCalls)
-	tokenCount := log.TotalTokens
-	if tokenCount <= 0 {
-		tokenCount = log.PromptTokens + log.CompletionTokens
-	}
-	return &AuditLogEntry{
-		BotID:         strings.TrimSpace(log.AssetID),
-		LogID:         strings.TrimSpace(log.ID),
-		LogTimestamp:  strings.TrimSpace(log.Timestamp),
-		RequestID:     strings.TrimSpace(log.RequestID),
-		Model:         strings.TrimSpace(log.Model),
-		Action:        strings.TrimSpace(log.Action),
-		RiskLevel:     strings.TrimSpace(log.RiskLevel),
-		RiskCauses:    strings.TrimSpace(log.RiskReason),
-		DurationMs:    log.DurationMs,
-		TokenCount:    tokenCount,
-		UserRequest:   log.RequestContent,
-		ToolCallCount: len(toolCalls),
-		ToolCalls:     toolCalls,
-	}
-}
-
-func parseExportToolCalls(raw string) []ToolCall {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	var source []struct {
-		Name      string `json:"name"`
-		Tool      string `json:"tool"`
-		Arguments string `json:"arguments"`
-		Params    string `json:"parameters"`
-		Result    string `json:"result"`
-	}
-	if err := json.Unmarshal([]byte(raw), &source); err != nil {
-		return nil
-	}
-	out := make([]ToolCall, 0, len(source))
-	for _, item := range source {
-		name := strings.TrimSpace(item.Name)
-		if name == "" {
-			name = strings.TrimSpace(item.Tool)
-		}
-		parameters := item.Arguments
-		if strings.TrimSpace(parameters) == "" {
-			parameters = item.Params
-		}
-		out = append(out, ToolCall{
-			Tool:       name,
-			Parameters: parameters,
-			Result:     item.Result,
-		})
-	}
-	return out
 }
 
 // buildStatus collects all status information.
@@ -626,21 +415,20 @@ func (s *ExportServiceImpl) collectRiskInfo(assets []core.Asset) []RiskInfo {
 		}
 
 		info := RiskInfo{
-			Name:   riskTitleKey(risk.ID),
+			Name:   risk.Title,
 			Level:  risk.Level,
 			Source: risk.SourcePlugin,
 		}
 
 		info.BotID = resolveRiskBotID(risk, assets)
 
-		// Convert mitigation to export format and only replace desc with key.
+		// Convert mitigation to export format
 		if risk.Mitigation != nil {
 			info.Mitigation = buildMitigationInfos(risk.Mitigation)
 		}
 		if info.Mitigation == nil {
 			info.Mitigation = []MitigationInfo{}
 		}
-		info.Mitigation = replaceMitigationDescWithKey(info.Mitigation, riskDescriptionKey(risk.ID))
 
 		riskInfos = append(riskInfos, info)
 	}

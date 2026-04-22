@@ -4,9 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"go_lib/core/logging"
@@ -37,7 +35,6 @@ type BotModelConfigData struct {
 type ProtectionConfig struct {
 	AssetName               string              `json:"asset_name"`
 	AssetID                 string              `json:"asset_id"`
-	InheritsDefaultPolicy   bool                `json:"inherits_default_policy"`
 	Enabled                 bool                `json:"enabled"`
 	AuditOnly               bool                `json:"audit_only"`
 	SandboxEnabled          bool                `json:"sandbox_enabled"`
@@ -81,12 +78,6 @@ type ProtectionRepository struct {
 const (
 	DefaultProtectionPolicyAssetID   = "__default_protection_policy__"
 	DefaultProtectionPolicyAssetName = "__default_protection_policy__"
-)
-
-var (
-	enabledConfigLogMu          sync.Mutex
-	lastEnabledConfigSignature  string
-	enabledConfigLogInitialized bool
 )
 
 func IsDefaultProtectionPolicyAssetID(assetID string) bool {
@@ -207,10 +198,6 @@ func (r *ProtectionRepository) SaveProtectionConfig(config *ProtectionConfig) er
 	if config.SandboxEnabled {
 		sandboxEnabled = 1
 	}
-	inheritsDefaultPolicy := 0
-	if config.InheritsDefaultPolicy {
-		inheritsDefaultPolicy = 1
-	}
 
 	// 序列化 BotModelConfig 为 JSON
 	var botModelConfigJSON string
@@ -224,11 +211,11 @@ func (r *ProtectionRepository) SaveProtectionConfig(config *ProtectionConfig) er
 
 	_, err := r.db.Exec(`
 		INSERT OR REPLACE INTO protection_config 
-		(asset_name, asset_id, inherits_default_policy, enabled, audit_only, sandbox_enabled, gateway_binary_path, gateway_config_path,
+		(asset_name, asset_id, enabled, audit_only, sandbox_enabled, gateway_binary_path, gateway_config_path,
 		 custom_security_prompt, single_session_token_limit, daily_token_limit,
 		 path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, config.AssetName, config.AssetID, inheritsDefaultPolicy, enabled, auditOnly, sandboxEnabled,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, config.AssetName, config.AssetID, enabled, auditOnly, sandboxEnabled,
 		config.GatewayBinaryPath, config.GatewayConfigPath,
 		"", config.SingleSessionTokenLimit, config.DailyTokenLimit,
 		config.PathPermission, config.NetworkPermission, config.ShellPermission,
@@ -251,7 +238,7 @@ func (r *ProtectionRepository) GetProtectionConfig(assetID string) (*ProtectionC
 		return nil, fmt.Errorf("asset_id is required")
 	}
 
-	row := r.db.QueryRow(`SELECT asset_name, asset_id, inherits_default_policy, enabled, audit_only, sandbox_enabled, 
+	row := r.db.QueryRow(`SELECT asset_name, asset_id, enabled, audit_only, sandbox_enabled, 
 		gateway_binary_path, gateway_config_path, custom_security_prompt, 
 		single_session_token_limit, daily_token_limit, 
 		path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at
@@ -279,7 +266,7 @@ func (r *ProtectionRepository) GetEnabledProtectionConfigs() ([]*ProtectionConfi
 		return nil, fmt.Errorf("database not initialized")
 	}
 
-	rows, err := r.db.Query(`SELECT asset_name, asset_id, inherits_default_policy, enabled, audit_only, sandbox_enabled, 
+	rows, err := r.db.Query(`SELECT asset_name, asset_id, enabled, audit_only, sandbox_enabled, 
 		gateway_binary_path, gateway_config_path, custom_security_prompt, 
 		single_session_token_limit, daily_token_limit, 
 		path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at
@@ -303,72 +290,8 @@ func (r *ProtectionRepository) GetEnabledProtectionConfigs() ([]*ProtectionConfi
 		configs = []*ProtectionConfig{}
 	}
 
-	if shouldLogEnabledProtectionConfigs(configs) {
-		logging.Info("Enabled protection configs count: %d", len(configs))
-	}
+	logging.Info("Enabled protection configs count: %d", len(configs))
 	return configs, nil
-}
-
-// shouldLogEnabledProtectionConfigs 仅在启用配置内容变化时返回 true。
-func shouldLogEnabledProtectionConfigs(configs []*ProtectionConfig) bool {
-	signature := buildEnabledProtectionConfigsSignature(configs)
-
-	enabledConfigLogMu.Lock()
-	defer enabledConfigLogMu.Unlock()
-
-	if enabledConfigLogInitialized && lastEnabledConfigSignature == signature {
-		return false
-	}
-	lastEnabledConfigSignature = signature
-	enabledConfigLogInitialized = true
-	return true
-}
-
-// buildEnabledProtectionConfigsSignature 构造启用配置的稳定签名，忽略查询结果顺序。
-func buildEnabledProtectionConfigsSignature(configs []*ProtectionConfig) string {
-	if len(configs) == 0 {
-		return "empty"
-	}
-
-	fingerprints := make([]string, 0, len(configs))
-	for _, config := range configs {
-		if config == nil {
-			fingerprints = append(fingerprints, "nil")
-			continue
-		}
-		fingerprints = append(fingerprints, buildProtectionConfigFingerprint(config))
-	}
-	sort.Strings(fingerprints)
-	return strings.Join(fingerprints, "||")
-}
-
-// buildProtectionConfigFingerprint 构造单个配置指纹，用于检测同数量下的内容变化。
-func buildProtectionConfigFingerprint(config *ProtectionConfig) string {
-	botModelConfig := ""
-	if config.BotModelConfig != nil {
-		if jsonBytes, err := json.Marshal(config.BotModelConfig); err == nil {
-			botModelConfig = string(jsonBytes)
-		}
-	}
-
-	return fmt.Sprintf(
-		"%s|%s|%t|%t|%t|%s|%s|%d|%d|%s|%s|%s|%s|%s|%s",
-		config.AssetID,
-		config.AssetName,
-		config.Enabled,
-		config.AuditOnly,
-		config.SandboxEnabled,
-		config.GatewayBinaryPath,
-		config.GatewayConfigPath,
-		config.SingleSessionTokenLimit,
-		config.DailyTokenLimit,
-		config.PathPermission,
-		config.NetworkPermission,
-		config.ShellPermission,
-		botModelConfig,
-		config.CreatedAt,
-		config.UpdatedAt,
-	)
 }
 
 // GetAllProtectionConfigs 获取所有保护配置
@@ -377,7 +300,7 @@ func (r *ProtectionRepository) GetAllProtectionConfigs() ([]*ProtectionConfig, e
 		return nil, fmt.Errorf("database not initialized")
 	}
 
-	rows, err := r.db.Query(`SELECT asset_name, asset_id, inherits_default_policy, enabled, audit_only, sandbox_enabled, 
+	rows, err := r.db.Query(`SELECT asset_name, asset_id, enabled, audit_only, sandbox_enabled,
 		gateway_binary_path, gateway_config_path, custom_security_prompt,
 		single_session_token_limit, daily_token_limit,
 		path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at
@@ -598,23 +521,6 @@ func (r *ProtectionRepository) SaveShepherdSensitiveActions(assetName, assetID s
 	return nil
 }
 
-// DeleteShepherdSensitiveActions 删除指定资产实例的Shepherd敏感操作配置。
-func (r *ProtectionRepository) DeleteShepherdSensitiveActions(assetID string) error {
-	if r.db == nil {
-		return fmt.Errorf("database not initialized")
-	}
-	assetID = strings.TrimSpace(assetID)
-	if assetID == "" {
-		return fmt.Errorf("asset_id is required")
-	}
-
-	_, err := r.db.Exec(`DELETE FROM shepherd_rules WHERE asset_id = ?`, assetID)
-	if err != nil {
-		return fmt.Errorf("failed to delete shepherd rules: %w", err)
-	}
-	return nil
-}
-
 func normalizeShepherdActions(actions []string) []string {
 	seen := make(map[string]struct{}, len(actions))
 	normalized := make([]string, 0, len(actions))
@@ -694,13 +600,13 @@ func (r *ProtectionRepository) SaveHomeDirectoryPermission(authorized bool, auth
 // scanProtectionConfig 从单行查询结果扫描ProtectionConfig
 func scanProtectionConfig(row *sql.Row) (*ProtectionConfig, error) {
 	var config ProtectionConfig
-	var inheritsDefaultPolicy, enabled, auditOnly, sandboxEnabled int
+	var enabled, auditOnly, sandboxEnabled int
 	var gatewayBinaryPath, gatewayConfigPath, customSecurityPrompt sql.NullString
 	var pathPermission, networkPermission, shellPermission sql.NullString
 	var botModelConfigJSON sql.NullString
 	var createdAt, updatedAt sql.NullString
 
-	err := row.Scan(&config.AssetName, &config.AssetID, &inheritsDefaultPolicy, &enabled, &auditOnly, &sandboxEnabled,
+	err := row.Scan(&config.AssetName, &config.AssetID, &enabled, &auditOnly, &sandboxEnabled,
 		&gatewayBinaryPath, &gatewayConfigPath, &customSecurityPrompt,
 		&config.SingleSessionTokenLimit, &config.DailyTokenLimit,
 		&pathPermission, &networkPermission, &shellPermission,
@@ -709,7 +615,6 @@ func scanProtectionConfig(row *sql.Row) (*ProtectionConfig, error) {
 		return nil, err
 	}
 
-	config.InheritsDefaultPolicy = inheritsDefaultPolicy == 1
 	config.Enabled = enabled == 1
 	config.AuditOnly = auditOnly == 1
 	config.SandboxEnabled = sandboxEnabled == 1
@@ -736,13 +641,13 @@ func scanProtectionConfig(row *sql.Row) (*ProtectionConfig, error) {
 // scanProtectionConfigFromRows 从多行查询结果扫描ProtectionConfig
 func scanProtectionConfigFromRows(rows *sql.Rows) (*ProtectionConfig, error) {
 	var config ProtectionConfig
-	var inheritsDefaultPolicy, enabled, auditOnly, sandboxEnabled int
+	var enabled, auditOnly, sandboxEnabled int
 	var gatewayBinaryPath, gatewayConfigPath, customSecurityPrompt sql.NullString
 	var pathPermission, networkPermission, shellPermission sql.NullString
 	var botModelConfigJSON sql.NullString
 	var createdAt, updatedAt sql.NullString
 
-	err := rows.Scan(&config.AssetName, &config.AssetID, &inheritsDefaultPolicy, &enabled, &auditOnly, &sandboxEnabled,
+	err := rows.Scan(&config.AssetName, &config.AssetID, &enabled, &auditOnly, &sandboxEnabled,
 		&gatewayBinaryPath, &gatewayConfigPath, &customSecurityPrompt,
 		&config.SingleSessionTokenLimit, &config.DailyTokenLimit,
 		&pathPermission, &networkPermission, &shellPermission,
@@ -751,7 +656,6 @@ func scanProtectionConfigFromRows(rows *sql.Rows) (*ProtectionConfig, error) {
 		return nil, err
 	}
 
-	config.InheritsDefaultPolicy = inheritsDefaultPolicy == 1
 	config.Enabled = enabled == 1
 	config.AuditOnly = auditOnly == 1
 	config.SandboxEnabled = sandboxEnabled == 1

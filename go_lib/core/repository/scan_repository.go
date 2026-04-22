@@ -4,19 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"go_lib/core"
 	"go_lib/core/logging"
-)
-
-const retainedScanCount = 20
-
-var (
-	latestScanLogMu          sync.Mutex
-	lastLatestScanSignature  string
-	latestScanLogInitialized bool
 )
 
 // ScanRecord 扫描记录，对应数据库scans表的一条记录及其关联的资产和风险
@@ -109,36 +100,12 @@ func (r *ScanRepository) SaveScanResult(record *ScanRecord) error {
 		}
 	}
 
-	// 仅保留最近固定数量的扫描记录，防止数据库无限增长。
-	if err := pruneOldScansTx(tx, retainedScanCount); err != nil {
-		return fmt.Errorf("failed to prune old scans: %w", err)
-	}
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	logging.Info("Scan result saved, id=%d, assets=%d, risks=%d",
 		scanID, len(record.Assets), len(record.Risks))
-	return nil
-}
-
-// pruneOldScansTx 在事务内仅保留最近 keepCount 条扫描记录。
-// 依赖外键级联删除自动清理 assets/risks 关联数据。
-func pruneOldScansTx(tx *sql.Tx, keepCount int) error {
-	if keepCount <= 0 {
-		return fmt.Errorf("keep_count must be greater than 0")
-	}
-
-	if _, err := tx.Exec(`
-		DELETE FROM scans
-		WHERE id NOT IN (
-			SELECT id FROM scans ORDER BY id DESC LIMIT ?
-		)
-	`, keepCount); err != nil {
-		return fmt.Errorf("failed to delete old scans: %w", err)
-	}
-
 	return nil
 }
 
@@ -222,58 +189,7 @@ func (r *ScanRepository) GetLatestScanResult() (*ScanRecord, error) {
 		record.Risks = []core.Risk{}
 	}
 
-	if shouldLogLatestScanResult(&record) {
-		logging.Info("Loaded latest scan result, id=%d, assets=%d, risks=%d",
-			record.ID, len(record.Assets), len(record.Risks))
-	}
+	logging.Info("Loaded latest scan result, id=%d, assets=%d, risks=%d",
+		record.ID, len(record.Assets), len(record.Risks))
 	return &record, nil
-}
-
-// shouldLogLatestScanResult 仅在最新扫描关键信息变化时返回 true。
-func shouldLogLatestScanResult(record *ScanRecord) bool {
-	signature := fmt.Sprintf("%d|%d|%d", record.ID, len(record.Assets), len(record.Risks))
-
-	latestScanLogMu.Lock()
-	defer latestScanLogMu.Unlock()
-
-	if latestScanLogInitialized && lastLatestScanSignature == signature {
-		return false
-	}
-	lastLatestScanSignature = signature
-	latestScanLogInitialized = true
-	return true
-}
-
-// DeleteScanResultByID 删除指定扫描记录及其关联资产、风险数据。
-// 用于上层在“保存成功但后续同步失败”场景下执行补偿回滚，保证原子语义。
-func (r *ScanRepository) DeleteScanResultByID(scanID int64) error {
-	if r.db == nil {
-		return fmt.Errorf("database not initialized")
-	}
-	if scanID <= 0 {
-		return fmt.Errorf("scan_id must be greater than 0")
-	}
-
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin delete scan transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`DELETE FROM risks WHERE scan_id = ?`, scanID); err != nil {
-		return fmt.Errorf("failed to delete risks for scan_id=%d: %w", scanID, err)
-	}
-	if _, err := tx.Exec(`DELETE FROM assets WHERE scan_id = ?`, scanID); err != nil {
-		return fmt.Errorf("failed to delete assets for scan_id=%d: %w", scanID, err)
-	}
-	if _, err := tx.Exec(`DELETE FROM scans WHERE id = ?`, scanID); err != nil {
-		return fmt.Errorf("failed to delete scan record for scan_id=%d: %w", scanID, err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit delete scan transaction: %w", err)
-	}
-
-	logging.Info("Scan result rollback completed, scan_id=%d", scanID)
-	return nil
 }

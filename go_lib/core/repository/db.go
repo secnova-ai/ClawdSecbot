@@ -110,7 +110,6 @@ func createProtectionTables(db *sql.DB) error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			asset_name TEXT NOT NULL,
 			asset_id TEXT NOT NULL,
-			inherits_default_policy INTEGER NOT NULL DEFAULT 0,
 			enabled INTEGER NOT NULL DEFAULT 0,
 			audit_only INTEGER NOT NULL DEFAULT 0,
 			sandbox_enabled INTEGER NOT NULL DEFAULT 0,
@@ -130,7 +129,6 @@ func createProtectionTables(db *sql.DB) error {
 	`); err != nil {
 		return fmt.Errorf("failed to create protection_config table: %w", err)
 	}
-	addColumnSafe(db, "protection_config", "inherits_default_policy", "INTEGER NOT NULL DEFAULT 0")
 
 	// protection_statistics is unique by asset instance.
 	if _, err := db.Exec(`

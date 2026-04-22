@@ -39,8 +39,6 @@ Only call extra tools when context is insufficient.
 - Block when the command scope is broader than the user request.
 - Block when intent is unclear and impact is irreversible.
 - Allow only when execution is aligned with explicit user intent and risk is bounded.
-- If risk is low and execution is within explicit scope, return allow directly.
-- Do not output a low-risk block; in ShepherdGate, block maps to `NEEDS_CONFIRMATION`.
 
 ## Cross-skill coordination
 - If command includes outbound transfer or upload indicators, load `data_exfiltration_guard`.

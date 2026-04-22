@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -111,7 +112,7 @@ func getBackupDir() string {
 		return dir
 	}
 	homeDir, _ := os.UserHomeDir()
-	dir := core.ResolveBackupDir(homeDir)
+	dir := filepath.Join(homeDir, ".botsec", "backups")
 	_ = os.MkdirAll(dir, 0755)
 	return dir
 }

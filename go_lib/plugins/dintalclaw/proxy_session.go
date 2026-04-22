@@ -4,6 +4,7 @@ package dintalclaw
 
 import (
 	"os"
+	"path/filepath"
 
 	"go_lib/core"
 	"go_lib/core/logging"
@@ -40,7 +41,7 @@ func HasInitialBackupInternal() string {
 		backupDir = pm.GetBackupDir()
 	} else {
 		homeDir, _ := os.UserHomeDir()
-		backupDir = core.ResolveBackupDir(homeDir)
+		backupDir = filepath.Join(homeDir, ".botsec", "backups")
 	}
 
 	exists := HasInitialBackup(backupDir)
@@ -60,7 +61,7 @@ func RestoreToInitialConfigInternal() string {
 		backupDir = pm.GetBackupDir()
 	} else {
 		homeDir, _ := os.UserHomeDir()
-		backupDir = core.ResolveBackupDir(homeDir)
+		backupDir = filepath.Join(homeDir, ".botsec", "backups")
 	}
 
 	result := RestoreToInitialConfig(backupDir)

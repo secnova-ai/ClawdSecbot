@@ -54,7 +54,7 @@ const _defaultHomeDir = String.fromEnvironment(
 );
 const _defaultCurrentVersion = String.fromEnvironment(
   'BOTSEC_CURRENT_VERSION',
-  defaultValue: '1.0.3',
+  defaultValue: '1.0.1',
 );
 
 class WebHomePage extends StatefulWidget {

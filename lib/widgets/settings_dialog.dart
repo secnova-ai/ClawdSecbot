@@ -110,12 +110,6 @@ class _SettingsDialogState extends State<SettingsDialog>
     }
   }
 
-  /// 处理手动验证连通性动作。
-  Future<void> _handleValidateConnection() async {
-    if (_saving || _currentTabIndex != 0) return;
-    await _formKey.currentState?.validateConnection();
-  }
-
   void _handleCancel() {
     if (_saving) return;
     if (Navigator.of(context).canPop()) {
@@ -306,24 +300,6 @@ class _SettingsDialogState extends State<SettingsDialog>
           ),
         ),
         const SizedBox(width: 12),
-        if (_currentTabIndex == 0) ...[
-          OutlinedButton(
-            onPressed: _saving ? null : _handleValidateConnection,
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
-              foregroundColor: _saving ? Colors.white24 : Colors.white70,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            ),
-            child: Text(
-              l10n.modelConfigValidateConnection,
-              style: AppFonts.inter(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-        ],
         ElevatedButton(
           onPressed: _saving ? null : _handleSave,
           style: ElevatedButton.styleFrom(

@@ -16,7 +16,6 @@ import 'services/database_service.dart';
 import 'services/native_library_service.dart';
 import 'services/plugin_service.dart';
 import 'services/protection_service.dart';
-import 'services/app_config_service.dart';
 import 'utils/app_logger.dart';
 import 'utils/app_fonts.dart';
 import 'utils/locale_utils.dart';
@@ -25,38 +24,11 @@ import 'widgets/hide_window_shortcut.dart';
 
 const appBackground = Color(0xFF0F0F23);
 
-/// 解析启动参数中的日志目录覆盖值。
-String? _extractLogDirOverride(List<String> args) {
-  for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
-    if (arg.startsWith('--log-dir=')) {
-      return arg.substring('--log-dir='.length);
-    }
-    if (arg == '--log-dir' && i + 1 < args.length) {
-      return args[i + 1];
-    }
-  }
-  return null;
-}
-
-/// 根据启动参数更新配置中的日志目录。
-Future<void> _applyLogDirOverrideIfNeeded(
-  List<String> args,
-  AppConfigService configService,
-) async {
-  final overrideLogDir = _extractLogDirOverride(args);
-  if (overrideLogDir == null) {
-    return;
-  }
-  await configService.setLogDir(overrideLogDir);
-}
-
 void main(List<String> args) async {
   // 使用 runZonedGuarded 捕获未处理的异步错误
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
-      final appConfigService = AppConfigService();
 
       // 注册 SIGINT 信号处理器，确保 Ctrl+C 时正确清理 Go 资源并退出
       // Go c-shared 库可能会干扰默认的信号处理，需要显式处理
@@ -103,25 +75,7 @@ void main(List<String> args) async {
       );
 
       // Initialize logger first
-      String? configuredLogDir;
-      try {
-        await _applyLogDirOverrideIfNeeded(args, appConfigService);
-        configuredLogDir = await appConfigService.getLogDir();
-      } catch (e) {
-        debugPrint('[Main] Failed to resolve configured log dir: $e');
-      }
-
-      await appLogger.init(
-        windowName: windowType.toString(),
-        customLogDir: configuredLogDir,
-      );
-      if (appLogger.logDir != null) {
-        try {
-          await appConfigService.setLogDir(appLogger.logDir!);
-        } catch (e) {
-          appLogger.warning('[Main] Failed to persist log dir: $e');
-        }
-      }
+      await appLogger.init(windowName: windowType.toString());
 
       // Check if this is a sub-window
       if (isMultiWindow) {
@@ -161,7 +115,7 @@ void main(List<String> args) async {
         if (windowType == 'audit_log') {
           // Initialize database path and native library for audit log window
           await DatabaseService().init();
-          await NativeLibraryService().initialize(logDir: appLogger.logDir);
+          await NativeLibraryService().initialize();
           runApp(
             AuditLogWindowApp(
               windowId: windowId,
@@ -173,7 +127,7 @@ void main(List<String> args) async {
         } else {
           // Initialize database path and native library for protection monitor window
           await DatabaseService().init();
-          await NativeLibraryService().initialize(logDir: appLogger.logDir);
+          await NativeLibraryService().initialize();
           runApp(
             ProtectionMonitorWindowApp(
               windowId: windowId,

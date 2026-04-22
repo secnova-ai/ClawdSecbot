@@ -316,8 +316,6 @@
   "modelConfigSaveFailed": "保存配置失败",
   "modelConfigRequired": "请先配置 AI 模型才能继续使用",
   "modelConfigTesting": "测试连接中...",
-  "modelConfigValidateConnection": "验证连通性",
-  "modelConfigTestSuccess": "连通性验证通过",
   "modelConfigSaving": "保存中...",
   "modelConfigTestFailed": "连接测试失败: {error}",
   "@modelConfigTestFailed": {
@@ -1059,7 +1057,7 @@
     }
   },
   "exitRestoreConfirm": "恢复并退出",
-  "exitRestoreExitOnly": "仅退出",
+  "exitWithoutRestoreConfirm": "不恢复直接退出",
   "exitRestoreInProgress": "正在恢复 Bot 默认服务，请稍候...",
   "exitRestoreFailedTitle": "恢复失败，已取消退出",
   "exitRestoreFailedMessage": "以下资产恢复失败，为避免 Bot 退出后无法继续工作，本次不会退出应用：\n\n{details}",

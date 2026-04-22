@@ -11,7 +11,6 @@ import (
 	"go_lib/core/logging"
 	"go_lib/core/proxy"
 	"go_lib/core/repository"
-	"go_lib/core/service"
 	"go_lib/core/shepherd"
 )
 
@@ -304,21 +303,12 @@ func saveDefaultProtectionPolicy(repo *repository.ProtectionRepository, req *Pro
 		return err
 	}
 	previousConfig := cloneProtectionConfig(config)
-	previousUserRules, foundPreviousUserRules, err := repo.GetShepherdSensitiveActions(
-		repository.DefaultProtectionPolicyAssetName,
-		repository.DefaultProtectionPolicyAssetID,
-	)
-	if err != nil {
-		return err
-	}
 	if config == nil {
 		config = &repository.ProtectionConfig{
 			AssetName: repository.DefaultProtectionPolicyAssetName,
 			AssetID:   repository.DefaultProtectionPolicyAssetID,
 		}
 	}
-	// 默认策略记录本身不应标记为“继承默认策略”。
-	config.InheritsDefaultPolicy = false
 
 	applyProtectionPolicyRequest(config, req)
 	if err := repo.SaveProtectionConfig(config); err != nil {
@@ -331,56 +321,12 @@ func saveDefaultProtectionPolicy(repo *repository.ProtectionRepository, req *Pro
 			repository.DefaultProtectionPolicyAssetID,
 			req.UserRules,
 		); err != nil {
-			if rollbackErr := rollbackDefaultPolicyUpdate(repo, previousConfig, previousUserRules, foundPreviousUserRules); rollbackErr != nil {
-				return errors.New(err.Error() + "; rollback failed: " + rollbackErr.Error())
-			}
-			return err
+			logging.Warning("API: Failed to save default user rules: %v", err)
 		}
 	}
 
-	// 默认策略更新后，批量同步所有“继承默认策略”的资产。
-	if err := service.SyncDefaultProtectionPolicyForAssets(nil); err != nil {
-		if rollbackErr := rollbackDefaultPolicyUpdate(repo, previousConfig, previousUserRules, foundPreviousUserRules); rollbackErr != nil {
-			return errors.New(err.Error() + "; rollback failed: " + rollbackErr.Error())
-		}
-		return err
-	}
+	applyProtectionPolicyRuntime(previousConfig, config, req.UserRules)
 	logging.Info("API: Default protection policy updated")
-	return nil
-}
-
-// rollbackDefaultPolicyUpdate 回滚默认策略及其默认用户规则，保证“保存+同步”原子化。
-func rollbackDefaultPolicyUpdate(
-	repo *repository.ProtectionRepository,
-	previousConfig *repository.ProtectionConfig,
-	previousUserRules []string,
-	foundPreviousUserRules bool,
-) error {
-	if previousConfig == nil {
-		if err := repo.DeleteProtectionConfig(repository.DefaultProtectionPolicyAssetID); err != nil {
-			return err
-		}
-	} else {
-		if err := repo.SaveProtectionConfig(previousConfig); err != nil {
-			return err
-		}
-	}
-
-	if foundPreviousUserRules {
-		if err := repo.SaveShepherdSensitiveActions(
-			repository.DefaultProtectionPolicyAssetName,
-			repository.DefaultProtectionPolicyAssetID,
-			previousUserRules,
-		); err != nil {
-			return err
-		}
-	} else {
-		if err := repo.DeleteShepherdSensitiveActions(repository.DefaultProtectionPolicyAssetID); err != nil {
-			return err
-		}
-	}
-
-	logging.Info("API: Default protection policy rollback completed")
 	return nil
 }
 
@@ -404,8 +350,6 @@ func updateProtectionPolicyForBotID(repo *repository.ProtectionRepository, botID
 	if existingConfig != nil {
 		config = existingConfig
 	}
-	// 显式按 botId 更新策略视为资产已定制，不再跟随默认策略。
-	config.InheritsDefaultPolicy = false
 
 	applyProtectionPolicyRequest(config, req)
 
@@ -760,6 +704,66 @@ func applyProtectionPolicyRuntime(previousConfig, config *repository.ProtectionC
 }
 
 func applyDefaultProtectionPolicyToAssets(repo *repository.ProtectionRepository, assets []core.Asset) error {
-	_ = repo
-	return service.SyncDefaultProtectionPolicyForAssets(assets)
+	defaultConfig, err := repo.GetDefaultProtectionConfig()
+	if err != nil {
+		return err
+	}
+	if defaultConfig == nil {
+		return nil
+	}
+
+	defaultUserRules, foundDefaultUserRules, err := repo.GetShepherdSensitiveActions(
+		repository.DefaultProtectionPolicyAssetName,
+		repository.DefaultProtectionPolicyAssetID,
+	)
+	if err != nil {
+		logging.Warning("API: Failed to load default protection user rules: %v", err)
+		defaultUserRules = nil
+		foundDefaultUserRules = false
+	}
+
+	for _, asset := range assets {
+		assetID := strings.TrimSpace(asset.ID)
+		assetName := strings.TrimSpace(asset.Name)
+		if assetID == "" || assetName == "" {
+			continue
+		}
+
+		existingConfig, _, err := findProtectionConfigByBotID(repo, assetID)
+		if err != nil {
+			return err
+		}
+		if existingConfig != nil {
+			continue
+		}
+
+		config := cloneProtectionConfig(defaultConfig)
+		config.AssetName = assetName
+		config.AssetID = assetID
+		// When a default bot model is already configured, newly discovered assets
+		// should start protection automatically after scan completion.
+		if config.BotModelConfig != nil {
+			config.Enabled = true
+			if !defaultConfig.Enabled {
+				config.AuditOnly = false
+			}
+		}
+
+		if err := repo.SaveProtectionConfig(config); err != nil {
+			return err
+		}
+
+		var runtimeUserRules []string
+		if foundDefaultUserRules {
+			runtimeUserRules = append([]string(nil), defaultUserRules...)
+			if err := repo.SaveShepherdSensitiveActions(assetName, assetID, runtimeUserRules); err != nil {
+				logging.Warning("API: Failed to copy default user rules for botId=%s: %v", assetID, err)
+			}
+		}
+
+		applyProtectionPolicyRuntime(nil, config, runtimeUserRules)
+		logging.Info("API: Applied default protection policy to newly discovered asset %s/%s", assetName, assetID)
+	}
+
+	return nil
 }

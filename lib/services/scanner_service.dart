@@ -132,8 +132,7 @@ class BotScanner {
       for (final skill in mergedRiskySkills) {
         final skillName = skill['skill_name'] as String;
         final issues = skill['issues'] as List<String>;
-        final persistedIssueCount =
-            (skill['issue_count'] as num?)?.toInt() ?? 0;
+        final persistedIssueCount = (skill['issue_count'] as num?)?.toInt() ?? 0;
         final issueCount = persistedIssueCount > issues.length
             ? persistedIssueCount
             : issues.length;
@@ -172,7 +171,6 @@ class BotScanner {
             level: _parseSkillRiskLevel(skill['risk_level'] as String?),
             icon: LucideIcons.alertTriangle,
             sourcePlugin: skill['source_plugin'] as String? ?? '',
-            assetID: skill['asset_id'] as String? ?? '',
           ),
         );
         _log('Found risky skill: $skillName ($normalizedIssueCount issues)');

@@ -5,7 +5,6 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
 import '../utils/app_logger.dart';
-import 'app_config_service.dart';
 import 'database_service.dart';
 import 'native_library_service.dart';
 
@@ -68,20 +67,13 @@ class ApiService {
 
   Future<void> _cleanupLegacyDiscoveryFile() async {
     try {
-      final sandboxDir = await AppConfigService().getSandboxDir();
-      final legacyCandidates = <String>[path.join(sandboxDir, 'api.json')];
-
       final appDir = await getApplicationDocumentsDirectory();
-      legacyCandidates.add(path.join(appDir.path, '.botsec', 'api.json'));
-
-      for (final candidatePath in legacyCandidates) {
-        final legacyFile = File(candidatePath);
-        if (await legacyFile.exists()) {
-          await legacyFile.delete();
-          appLogger.info(
-            '[ApiService] Removed legacy discovery file: ${legacyFile.path}',
-          );
-        }
+      final legacyFile = File(path.join(appDir.path, '.botsec', 'api.json'));
+      if (await legacyFile.exists()) {
+        await legacyFile.delete();
+        appLogger.info(
+          '[ApiService] Removed legacy discovery file: ${legacyFile.path}',
+        );
       }
     } catch (e) {
       appLogger.warning(

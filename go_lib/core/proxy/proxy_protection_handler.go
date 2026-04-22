@@ -1,7 +1,7 @@
 package proxy
 
-// proxy_protection_handler.go contains request/response handlers for ProxyProtection.
-// Request lifecycle updates are written through updateTruthRecord() as SSOT snapshots.
+// proxy_protection_handler.go 包含 ProxyProtection 的请求/响应处理方法。
+// 所有请求生命周期信息统一通过 updateTruthRecord() 写入单一 TruthRecord（SSOT）。
 
 import (
 	"context"
@@ -13,9 +13,118 @@ import (
 	chatmodelrouting "go_lib/chatmodel-routing"
 	"go_lib/core/logging"
 	"go_lib/core/shepherd"
+	"go_lib/core/skillscan"
 
 	"github.com/openai/openai-go"
 )
+
+const recentConversationMessageWindow = 3
+
+func appendRequestMessagesToTruthRecord(r *TruthRecord, req *openai.ChatCompletionNewParams) {
+	if r == nil || req == nil || len(r.Messages) > 0 {
+		return
+	}
+	for i, msg := range req.Messages {
+		r.Messages = append(r.Messages, RecordMessage{
+			Index:   i,
+			Role:    getMessageRole(msg),
+			Content: truncateToBytes(extractMessageContent(msg), maxRecordMessageBytes),
+		})
+	}
+}
+
+func appendAssistantMessageToTruthRecord(r *TruthRecord, content string) {
+	if r == nil {
+		return
+	}
+	assistantIndex := len(r.Messages)
+	if assistantIndex < r.MessageCount {
+		assistantIndex = r.MessageCount
+	}
+	r.Messages = append(r.Messages, RecordMessage{
+		Index:   assistantIndex,
+		Role:    "assistant",
+		Content: truncateToBytes(content, maxRecordMessageBytes),
+	})
+}
+
+func detectConversationContinuation(currentAll []NormalizedMessage, prevRecent []NormalizedMessage, currentCount, prevCount int) bool {
+	if len(currentAll) == 0 || len(prevRecent) == 0 {
+		return false
+	}
+	if currentCount <= prevCount {
+		return false
+	}
+	if prevCount > len(currentAll) {
+		return false
+	}
+	start := prevCount - len(prevRecent)
+	if start < 0 {
+		start = 0
+	}
+	end := start + len(prevRecent)
+	if end > len(currentAll) {
+		return false
+	}
+	for i := range prevRecent {
+		if currentAll[start+i] != prevRecent[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (pp *ProxyProtection) evaluateConversationWindow(req *openai.ChatCompletionNewParams) (int, int, bool) {
+	currentAll := extractComparableMessages(req.Messages)
+	currentRecent := extractRecentComparableMessages(req.Messages, recentConversationMessageWindow)
+	currentCount := len(req.Messages)
+
+	pp.metricsMu.Lock()
+	prevRecent := cloneNormalizedMessages(pp.lastRecentMessages)
+	prevCount := pp.lastRecentMessageCount
+	isContinuation := detectConversationContinuation(currentAll, prevRecent, currentCount, prevCount)
+	if !isContinuation {
+		pp.currentConversationTokenUsage = 0
+	}
+	pp.lastRecentMessages = cloneNormalizedMessages(currentRecent)
+	pp.lastRecentMessageCount = currentCount
+	currentUsage := pp.currentConversationTokenUsage
+	pp.metricsMu.Unlock()
+
+	return currentUsage, len(currentRecent), isContinuation
+}
+
+func (pp *ProxyProtection) addConversationTokens(totalTokens int) int {
+	pp.metricsMu.Lock()
+	defer pp.metricsMu.Unlock()
+	if totalTokens > 0 {
+		pp.currentConversationTokenUsage += totalTokens
+	}
+	return pp.currentConversationTokenUsage
+}
+
+func (pp *ProxyProtection) currentDailyTokenUsage() int {
+	pp.configMu.RLock()
+	initialUsage := pp.initialDailyUsage
+	pp.configMu.RUnlock()
+
+	pp.metricsMu.Lock()
+	runtimeUsage := pp.totalTokens - pp.baselineTotalTokens
+	pp.metricsMu.Unlock()
+	if runtimeUsage < 0 {
+		runtimeUsage = 0
+	}
+	return initialUsage + runtimeUsage
+}
+
+func (pp *ProxyProtection) updateRecordTokenTotals(requestID string, promptTokens, completionTokens, conversationTokens, dailyTokens int) {
+	pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+		r.PromptTokens = promptTokens
+		r.CompletionTokens = completionTokens
+		r.ConversationTokens = conversationTokens
+		r.DailyTokens = dailyTokens
+	})
+}
 
 // onRequest handles incoming requests
 func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatCompletionNewParams, rawBody []byte) (*chatmodelrouting.FilterRequestResult, bool) {
@@ -50,9 +159,6 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			pp.currentRequestID = fmt.Sprintf("req_%d_%d", time.Now().UnixNano(), pp.requestCount+1)
 			requestID := pp.currentRequestID
 			pp.auditMu.Unlock()
-			pp.auditLogSafe("start_from_request_quota_conversation", func(tracker *AuditChainTracker) {
-				tracker.StartFromRequest(requestID, pp.assetName, pp.assetID, modelName, req.Messages)
-			})
 
 			pp.sendLog("proxy_session_quota_exceeded", map[string]interface{}{
 				"current": conversationUsage,
@@ -84,11 +190,61 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			pp.emitMonitorRequestCreated(req, rawBody, stream)
 			pp.emitMonitorSecurityDecision("QUOTA_EXCEEDED", reason, true, mockMsg)
 			pp.emitMonitorResponseReturned("QUOTA_EXCEEDED", mockMsg, mockMsg)
-			pp.auditLogSafe("set_decision_quota_conversation", func(tracker *AuditChainTracker) {
-				tracker.SetRequestDecision(requestID, "BLOCK", "QUOTA", reason, 100)
-				tracker.FinalizeRequestOutput(requestID, mockMsg)
+			return &chatmodelrouting.FilterRequestResult{MockContent: mockMsg}, false
+		}
+	}
+
+	// ==================== 单会话 Token 配额检查 ====================
+	if sessionLimit > 0 {
+		pp.metricsMu.Lock()
+		sessionTotal := pp.totalTokens - pp.baselineTotalTokens
+		if sessionTotal < 0 {
+			sessionTotal = 0
+		}
+		pp.metricsMu.Unlock()
+
+		pp.sendTerminalLog(fmt.Sprintf("📊 单会话 Token 用量: %d / %d", sessionTotal, sessionLimit))
+
+		if sessionTotal >= sessionLimit {
+			reason := fmt.Sprintf("单会话 Token 配额已用尽 (%d/%d)", sessionTotal, sessionLimit)
+			pp.sendTerminalLog(fmt.Sprintf(">>> %s,已拦截请求 <<<", reason))
+
+			pp.auditMu.Lock()
+			pp.requestStartTime = time.Now()
+			pp.currentRequestID = fmt.Sprintf("req_%d_%d", time.Now().UnixNano(), pp.requestCount+1)
+			requestID := pp.currentRequestID
+			pp.auditMu.Unlock()
+
+			pp.sendLog("proxy_session_quota_exceeded", map[string]interface{}{
+				"current": sessionTotal,
+				"limit":   sessionLimit,
+				"model":   modelName,
 			})
-			pp.clearRequestContext(ctx)
+
+			mockMsg := formatQuotaExceededMessage("session", sessionTotal, sessionLimit)
+			pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+				r.Model = modelName
+				r.MessageCount = len(req.Messages)
+				r.Phase = RecordPhaseStopped
+				r.CompletedAt = time.Now().Format(time.RFC3339Nano)
+				r.FinishReason = "quota_exceeded"
+				r.ConversationTokens = conversationUsage
+				r.DailyTokens = pp.currentDailyTokenUsage()
+				r.OutputContent = truncateToBytes(mockMsg, maxRecordOutputBytes)
+				appendRequestMessagesToTruthRecord(r, req)
+				appendAssistantMessageToTruthRecord(r, mockMsg)
+				r.Decision = &SecurityDecision{
+					Action:     "BLOCK",
+					RiskLevel:  "QUOTA",
+					Reason:     reason,
+					Confidence: 100,
+				}
+				applyRecordPrimaryContent(r, RecordContentSecurity, mockMsg, true)
+			})
+
+			pp.emitMonitorRequestCreated(req, rawBody, stream)
+			pp.emitMonitorSecurityDecision("QUOTA_EXCEEDED", reason, true, mockMsg)
+			pp.emitMonitorResponseReturned("QUOTA_EXCEEDED", mockMsg, mockMsg)
 			return &chatmodelrouting.FilterRequestResult{MockContent: mockMsg}, false
 		}
 	}
@@ -114,9 +270,6 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			pp.currentRequestID = fmt.Sprintf("req_%d_%d", time.Now().UnixNano(), pp.requestCount+1)
 			requestID := pp.currentRequestID
 			pp.auditMu.Unlock()
-			pp.auditLogSafe("start_from_request_quota_daily", func(tracker *AuditChainTracker) {
-				tracker.StartFromRequest(requestID, pp.assetName, pp.assetID, modelName, req.Messages)
-			})
 
 			pp.sendLog("proxy_quota_exceeded", map[string]interface{}{
 				"current": currentTotal,
@@ -146,11 +299,6 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			pp.emitMonitorRequestCreated(req, rawBody, stream)
 			pp.emitMonitorSecurityDecision("QUOTA_EXCEEDED", reason, true, mockMsg)
 			pp.emitMonitorResponseReturned("QUOTA_EXCEEDED", mockMsg, mockMsg)
-			pp.auditLogSafe("set_decision_quota_daily", func(tracker *AuditChainTracker) {
-				tracker.SetRequestDecision(requestID, "BLOCK", "QUOTA", reason, 100)
-				tracker.FinalizeRequestOutput(requestID, mockMsg)
-			})
-			pp.clearRequestContext(ctx)
 			return &chatmodelrouting.FilterRequestResult{MockContent: mockMsg}, false
 		}
 	}
@@ -167,15 +315,10 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 	pp.currentRequestID = fmt.Sprintf("req_%d_%d", time.Now().UnixNano(), currentRequestNum)
 	requestID := pp.currentRequestID
 	pp.auditMu.Unlock()
-	pp.bindRequestContext(ctx, requestID)
-	pp.auditLogSafe("start_from_request_normal", func(tracker *AuditChainTracker) {
-		tracker.StartFromRequest(requestID, pp.assetName, pp.assetID, modelName, req.Messages)
-	})
 
 	pp.updateTruthRecord(requestID, func(r *TruthRecord) {
 		r.Model = modelName
 		r.MessageCount = len(req.Messages)
-		r.Messages = extractCurrentRoundRecordMessages(req.Messages)
 		r.Phase = RecordPhaseStarting
 		r.Decision = &SecurityDecision{Action: "ALLOW"}
 		r.ConversationTokens = conversationUsage
@@ -454,6 +597,13 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 			"content": displayContent,
 		})
 		pp.emitMonitorClientMessage(i, role, content)
+		pp.updateTruthRecord(requestID, func(r *TruthRecord) {
+			r.Messages = append(r.Messages, RecordMessage{
+				Index:   i,
+				Role:    role,
+				Content: recordContent,
+			})
+		})
 
 		if role == "user" {
 			pp.mu.Lock()
@@ -536,44 +686,22 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 		}
 	}
 
-	toolResultsMap := collectTailToolResults(req.Messages)
+	toolResultsMap := make(map[string]string)
+	for _, msg := range req.Messages {
+		if msg.OfTool != nil {
+			toolCallID := msg.OfTool.ToolCallID
+			if toolCallID != "" {
+				content := extractMessageContent(msg)
+				toolResultsMap[strings.TrimSpace(toolCallID)] = content
+			}
+		}
+	}
 	// DinTalClaw 内嵌协议：将 <tool_result> 结果合并到 toolResultsMap
 	if isInlineToolProtocol && inlineToolResultsMap != nil {
 		for id, result := range inlineToolResultsMap {
 			toolResultsMap[id] = result
 		}
 	}
-	tailToolCount, tailToolWithID, tailToolMissingID, tailToolIDs := summarizeTailToolMessages(req.Messages)
-	lastRole := ""
-	if len(req.Messages) > 0 {
-		lastRole = strings.TrimSpace(getMessageRole(req.Messages[len(req.Messages)-1]))
-	}
-	logging.Info(
-		"[AuditChain] request observed: request_id=%s asset_id=%s model=%s message_count=%d last_role=%s tail_tools=%d tail_tools_with_id=%d tail_tools_missing_id=%d tail_tool_results=%d tail_tool_ids=%s tool_call_ids=%s",
-		requestID,
-		strings.TrimSpace(pp.assetID),
-		modelName,
-		len(req.Messages),
-		lastRole,
-		tailToolCount,
-		tailToolWithID,
-		tailToolMissingID,
-		len(toolResultsMap),
-		formatAuditToolIDSummary(tailToolIDs, 12),
-		formatAuditToolResultMapSummary(toolResultsMap, 12),
-	)
-	if tailToolCount > 0 && tailToolMissingID > 0 {
-		logging.Warning(
-			"[AuditChain] request tail tool messages missing tool_call_id: request_id=%s missing=%d tail_tools=%d",
-			requestID,
-			tailToolMissingID,
-			tailToolCount,
-		)
-	}
-	pp.auditLogSafe("link_request_by_tool_results", func(tracker *AuditChainTracker) {
-		tracker.LinkRequestByToolResults(requestID, pp.assetID, toolResultsMap)
-		tracker.RecordToolResults(pp.assetID, toolResultsMap)
-	})
 
 	// 将历史工具调用记录写入 TruthRecord，标记最新一轮
 	for _, tc := range toolCallsInHistory {
@@ -685,22 +813,12 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 				}
 
 				if skipShepherdForSandboxBlock {
-					sandboxReason := "tool result already blocked by ClawdSecbot sandbox"
 					pp.emitMonitorSecurityDecision(
 						"SANDBOX_BLOCKED",
-						sandboxReason,
+						"tool result already blocked by ClawdSecbot sandbox",
 						false,
 						"",
 					)
-					pp.auditLogSafe("set_decision_sandbox_blocked", func(tracker *AuditChainTracker) {
-						tracker.SetRequestDecision(
-							requestID,
-							"BLOCK",
-							"SANDBOX_BLOCKED",
-							sandboxReason,
-							100,
-						)
-					})
 					return nil, true
 				}
 
@@ -758,8 +876,7 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 
 					pp.storePendingToolCallRecovery(nil, "", decision.Reason, "tool_result")
 
-					securityMsg := pp.shepherdGate.FormatSecurityMessage(decision)
-					securityMsg = pp.shepherdGate.TranslateForUser(pp.ctx, securityMsg, cachedLastUserMsg)
+					securityMsg := pp.shepherdGate.FormatSecurityMockReply(decision)
 					pp.emitMonitorSecurityDecision(decision.Status, decision.Reason, true, securityMsg)
 					recordAction := "BLOCK"
 					recordRiskLevel := "BLOCKED"
@@ -784,11 +901,7 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 					pp.statsMu.Unlock()
 					pp.sendMetricsToCallback()
 					pp.emitMonitorResponseReturned(decision.Status, securityMsg, securityMsg)
-					pp.auditLogSafe("set_decision_shepherd_blocked", func(tracker *AuditChainTracker) {
-						tracker.SetRequestDecision(requestID, recordAction, recordRiskLevel, decision.Reason, 100)
-						tracker.FinalizeRequestOutput(requestID, securityMsg)
-					})
-					pp.clearRequestContext(ctx)
+
 					return &chatmodelrouting.FilterRequestResult{MockContent: securityMsg}, false
 				} else {
 					logging.Info("[ProxyProtection] ShepherdGate tool result decision: ALLOWED, tools=%s", strings.Join(toolNames, ", "))
@@ -808,9 +921,6 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 							Reason: decision.Reason,
 						}
 					})
-					pp.auditLogSafe("set_decision_shepherd_allowed", func(tracker *AuditChainTracker) {
-						tracker.SetRequestDecision(requestID, "ALLOW", "", decision.Reason, 0)
-					})
 				}
 			}
 		}
@@ -828,8 +938,7 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 
 // onResponse handles non-streaming responses
 func (pp *ProxyProtection) onResponse(ctx context.Context, resp *openai.ChatCompletion) bool {
-	requestID := pp.requestIDFromContext(ctx)
-	defer pp.clearRequestContext(ctx)
+	requestID := pp.activeRequestID()
 	pp.sendLogForRequest(requestID, "proxy_response_non_stream", nil)
 	pp.sendLogForRequest(requestID, "proxy_response_info", map[string]interface{}{
 		"model":       resp.Model,
@@ -848,9 +957,6 @@ func (pp *ProxyProtection) onResponse(ctx context.Context, resp *openai.ChatComp
 		msg := &resp.Choices[0].Message
 		outputContent = msg.Content
 		generatedToolCalls = msg.ToolCalls
-		if ensureResponseToolCallIDs(generatedToolCalls) {
-			msg.ToolCalls = generatedToolCalls
-		}
 
 		pp.sendTerminalLog(fmt.Sprintf("onResponse: toolCalls=%d", len(msg.ToolCalls)))
 		for _, tc := range msg.ToolCalls {
@@ -941,12 +1047,6 @@ func (pp *ProxyProtection) onResponse(ctx context.Context, resp *openai.ChatComp
 				completionTokens += estimateTokenCount(string(toolCallsBytes))
 			}
 		}
-		logging.Info(
-			"[AuditChain] response observed: request_id=%s mode=non_stream tool_calls=%d output_len=%d",
-			requestID,
-			len(generatedToolCalls),
-			len(strings.TrimSpace(outputContent)),
-		)
 		totalTokens = promptTokens + completionTokens
 	}
 
@@ -977,29 +1077,6 @@ func (pp *ProxyProtection) onResponse(ctx context.Context, resp *openai.ChatComp
 		}
 		pp.sendMetricsToCallback()
 	}
-	pp.auditLogSafe("update_tokens_on_response", func(tracker *AuditChainTracker) {
-		tracker.UpdateRequestTokens(requestID, promptTokens, completionTokens)
-	})
-
-	if len(generatedToolCalls) > 0 {
-		logging.Info(
-			"[AuditChain] finalize assistant output skipped: request_id=%s mode=non_stream reason=tool_calls_present tool_calls=%d",
-			requestID,
-			len(generatedToolCalls),
-		)
-		pp.auditLogSafe("record_toolcalls_on_response", func(tracker *AuditChainTracker) {
-			tracker.RecordToolCallsForRequest(requestID, pp.assetID, generatedToolCalls, pp.toolValidator)
-		})
-	} else {
-		logging.Info(
-			"[AuditChain] finalize assistant output begin: request_id=%s mode=non_stream output_len=%d",
-			requestID,
-			len(strings.TrimSpace(outputContent)),
-		)
-		pp.auditLogSafe("finalize_output_on_response", func(tracker *AuditChainTracker) {
-			tracker.FinalizeRequestOutput(requestID, outputContent)
-		})
-	}
 
 	// Finalize via TruthRecord
 	pp.finalizeTruthRecord(requestID, outputContent, generatedToolCalls, promptTokens, completionTokens)
@@ -1020,7 +1097,7 @@ func (pp *ProxyProtection) onResponse(ctx context.Context, resp *openai.ChatComp
 
 // onStreamChunk handles streaming responses
 func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.ChatCompletionChunk) bool {
-	requestID := pp.requestIDFromContext(ctx)
+	requestID := pp.activeRequestID()
 	var currentRequestPromptTokens, currentRequestCompletionTokens, currentRequestTotalTokens int
 
 	if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 || chunk.Usage.TotalTokens > 0 {
@@ -1118,17 +1195,11 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 	}
 
 	if len(choice.Delta.ToolCalls) > 0 {
-		readyToolCalls := make([]openai.ChatCompletionMessageToolCall, 0)
-		for i := range choice.Delta.ToolCalls {
-			originalID := strings.TrimSpace(choice.Delta.ToolCalls[i].ID)
-			resolvedID := pp.streamBuffer.MergeStreamToolCall(choice.Delta.ToolCalls[i])
-			if originalID == "" && resolvedID != "" {
-				choice.Delta.ToolCalls[i].ID = resolvedID
-			}
+		for _, stc := range choice.Delta.ToolCalls {
+			pp.streamBuffer.MergeStreamToolCall(stc)
 		}
 		for _, update := range pp.streamBuffer.ConsumeNewlyReadyToolCalls() {
 			tc := update.ToolCall
-			readyToolCalls = append(readyToolCalls, tc)
 			pp.sendLog("proxy_tool_call_name", map[string]interface{}{
 				"index": update.Index,
 				"name":  tc.Function.Name,
@@ -1148,15 +1219,9 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 				})
 			}
 		}
-		if len(readyToolCalls) > 0 {
-			pp.auditLogSafe("record_toolcalls_on_stream_delta", func(tracker *AuditChainTracker) {
-				tracker.RecordToolCallsForRequest(requestID, pp.assetID, readyToolCalls, pp.toolValidator)
-			})
-		}
 	}
 
 	if choice.FinishReason != "" {
-		var finishToolCallCount int
 		pp.sendLogForRequest(requestID, "proxy_stream_finished", map[string]interface{}{
 			"reason": choice.FinishReason,
 		})
@@ -1167,7 +1232,6 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 		if pp.streamBuffer.HasToolCalls() {
 			pp.streamBuffer.mu.Lock()
 			toolCallCount := len(pp.streamBuffer.toolCalls)
-			finishToolCallCount = toolCallCount
 			bufferToolCalls := make([]openai.ChatCompletionMessageToolCall, len(pp.streamBuffer.toolCalls))
 			copy(bufferToolCalls, pp.streamBuffer.toolCalls)
 			var contentWithTools string
@@ -1206,11 +1270,10 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 				for _, tc := range bufferToolCalls {
 					args := truncateToBytes(tc.Function.Arguments, maxRecordToolArgsBytes)
 					r.ToolCalls = append(r.ToolCalls, RecordToolCall{
-						ID:          tc.ID,
-						Name:        tc.Function.Name,
-						Arguments:   args,
-						Source:      "response",
-						LatestRound: true,
+						ID:        tc.ID,
+						Name:      tc.Function.Name,
+						Arguments: args,
+						Source:    "response",
 					})
 				}
 				if contentWithTools == "" {
@@ -1218,9 +1281,6 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 				}
 			})
 			pp.sendLogForRequest(requestID, "proxy_tool_calls_pending", nil)
-			pp.auditLogSafe("record_toolcalls_on_stream_finish", func(tracker *AuditChainTracker) {
-				tracker.RecordToolCallsForRequest(requestID, pp.assetID, bufferToolCalls, pp.toolValidator)
-			})
 		} else {
 			pp.streamBuffer.mu.Lock()
 			var accumulatedContent string
@@ -1255,7 +1315,6 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 								Arguments:   truncateToBytes(it.RawArgs, maxRecordToolArgsBytes),
 								IsSensitive: isSensitive,
 								Source:      "response",
-								LatestRound: true,
 							})
 						}
 						assistantIndex := len(r.Messages)
@@ -1349,32 +1408,6 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 			})
 		}
 		pp.streamBuffer.mu.Unlock()
-		logging.Info(
-			"[AuditChain] response observed: request_id=%s mode=stream finish_reason=%s tool_calls=%d output_len=%d",
-			requestID,
-			string(choice.FinishReason),
-			finishToolCallCount,
-			len(strings.TrimSpace(outputContent)),
-		)
-		pp.auditLogSafe("update_tokens_on_stream_finish", func(tracker *AuditChainTracker) {
-			tracker.UpdateRequestTokens(requestID, promptTokens, completionTokens)
-		})
-		if len(generatedToolCalls) == 0 {
-			logging.Info(
-				"[AuditChain] finalize assistant output begin: request_id=%s mode=stream output_len=%d",
-				requestID,
-				len(strings.TrimSpace(outputContent)),
-			)
-			pp.auditLogSafe("finalize_output_on_stream_finish", func(tracker *AuditChainTracker) {
-				tracker.FinalizeRequestOutput(requestID, outputContent)
-			})
-		} else {
-			logging.Info(
-				"[AuditChain] finalize assistant output skipped: request_id=%s mode=stream reason=tool_calls_present tool_calls=%d",
-				requestID,
-				len(generatedToolCalls),
-			)
-		}
 
 		pp.finalizeTruthRecord(requestID, outputContent, generatedToolCalls, promptTokens, completionTokens)
 		pp.sendLog("monitor_upstream_completed", map[string]interface{}{
@@ -1385,9 +1418,33 @@ func (pp *ProxyProtection) onStreamChunk(ctx context.Context, chunk *openai.Chat
 		})
 		pp.emitMonitorResponseReturned("COMPLETED", outputContent, outputContent)
 
-		pp.clearRequestContext(ctx)
 		pp.streamBuffer.Clear()
 	}
 
 	return true
+}
+
+// formatQuotaExceededMessage 根据语言生成配额超限的模拟返回消息
+func formatQuotaExceededMessage(quotaType string, current, limit int) string {
+	lang := shepherd.NormalizeShepherdLanguage(skillscan.GetLanguageFromAppSettings())
+
+	if lang == "zh" {
+		var quotaName string
+		if quotaType == "session" || quotaType == "conversation" {
+			quotaName = "单会话 Token 配额已用尽"
+		} else {
+			quotaName = "每日 Token 配额已用尽"
+		}
+		return fmt.Sprintf("[ClawSecbot] 状态: QUOTA_EXCEEDED | 原因: %s (%d/%d)\n\n当前请求已被拦截，请调整配额设置或等待配额重置。",
+			quotaName, current, limit)
+	}
+
+	var quotaName string
+	if quotaType == "session" || quotaType == "conversation" {
+		quotaName = "Conversation token quota exceeded"
+	} else {
+		quotaName = "Daily token quota exceeded"
+	}
+	return fmt.Sprintf("[ClawSecbot] Status: QUOTA_EXCEEDED | Reason: %s (%d/%d)\n\nThis request has been blocked. Please adjust quota settings or wait for quota reset.",
+		quotaName, current, limit)
 }

@@ -8,7 +8,6 @@
 
 按用途选择脚本：
 
-- 构建本机 Go 插件：`./scripts/build_openclaw_plugin.sh`
 - 构建共享库并同步到 `plugins/`：`./scripts/build_go.sh`
 - 构建 Linux 发布包：`./scripts/build_linux_release.sh`
 - 构建 macOS 发布包：`./scripts/build_macos_release_new.sh`
@@ -20,27 +19,10 @@
 
 ## Script List / 脚本列表
 
-### `build_openclaw_plugin.sh`
-
-用途：
-- 在当前操作系统上构建 `go_lib/` 的 Go `c-shared` 动态库。
-- 输出文件名统一为 `botsec.so`、`botsec.dylib` 或 `botsec.dll`。
-- 构建完成后复制到项目根目录的 `plugins/`。
-
-用法：
-
-```bash
-./scripts/build_openclaw_plugin.sh
-```
-
-说明：
-- 脚本名保留了历史命名，但实际构建的是 `botsec` 插件，不再是 `openclaw`。
-- 脚本会清理 `plugins/` 中旧的 `openclaw`/`botsec` 同平台产物。
-
 ### `build_go.sh`
 
 用途：
-- 与 `build_openclaw_plugin.sh` 类似，也会构建 `go_lib/` 共享库并复制到 `plugins/`。
+- 构建 `go_lib/` 共享库并复制到 `plugins/`。
 - 额外会清理 `go_lib/` 中的旧头文件与旧动态库文件。
 
 用法：
@@ -50,8 +32,7 @@
 ```
 
 说明：
-- 如果只是本机开发、调试插件，通常使用 `build_openclaw_plugin.sh` 即可。
-- 如果需要同时刷新 `go_lib/` 内的旧产物和头文件，可以使用本脚本。
+- 该脚本是本仓库统一的本机构建入口。
 
 ### `build_linux_release.sh`
 

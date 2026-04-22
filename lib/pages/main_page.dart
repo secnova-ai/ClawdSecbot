@@ -43,10 +43,8 @@ import '../widgets/settings_dialog.dart';
 import '../widgets/onboarding_dialog.dart';
 import '../widgets/skill_scan_dialog.dart';
 import '../widgets/skill_scan_results_dialog.dart';
-import '../widgets/processing_notice_card.dart';
 import '../widgets/protection_config_dialog.dart';
 import '../widgets/scan_result_view.dart';
-import '../widgets/titlebar_bypass_dialog_route.dart';
 import '../widgets/welcome_overlay.dart';
 import '../widgets/onboarding_completion_overlay.dart';
 import '../utils/locale_utils.dart';
@@ -70,9 +68,7 @@ class _MainPageState extends State<MainPage>
         MainPageVersionMixin,
         MainPageWindowMixin,
         MainPageDataMixin {
-  /// 主窗口标题栏高度。
-  double get _mainTitleBarHeight => Platform.isLinux ? 40 : 48;
-
+  // ============ 扫描状态 ============
   ScanState _scanState = ScanState.idle;
   final List<String> _logs = [];
   ScanResult? _result;
@@ -80,12 +76,14 @@ class _MainPageState extends State<MainPage>
   StreamSubscription<String>? _logSubscription;
   RescanAction _selectedRescanAction = RescanAction.securityDiscovery;
 
+  // ============ 防护状态 ============
   final Set<String> _protectedAssetIDs = {};
   final Map<String, String> _protectedAssetNamesByID = {};
 
   /// 启动时后台恢复防护中，期间防护监控按钮显示 loading，防护配置按钮禁用
   bool _isRestoringProtection = false;
 
+  // ============ 引导和欢迎状态 ============
   bool _hasConfigAccess = false;
   bool _showOnboarding = false;
   bool _showOnboardingCompletionOverlay = false;
@@ -95,15 +93,16 @@ class _MainPageState extends State<MainPage>
   Timer? _onboardingCompletionTimer;
   AppLifecycleListener? _appExitListener;
   bool _isExitFlowInProgress = false;
-  bool _showExitCleanupProgressOverlay = false;
   static const MethodChannel _appExitChannel = MethodChannel(
     'com.clawdbot.guard/app_exit',
   );
 
+  // ============ 开机启动 ============
   bool _launchAtStartupEnabled = false;
   int _scheduledScanIntervalSeconds = 0;
   Timer? _scheduledScanTimer;
 
+  // ============ API Server 状态 ============
   bool _apiServerEnabled = false;
   bool _isApiServerToggling = false;
   Timer? _externalStateRefreshTimer;
@@ -117,6 +116,9 @@ class _MainPageState extends State<MainPage>
   /// 待应用的扫描结果（在 welcome sequence 结束后应用）
   ScanResult? _pendingScanResult;
 
+  // ============ Mixin 接口实现 ============
+
+  // MainPageTrayMixin 需要的接口
   @override
   bool get launchAtStartupEnabled => _launchAtStartupEnabled;
   @override
@@ -128,6 +130,7 @@ class _MainPageState extends State<MainPage>
     await _requestAppExit();
   }
 
+  // MainPageDataMixin 需要的接口
   @override
   Set<String> get protectedAssets => _protectedAssetIDs;
   @override
@@ -164,6 +167,8 @@ class _MainPageState extends State<MainPage>
     return _showConfigAccessDialog();
   }
 
+  // ============ 生命周期方法 ============
+
   @override
   void initState() {
     super.initState();
@@ -186,17 +191,23 @@ class _MainPageState extends State<MainPage>
     await windowManager.setPreventClose(true);
     await initTray();
 
+    // 初始化开机启动
     await _initLaunchAtStartup();
 
+    // 默认访问标志（实际检查在欢迎屏幕后进行）
     _hasConfigAccess = !Platform.isMacOS || !BuildConfig.requiresDirectoryAuth;
     appLogger.info('[MainPage] Initial config access: $_hasConfigAccess');
+
+    // 重初始化改为欢迎层结束后再触发，避免启动首屏被重任务阻塞。
   }
 
   /// 执行重量级初始化任务（数据库、插件、扫描结果恢复）
   Future<void> _performHeavyInit() async {
     try {
+      // 1. 计算数据库路径
       await DatabaseService().init();
 
+      // 2. 优先恢复扫描结果，让主界面尽快展示可交互内容。
       final savedResult = await ScanDatabaseService().getLatestScanResult();
       if (savedResult != null) {
         _pendingScanResult = savedResult;
@@ -215,7 +226,7 @@ class _MainPageState extends State<MainPage>
 
     // 3. 加载 dylib + 初始化 Go 日志 + 初始化 Go 数据库
     try {
-      await NativeLibraryService().initialize(logDir: appLogger.logDir);
+      await NativeLibraryService().initialize();
       await _syncProtectionLanguage();
       await _registerApiShutdownHandler();
     } catch (e) {
@@ -1036,19 +1047,19 @@ class _MainPageState extends State<MainPage>
 
   Future<void> _requestAppExit() async {
     final enabledConfigs = await _loadExitTargets();
-    var restoreConfig = false;
     if (enabledConfigs.isNotEmpty) {
       await showWindow();
-      final action = await _showExitRestoreDialog(enabledConfigs.length);
-      if (action == null || action == ExitRestoreAction.cancel) {
+      final restoreConfig = await _showExitRestoreDialog(enabledConfigs.length);
+      if (restoreConfig == null) {
         return;
       }
-      restoreConfig = action == ExitRestoreAction.restoreAndExit;
+      await _requestAppExitWithOptions(
+        interactive: true,
+        restoreConfig: restoreConfig,
+      );
+      return;
     }
-    await _requestAppExitWithOptions(
-      interactive: true,
-      restoreConfig: restoreConfig,
-    );
+    await _requestAppExitWithOptions(interactive: true, restoreConfig: false);
   }
 
   Future<void> _requestAppExitWithOptions({
@@ -1205,7 +1216,34 @@ class _MainPageState extends State<MainPage>
 
   Future<T> _runExitCleanupWithProgress<T>(Future<T> Function() action) async {
     if (mounted) {
-      setState(() => _showExitCleanupProgressOverlay = true);
+      unawaited(
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            backgroundColor: const Color(0xFF1E1E2E),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            content: Row(
+              children: [
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(
+                    AppLocalizations.of(context)!.exitRestoreInProgress,
+                    style: AppFonts.inter(fontSize: 14, color: Colors.white70),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
       await Future.delayed(const Duration(milliseconds: 50));
     }
 
@@ -1213,15 +1251,17 @@ class _MainPageState extends State<MainPage>
       return await action();
     } finally {
       if (mounted) {
-        setState(() => _showExitCleanupProgressOverlay = false);
+        final navigator = Navigator.of(context, rootNavigator: true);
+        if (navigator.canPop()) {
+          navigator.pop();
+        }
       }
     }
   }
 
-  /// 显示退出前恢复确认弹窗，支持仅退出不恢复。
-  Future<ExitRestoreAction?> _showExitRestoreDialog(int protectedCount) {
+  Future<bool?> _showExitRestoreDialog(int protectedCount) {
     final l10n = AppLocalizations.of(context)!;
-    return showDialog<ExitRestoreAction>(
+    return showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
@@ -1260,34 +1300,21 @@ class _MainPageState extends State<MainPage>
         ),
         actions: [
           TextButton(
-            onPressed: () =>
-                Navigator.of(context).pop(ExitRestoreAction.cancel),
+            onPressed: () => Navigator.of(context).pop(),
             child: Text(
               l10n.cancel,
               style: AppFonts.inter(color: Colors.white54),
             ),
           ),
-          OutlinedButton(
-            onPressed: () =>
-                Navigator.of(context).pop(ExitRestoreAction.exitOnly),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
-              foregroundColor: Colors.white70,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
             child: Text(
-              l10n.exitRestoreExitOnly,
-              style: AppFonts.inter(
-                fontWeight: FontWeight.w500,
-                color: Colors.white70,
-              ),
+              l10n.exitWithoutRestoreConfirm,
+              style: AppFonts.inter(color: const Color(0xFFFCA5A5)),
             ),
           ),
           ElevatedButton(
-            onPressed: () =>
-                Navigator.of(context).pop(ExitRestoreAction.restoreAndExit),
+            onPressed: () => Navigator.of(context).pop(true),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFF59E0B),
               shape: RoundedRectangleBorder(
@@ -2222,23 +2249,12 @@ class _MainPageState extends State<MainPage>
     Asset asset, {
     required bool isEditMode,
   }) async {
-    final barrierLabel = MaterialLocalizations.of(
-      context,
-    ).modalBarrierDismissLabel;
-    final result = await Navigator.of(context).push<ProtectionConfig>(
-      TitlebarBypassDialogRoute<ProtectionConfig>(
-        topInset: _mainTitleBarHeight,
-        barrierDismissible: true,
-        barrierLabel: barrierLabel,
-        barrierColor: Colors.black.withValues(alpha: 0.45),
-        builder: (dialogContext) => Padding(
-          padding: EdgeInsets.only(top: _mainTitleBarHeight),
-          child: ProtectionConfigDialog(
-            assetName: asset.name,
-            assetID: asset.id,
-            isEditMode: isEditMode,
-          ),
-        ),
+    final result = await showDialog<ProtectionConfig>(
+      context: context,
+      builder: (context) => ProtectionConfigDialog(
+        assetName: asset.name,
+        assetID: asset.id,
+        isEditMode: isEditMode,
       ),
     );
 
@@ -2418,22 +2434,6 @@ class _MainPageState extends State<MainPage>
                       visible: _showOnboardingCompletionOverlay,
                     ),
                   ),
-                  if (_showExitCleanupProgressOverlay)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        ignoring: true,
-                        child: Center(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 24),
-                            child: const ProcessingNoticeCard(
-                              title: '正在恢复Openclaw配置',
-                              message:
-                                  '在此期间Openclaw Dashboard页面会提示断开连接, 稍后将恢复正常',
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
                   if (isRestoringConfig)
                     Positioned.fill(
                       child: Container(

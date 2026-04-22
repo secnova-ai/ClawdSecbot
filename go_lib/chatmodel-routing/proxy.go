@@ -149,21 +149,11 @@ func (p *Proxy) serveNonStreamResponse(ctx context.Context, resp *openai.ChatCom
 		}
 	}
 
+	// 使用 RawJSON 透传原始 JSON（保留 reasoning_content 等非标准字段）
+	// filter 回调仅做分析（日志/审计/指标），不修改 resp，因此直接使用原始 JSON 即可
 	var content []byte
 	if raw := resp.RawJSON(); raw != "" {
-		rewritten, changed, err := rewriteRawResponseToolCallIDs(raw, resp)
-		if err != nil {
-			logging.Warning("[Proxy] Failed to rewrite non-stream raw JSON tool_call IDs: %v", err)
-			content, err = json.Marshal(resp)
-			if err != nil {
-				p.writeOpenAIErrorResponse(w, "internal_error", "Failed to marshal response", http.StatusInternalServerError)
-				return
-			}
-		} else if changed {
-			content = []byte(rewritten)
-		} else {
-			content = []byte(raw)
-		}
+		content = []byte(raw)
 	} else {
 		var err error
 		content, err = json.Marshal(resp)
@@ -251,20 +241,10 @@ func (p *Proxy) serveStreamResponse(ctx context.Context, stream adapter.Stream, 
 			}
 		}
 
+		// 使用 RawJSON 透传原始 JSON（保留 reasoning_content 等非标准字段）
 		var chunkBytes []byte
 		if raw := chunk.RawJSON(); raw != "" {
-			rewritten, changed, rewriteErr := rewriteRawChunkToolCallIDs(raw, chunk)
-			if rewriteErr != nil {
-				logging.Warning("[Proxy] Failed to rewrite stream raw JSON tool_call IDs: %v", rewriteErr)
-				chunkBytes, rewriteErr = json.Marshal(chunk)
-				if rewriteErr != nil {
-					continue
-				}
-			} else if changed {
-				chunkBytes = []byte(rewritten)
-			} else {
-				chunkBytes = []byte(raw)
-			}
+			chunkBytes = []byte(raw)
 		} else {
 			var marshalErr error
 			chunkBytes, marshalErr = json.Marshal(chunk)
@@ -278,149 +258,6 @@ func (p *Proxy) serveStreamResponse(ctx context.Context, stream adapter.Stream, 
 		if flusher != nil {
 			flusher.Flush()
 		}
-	}
-}
-
-func rewriteRawResponseToolCallIDs(raw string, resp *openai.ChatCompletion) (string, bool, error) {
-	if strings.TrimSpace(raw) == "" || resp == nil {
-		return raw, false, nil
-	}
-	var root map[string]interface{}
-	if err := json.Unmarshal([]byte(raw), &root); err != nil {
-		return "", false, err
-	}
-	choices, ok := root["choices"].([]interface{})
-	if !ok || len(choices) == 0 {
-		return raw, false, nil
-	}
-
-	changed := false
-	for i, choice := range choices {
-		if i >= len(resp.Choices) {
-			break
-		}
-		respToolCalls := resp.Choices[i].Message.ToolCalls
-		if len(respToolCalls) == 0 {
-			continue
-		}
-
-		choiceMap, ok := choice.(map[string]interface{})
-		if !ok {
-			return "", false, fmt.Errorf("raw choices[%d] is not an object", i)
-		}
-		messageMap, ok := choiceMap["message"].(map[string]interface{})
-		if !ok {
-			return "", false, fmt.Errorf("raw choices[%d].message is not an object", i)
-		}
-		rawToolCalls, ok := messageMap["tool_calls"].([]interface{})
-		if !ok {
-			return "", false, fmt.Errorf("raw choices[%d].message.tool_calls is not an array", i)
-		}
-
-		for j := range respToolCalls {
-			respID := strings.TrimSpace(respToolCalls[j].ID)
-			if respID == "" {
-				continue
-			}
-			if j >= len(rawToolCalls) {
-				return "", false, fmt.Errorf("raw choices[%d].message.tool_calls is shorter than parsed response", i)
-			}
-			rawToolCall, ok := rawToolCalls[j].(map[string]interface{})
-			if !ok {
-				return "", false, fmt.Errorf("raw choices[%d].message.tool_calls[%d] is not an object", i, j)
-			}
-			rawID := strings.TrimSpace(stringValue(rawToolCall["id"]))
-			if rawID == respID {
-				continue
-			}
-			rawToolCall["id"] = respID
-			changed = true
-		}
-	}
-
-	if !changed {
-		return raw, false, nil
-	}
-	out, err := json.Marshal(root)
-	if err != nil {
-		return "", false, err
-	}
-	return string(out), true, nil
-}
-
-func rewriteRawChunkToolCallIDs(raw string, chunk *openai.ChatCompletionChunk) (string, bool, error) {
-	if strings.TrimSpace(raw) == "" || chunk == nil {
-		return raw, false, nil
-	}
-	var root map[string]interface{}
-	if err := json.Unmarshal([]byte(raw), &root); err != nil {
-		return "", false, err
-	}
-	choices, ok := root["choices"].([]interface{})
-	if !ok || len(choices) == 0 {
-		return raw, false, nil
-	}
-
-	changed := false
-	for i, choice := range choices {
-		if i >= len(chunk.Choices) {
-			break
-		}
-		respToolCalls := chunk.Choices[i].Delta.ToolCalls
-		if len(respToolCalls) == 0 {
-			continue
-		}
-
-		choiceMap, ok := choice.(map[string]interface{})
-		if !ok {
-			return "", false, fmt.Errorf("raw chunk choices[%d] is not an object", i)
-		}
-		deltaMap, ok := choiceMap["delta"].(map[string]interface{})
-		if !ok {
-			return "", false, fmt.Errorf("raw chunk choices[%d].delta is not an object", i)
-		}
-		rawToolCalls, ok := deltaMap["tool_calls"].([]interface{})
-		if !ok {
-			return "", false, fmt.Errorf("raw chunk choices[%d].delta.tool_calls is not an array", i)
-		}
-
-		for j := range respToolCalls {
-			respID := strings.TrimSpace(respToolCalls[j].ID)
-			if respID == "" {
-				continue
-			}
-			if j >= len(rawToolCalls) {
-				return "", false, fmt.Errorf("raw chunk choices[%d].delta.tool_calls is shorter than parsed response", i)
-			}
-			rawToolCall, ok := rawToolCalls[j].(map[string]interface{})
-			if !ok {
-				return "", false, fmt.Errorf("raw chunk choices[%d].delta.tool_calls[%d] is not an object", i, j)
-			}
-			rawID := strings.TrimSpace(stringValue(rawToolCall["id"]))
-			if rawID == respID {
-				continue
-			}
-			rawToolCall["id"] = respID
-			changed = true
-		}
-	}
-
-	if !changed {
-		return raw, false, nil
-	}
-	out, err := json.Marshal(root)
-	if err != nil {
-		return "", false, err
-	}
-	return string(out), true, nil
-}
-
-func stringValue(v interface{}) string {
-	switch s := v.(type) {
-	case string:
-		return s
-	default:
-		return ""
 	}
 }
 

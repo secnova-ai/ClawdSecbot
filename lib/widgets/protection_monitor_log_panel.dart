@@ -4,11 +4,17 @@ import '../l10n/app_localizations.dart';
 import '../models/protection_analysis_model.dart';
 import '../models/truth_record_model.dart';
 import '../utils/app_fonts.dart';
-import 'protection_monitor_security_decision.dart';
 
+/// 中部工具区跨卡去重上下文，每张卡片一份。
+/// 仅影响中部「工具参数」和「工具结果」两个 _buildToolSection 区块。
 class _ToolDedupContext {
+  /// 经跨卡去重后，本卡可展示的工具结果 ID 集合（仅含非空 ID）
   final Set<String> visibleResultIds;
+
+  /// 是否隐藏中部工具参数区（上一张为「仅参数」且本卡有对应结果时）
   final bool hideToolArgs;
+
+  /// 是否隐藏中部工具结果区（本卡为「仅工具参数」模式时）
   final bool hideToolResults;
 
   const _ToolDedupContext({
@@ -1381,11 +1387,7 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
                       ? const Color(0xFFEF4444)
                       : const Color(0xFFF59E0B),
                   label: _localizedDecisionLabel(l10n, group.decisionStatus),
-                  value: buildSecurityDecisionValue(
-                    l10n,
-                    group,
-                    isZh: _isZh(l10n),
-                  ),
+                  value: group.decisionReason,
                 ),
               if (currentToolCalls.isNotEmpty)
                 _buildMetaChip(

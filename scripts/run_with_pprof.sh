@@ -26,6 +26,19 @@ set -e
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )"
 cd "$PROJECT_ROOT"
 
+detect_shared_lib_ext() {
+    case "$OSTYPE" in
+        darwin*) echo ".dylib" ;;
+        linux-gnu*) echo ".so" ;;
+        msys*|win32*) echo ".dll" ;;
+        *) echo ".so" ;;
+    esac
+}
+
+SHARED_EXT="$(detect_shared_lib_ext)"
+SHARED_NAME="botsec${SHARED_EXT}"
+LATEST_SHARED_LIB="$PROJECT_ROOT/plugins/${SHARED_NAME}"
+
 # 确定 pprof 端口: 命令行参数 > 环境变量 > 默认值 6060
 PPROF_PORT="${1:-${BOTSEC_PPROF_PORT:-6060}}"
 BUILD_TYPE="${2:-community}"
@@ -44,6 +57,39 @@ run_with_sudo() {
     fi
 }
 
+sync_latest_shared_library() {
+    if [[ ! -f "$LATEST_SHARED_LIB" ]]; then
+        echo "错误: 未找到最新动态库: $LATEST_SHARED_LIB"
+        return 1
+    fi
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "  同步最新动态库到已存在的 macOS App Bundle 插件目录..."
+        local synced=0
+        while IFS= read -r target; do
+            cp -f "$LATEST_SHARED_LIB" "$target"
+            echo "    -> $target"
+            synced=$((synced + 1))
+        done < <(find "$PROJECT_ROOT/build" -type f -path "*/Contents/Resources/plugins/${SHARED_NAME}" 2>/dev/null || true)
+        if [[ $synced -eq 0 ]]; then
+            echo "    (未发现已构建 App Bundle 插件库，后续 flutter run 将使用 plugins 目录中的新库)"
+        fi
+    fi
+}
+
+stop_existing_debug_app_if_needed() {
+    if [[ "$OSTYPE" != "darwin"* ]]; then
+        return 0
+    fi
+
+    local debug_exec="$PROJECT_ROOT/build/macos/Build/Products/Debug/ClawdSecbot.app/Contents/MacOS/ClawdSecbot"
+    if pgrep -f "$debug_exec" >/dev/null 2>&1; then
+        echo "  检测到旧 Debug App 仍在运行，先关闭以确保重新加载最新动态库..."
+        pkill -f "$debug_exec" || true
+        sleep 1
+    fi
+}
+
 echo "============================================"
 echo "  BotSecManager — pprof 性能分析模式"
 echo "============================================"
@@ -52,29 +98,8 @@ echo ""
 
 # Step 1: 构建 Go 插件
 echo "[1/3] 构建 Go 插件..."
-"$PROJECT_ROOT/scripts/build_openclaw_plugin.sh"
-
-# macOS: flutter run 可能直接复用已构建的 .app，导致继续加载旧的 Resources/plugins/botsec.dylib。
-# 这里在启动前主动把最新插件同步到现有 app bundle，避免“构建成功但运行仍是旧动态库”。
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    SOURCE_DYLIB="$PROJECT_ROOT/plugins/botsec.dylib"
-    if [[ -f "$SOURCE_DYLIB" ]]; then
-        SYNCED_COUNT=0
-        while IFS= read -r APP_DIR; do
-            TARGET_DYLIB="$APP_DIR/Contents/Resources/plugins/botsec.dylib"
-            mkdir -p "$(dirname "$TARGET_DYLIB")"
-            cp -f "$SOURCE_DYLIB" "$TARGET_DYLIB"
-            SYNCED_COUNT=$((SYNCED_COUNT + 1))
-            echo "  已同步最新 botsec.dylib -> $TARGET_DYLIB"
-        done < <(find "$PROJECT_ROOT/build/macos/Build/Products" -type d -name "*.app" 2>/dev/null || true)
-
-        if [[ "$SYNCED_COUNT" -eq 0 ]]; then
-            echo "  未发现已构建的 macOS .app，跳过 app bundle dylib 同步"
-        fi
-    else
-        echo "  警告: 未找到 $SOURCE_DYLIB，跳过 app bundle dylib 同步"
-    fi
-fi
+"$PROJECT_ROOT/scripts/build_go.sh"
+sync_latest_shared_library
 echo ""
 
 # Step 2 (Linux only): 重新编译 LD_PRELOAD 沙箱库并复制到策略目录，与 gateway 查找路径一致
@@ -203,6 +228,8 @@ if [ ! -f "$PROJECT_ROOT/.dart_tool/package_config.json" ]; then
     echo "Bootstrap Flutter dependencies: package_config.json is missing."
     flutter pub get
 fi
+
+stop_existing_debug_app_if_needed
 
 exec flutter run -d "$FLUTTER_DEVICE" --no-pub \
     --dart-define=BUILD_VARIANT=personal \

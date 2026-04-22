@@ -23,69 +23,6 @@ func TestParseReactRiskDecision(t *testing.T) {
 	}
 }
 
-// TestNormalizeReactRiskDecisionConsistency 验证低风险判定的一致性兜底逻辑。
-func TestNormalizeReactRiskDecisionConsistency(t *testing.T) {
-	t.Run("low risk blocked decision should be normalized to allow", func(t *testing.T) {
-		input := &ReactRiskDecision{
-			Allowed:    false,
-			Reason:     "ambiguous but low impact",
-			RiskLevel:  "low",
-			Confidence: 72,
-		}
-
-		output := normalizeReactRiskDecisionConsistency(input)
-		if output == nil {
-			t.Fatalf("expected non-nil decision")
-		}
-		if !output.Allowed {
-			t.Fatalf("expected low-risk blocked decision to be normalized to allow")
-		}
-		if !strings.Contains(output.Reason, "normalized: low-risk decision forced to allow") {
-			t.Fatalf("expected normalized reason marker, got=%q", output.Reason)
-		}
-	})
-
-	t.Run("non-low risk decision should remain unchanged", func(t *testing.T) {
-		input := &ReactRiskDecision{
-			Allowed:    false,
-			Reason:     "sensitive operation requires confirmation",
-			RiskLevel:  "medium",
-			Confidence: 90,
-		}
-
-		output := normalizeReactRiskDecisionConsistency(input)
-		if output == nil {
-			t.Fatalf("expected non-nil decision")
-		}
-		if output.Allowed {
-			t.Fatalf("expected medium-risk blocked decision to remain blocked")
-		}
-		if output.Reason != "sensitive operation requires confirmation" {
-			t.Fatalf("expected reason unchanged, got=%q", output.Reason)
-		}
-	})
-
-	t.Run("low risk sensitive rule block should remain blocked", func(t *testing.T) {
-		input := &ReactRiskDecision{
-			Allowed:    false,
-			Reason:     "Tool call matches user-defined sensitive action rule",
-			RiskLevel:  "low",
-			Confidence: 88,
-		}
-
-		output := normalizeReactRiskDecisionConsistency(input)
-		if output == nil {
-			t.Fatalf("expected non-nil decision")
-		}
-		if output.Allowed {
-			t.Fatalf("expected sensitive-rule block to remain blocked")
-		}
-		if output.Reason != "Tool call matches user-defined sensitive action rule" {
-			t.Fatalf("expected reason unchanged, got=%q", output.Reason)
-		}
-	})
-}
-
 func TestDetectToolResultInjection(t *testing.T) {
 	// English injection patterns should be detected
 	englishInjections := []struct {

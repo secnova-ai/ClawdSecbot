@@ -35,8 +35,6 @@ Only call extra tools when context is insufficient.
 - Block critical patterns.
 - Block when no effective limits are present.
 - Allow only for bounded, explicitly requested load operations.
-- If risk is low and limits are explicit, return allow directly.
-- Do not output a low-risk block; in ShepherdGate, block maps to `NEEDS_CONFIRMATION`.
 
 ## Cross-skill coordination
 - If resource-heavy behavior is embedded in shell commands, load `script_execution_guard`.
