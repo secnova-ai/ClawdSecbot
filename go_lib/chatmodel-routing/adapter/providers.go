@@ -146,10 +146,13 @@ var supportedProviders = []ProviderInfo{
 		APIKeyHint: "Your Doubao API key", ModelHint: "doubao-seed-1-6-250615",
 	},
 	{
+		// 千帆 ModelBuilder V2 OpenAI 兼容接口，使用单一 API Key（Bearer Token），无需 Secret Key
+		// 调用路径：POST {baseURL}/chat/completions，Authorization: Bearer <api_key>
 		Name: ProviderQianfan, DisplayName: "Qianfan", Icon: "cloud", Scope: ScopeSecurity,
-		NeedsEndpoint: true, NeedsAPIKey: true, NeedsSecretKey: true, AutoV1Suffix: false,
-		DefaultBaseURL: "https://aip.baidubce.com/rpc/2.0/ai_custom/v1", DefaultModel: "ERNIE-4.0-8K",
-		APIKeyHint: "Your Qianfan Access Key", ModelHint: "ERNIE-4.0-8K, ERNIE-Speed-128K",
+		NeedsEndpoint: true, NeedsAPIKey: true, NeedsSecretKey: false, AutoV1Suffix: false,
+		DefaultBaseURL: "https://qianfan.baidubce.com/v2", DefaultModel: "ernie-4.5-turbo-128k",
+		APIKeyHint: "Your Qianfan API Key (bce-v3/...)",
+		ModelHint:  "ernie-4.5-turbo-128k, ernie-speed-128k, deepseek-v3.1",
 	},
 	{
 		Name: ProviderErnie, DisplayName: "Ernie", Icon: "message-square", Scope: ScopeSecurity,

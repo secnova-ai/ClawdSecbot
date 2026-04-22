@@ -3,7 +3,6 @@ package modelfactory
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	"github.com/cloudwego/eino-ext/components/model/gemini"
 	"github.com/cloudwego/eino-ext/components/model/ollama"
 	"github.com/cloudwego/eino-ext/components/model/openai"
-	"github.com/cloudwego/eino-ext/components/model/qianfan"
 	"github.com/cloudwego/eino-ext/components/model/qwen"
 	"github.com/cloudwego/eino/components/model"
 	"google.golang.org/genai"
@@ -65,11 +63,11 @@ func ValidateSecurityModelConfig(config *repository.SecurityModelConfig) error {
 			return fmt.Errorf("Gemini model name is required")
 		}
 	case "qianfan":
+		if config.APIKey == "" {
+			return fmt.Errorf("Qianfan API key is required")
+		}
 		if config.Model == "" {
 			return fmt.Errorf("Qianfan model name is required")
-		}
-		if config.APIKey == "" && os.Getenv("QIANFAN_ACCESS_KEY") == "" {
-			return fmt.Errorf("Qianfan access key is required (set api_key or QIANFAN_ACCESS_KEY env)")
 		}
 	case "qwen":
 		if config.APIKey == "" {
@@ -240,18 +238,27 @@ func createGeminiModel(ctx context.Context, config *repository.SecurityModelConf
 	})
 }
 
+// createQianfanModel 创建千帆 ChatModel 实例。
+// 千帆 ModelBuilder V2 提供 OpenAI 兼容协议：
+//   - 默认 BaseURL：https://qianfan.baidubce.com/v2
+//   - 鉴权：Authorization: Bearer <api_key>（单一 API Key，无需 Secret Key）
+//   - 参考文档：https://cloud.baidu.com/doc/qianfan-api/s/3m7of64lb
 func createQianfanModel(ctx context.Context, config *repository.SecurityModelConfig) (model.ChatModel, error) {
+	if config.APIKey == "" {
+		return nil, fmt.Errorf("Qianfan API key is required")
+	}
 	if config.Model == "" {
 		return nil, fmt.Errorf("Qianfan model name is required")
 	}
-	if config.APIKey != "" {
-		os.Setenv("QIANFAN_ACCESS_KEY", config.APIKey)
+	baseURL := config.Endpoint
+	if baseURL == "" {
+		baseURL = "https://qianfan.baidubce.com/v2"
 	}
-	if config.SecretKey != "" {
-		os.Setenv("QIANFAN_SECRET_KEY", config.SecretKey)
-	}
-	return qianfan.NewChatModel(ctx, &qianfan.ChatModelConfig{
-		Model: config.Model,
+	return openai.NewChatModel(ctx, &openai.ChatModelConfig{
+		APIKey:  config.APIKey,
+		BaseURL: baseURL,
+		Model:   config.Model,
+		Timeout: 120 * time.Second,
 	})
 }
 
