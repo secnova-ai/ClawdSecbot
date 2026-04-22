@@ -133,6 +133,12 @@ func (p *OpenclawPlugin) AssessRisks(scannedHashes map[string]bool) ([]core.Risk
 	checkNetworkExposure(*config, &risks)
 	checkSandbox(*config, rawConfig, &risks)
 	checkLogging(*config, configPath, &risks)
+	checkDangerousGatewayFlags(*config, rawConfig, &risks)
+
+	version := getOpenClawVersion()
+	checkOneClickRCEVulnerabilityByVersion(version, &risks)
+	checkConfigPatchLevelByVersion(version, &risks)
+
 	// 已隐藏：配置文件中明文密钥检测，不再向用户展示此项风险
 	// checkCredentialsInConfig(configPath, &risks)
 

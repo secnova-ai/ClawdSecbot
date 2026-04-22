@@ -5,8 +5,9 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
-	"strconv"
+	"sort"
 	"strings"
 
 	"go_lib/core"
@@ -278,32 +279,173 @@ func checkCredentialsInConfig(configPath string, risks *[]core.Risk) {
 	}
 }
 
-// checkOneClickRCEVulnerability detects 1-click RCE vulnerability (CVSS 10.0)
-// This vulnerability exists in openclaw versions before 2026.1.24-1
-func checkOneClickRCEVulnerability(risks *[]core.Risk) {
-	// Try to get OpenClaw version
-	version := getOpenClawVersion()
+var openClawVersionPattern = regexp.MustCompile(`(?i)\bv?(\d{4})\.(\d{1,2})\.(\d{1,2})(?:-(\d+))?\b`)
 
-	// If version check fails or version is vulnerable, report the risk
-	if version == "" || isVulnerableVersion(version) {
-		*risks = append(*risks, core.Risk{
-			ID:    "openclaw_1click_rce_vulnerability",
-			Title: "1-click RCE Vulnerability (CVSS 10.0)",
-			Description: "OpenClaw存在严重的1-click RCE漏洞,攻击者可通过诱导用户访问恶意网站,利用Gateway URL参数覆盖、Token泄露和WebSocket Origin绕过三个漏洞链完成远程代码执行." +
-				"漏洞链：(1) URL参数gatewayUrl可被覆盖无白名单验证 → (2) Token明文存储在localStorage被泄露 → (3) WebSocket未验证Origin导致攻击者可直连本地Gateway → (4) 完成认证并执行任意命令." +
-				"受影响版本：< 2026.1.24-1,建议升级至最新版本并检查是否包含修复补丁.",
-			Level: core.RiskLevelCritical,
-			Args: map[string]interface{}{
-				"cvss_score":       "10.0",
-				"attack_vector":    "Network",
-				"attack_chain":     "URL覆盖 + Token泄露 + Origin绕过 + RCE",
-				"affected_files":   "ui/src/ui/app-settings.ts, ui/src/ui/app-gateway.ts, ui/src/ui/storage.ts, src/gateway/auth.ts, src/gateway/server/ws-connection.ts",
-				"check_version":    "openclaw --version",
-				"vulnerable_below": "2026.1.24-1",
-				"current_version":  version, // 添加当前检测到的版本
-			},
-		})
+type openClawVersion struct {
+	year  int
+	month int
+	day   int
+	build int
+}
+
+type openClawConfigAdvisory struct {
+	ID           string
+	FixedVersion string
+	Summary      string
+}
+
+var configAdvisories = []openClawConfigAdvisory{
+	{
+		ID:           "GHSA-qvr7-g57c-mrc7 / CVE-2026-32970",
+		FixedVersion: "2026.3.11",
+		Summary:      "Unavailable local auth SecretRefs can fall through to remote credentials in local mode.",
+	},
+	{
+		ID:           "GHSA-mj59-h3q9-ghfh",
+		FixedVersion: "2026.4.20",
+		Summary:      "Workspace MCP stdio env can inject dangerous startup variables.",
+	},
+	{
+		ID:           "GHSA-7jm2-g593-4qrc",
+		FixedVersion: "2026.4.20",
+		Summary:      "Model-driven gateway config.patch can mutate operator-trusted security settings.",
+	},
+	{
+		ID:           "GHSA-hxvm-xjvf-93f3",
+		FixedVersion: "2026.4.20",
+		Summary:      "Workspace dotenv can override OPENCLAW_ runtime-control environment variables.",
+	},
+}
+
+// checkDangerousGatewayFlags validates insecure or dangerous configuration toggles.
+func checkDangerousGatewayFlags(config OpenclawConfig, rawConfig map[string]interface{}, risks *[]core.Risk) {
+	if rawConfig == nil {
+		return
 	}
+
+	var flags []string
+	isCritical := false
+
+	if v, ok := lookupNestedBool(rawConfig, "gateway", "controlUi", "allowInsecureAuth"); ok && v {
+		flags = append(flags, "gateway.controlUi.allowInsecureAuth=true")
+	}
+	if v, ok := lookupNestedBool(rawConfig, "gateway", "controlUi", "dangerouslyDisableDeviceAuth"); ok && v {
+		flags = append(flags, "gateway.controlUi.dangerouslyDisableDeviceAuth=true")
+		isCritical = true
+	}
+	if v, ok := lookupNestedBool(rawConfig, "gateway", "controlUi", "dangerouslyAllowHostHeaderOriginFallback"); ok && v {
+		flags = append(flags, "gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback=true")
+	}
+	if v, ok := lookupNestedBool(rawConfig, "gateway", "allowRealIpFallback"); ok && v {
+		flags = append(flags, "gateway.allowRealIpFallback=true")
+	}
+
+	if origins, ok := lookupNestedStringSlice(rawConfig, "gateway", "controlUi", "allowedOrigins"); ok {
+		for _, origin := range origins {
+			if strings.TrimSpace(origin) == "*" {
+				flags = append(flags, "gateway.controlUi.allowedOrigins contains '*'")
+				break
+			}
+		}
+	}
+
+	if strings.EqualFold(strings.TrimSpace(config.Gateway.Auth.Mode), "trusted-proxy") && len(config.Gateway.TrustedProxies) == 0 {
+		flags = append(flags, "gateway.auth.mode=trusted-proxy without gateway.trustedProxies")
+		isCritical = true
+	}
+
+	if len(flags) == 0 {
+		return
+	}
+
+	sort.Strings(flags)
+	riskLevel := core.RiskLevelHigh
+	if isCritical {
+		riskLevel = core.RiskLevelCritical
+	}
+
+	*risks = append(*risks, core.Risk{
+		ID:    "openclaw_insecure_or_dangerous_flags",
+		Title: "Insecure or Dangerous Gateway Flags Enabled",
+		Description: "Detected OpenClaw gateway flags that weaken authentication or origin trust protections. " +
+			"Disable these flags unless you have a strict, verified threat-model exception.",
+		Level: riskLevel,
+		Args: map[string]interface{}{
+			"flags": flags,
+		},
+	})
+}
+
+// checkConfigPatchLevelByVersion reports known configuration-related advisories by version.
+func checkConfigPatchLevelByVersion(version string, risks *[]core.Risk) {
+	var impacted []openClawConfigAdvisory
+	required := "2026.3.11"
+
+	for _, advisory := range configAdvisories {
+		if version == "" || isVersionLowerThan(version, advisory.FixedVersion) {
+			impacted = append(impacted, advisory)
+			if isVersionLowerThan(required, advisory.FixedVersion) {
+				required = advisory.FixedVersion
+			}
+		}
+	}
+
+	if len(impacted) == 0 {
+		return
+	}
+
+	items := make([]string, 0, len(impacted))
+	for _, advisory := range impacted {
+		items = append(items, fmt.Sprintf("%s (fixed in %s)", advisory.ID, advisory.FixedVersion))
+	}
+	sort.Strings(items)
+
+	displayVersion := version
+	if displayVersion == "" {
+		displayVersion = "unknown"
+	}
+
+	*risks = append(*risks, core.Risk{
+		ID:    "openclaw_config_patch_outdated",
+		Title: "OpenClaw Config Security Patches Missing",
+		Description: "Current OpenClaw version is missing published configuration-security fixes. " +
+			"Upgrade to a patched version immediately.",
+		Level: core.RiskLevelHigh,
+		Args: map[string]interface{}{
+			"current_version":  displayVersion,
+			"required_version": required,
+			"advisories":       strings.Join(items, "; "),
+			"check_version":    "openclaw --version",
+		},
+	})
+}
+
+// checkOneClickRCEVulnerabilityByVersion detects the one-click token exfiltration RCE chain.
+func checkOneClickRCEVulnerabilityByVersion(version string, risks *[]core.Risk) {
+	if version != "" && !isVersionLowerThan(version, "2026.1.29") {
+		return
+	}
+
+	displayVersion := version
+	if displayVersion == "" {
+		displayVersion = "unknown"
+	}
+
+	*risks = append(*risks, core.Risk{
+		ID:    "openclaw_1click_rce_vulnerability",
+		Title: "1-click RCE via gatewayUrl Token Exfiltration",
+		Description: "OpenClaw Control UI may trust gatewayUrl from query parameters and auto-connect with a stored auth token, " +
+			"which can enable attacker-controlled token theft and gateway takeover (GHSA-g8p2-7wf7-98mq / CVE-2026-25253).",
+		Level: core.RiskLevelCritical,
+		Args: map[string]interface{}{
+			"cvss_score":       "8.8",
+			"attack_vector":    "Network",
+			"check_version":    "openclaw --version",
+			"vulnerable_below": "2026.1.29",
+			"current_version":  displayVersion,
+			"advisory":         "GHSA-g8p2-7wf7-98mq / CVE-2026-25253",
+		},
+	})
 }
 
 // getOpenClawVersion tries to get the OpenClaw version
@@ -316,41 +458,133 @@ func getOpenClawVersion() string {
 		return ""
 	}
 
-	// Parse version from output
-	// Expected format: "2026.2.2-3" or similar
-	version := strings.TrimSpace(string(output))
+	return extractOpenClawVersion(string(output))
+}
+
+func extractOpenClawVersion(raw string) string {
+	match := openClawVersionPattern.FindStringSubmatch(strings.TrimSpace(raw))
+	if len(match) < 4 {
+		return ""
+	}
+	version := fmt.Sprintf("%s.%s.%s", match[1], match[2], match[3])
+	if len(match) >= 5 && match[4] != "" {
+		version = version + "-" + match[4]
+	}
 	return version
 }
 
-// isVulnerableVersion checks if the version is vulnerable
-func isVulnerableVersion(version string) bool {
-	if version == "" {
-		// Unknown version, assume vulnerable for safety
-		return true
+func parseOpenClawVersion(value string) (openClawVersion, bool) {
+	match := openClawVersionPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if len(match) < 4 {
+		return openClawVersion{}, false
 	}
 
-	// Parse version string (format: YYYY.M.D-BUILD)
-	// Example: "2026.1.24-1"
-	parts := strings.Split(version, "-")
-	if len(parts) < 2 {
-		return true // Cannot parse, assume vulnerable
+	parsed := openClawVersion{}
+	if _, err := fmt.Sscanf(match[1], "%d", &parsed.year); err != nil {
+		return openClawVersion{}, false
 	}
-
-	datePart := parts[0]
-	buildPart := parts[1]
-
-	// Compare with fix version: 2026.1.24-1
-	// Versions before 2026.1.24-1 are vulnerable
-	if datePart < "2026.1.24" {
-		return true
-	} else if datePart == "2026.1.24" {
-		// Same date, compare build number
-		buildNum, err := strconv.Atoi(buildPart)
-		if err != nil || buildNum < 1 {
-			return true
+	if _, err := fmt.Sscanf(match[2], "%d", &parsed.month); err != nil {
+		return openClawVersion{}, false
+	}
+	if _, err := fmt.Sscanf(match[3], "%d", &parsed.day); err != nil {
+		return openClawVersion{}, false
+	}
+	parsed.build = 0
+	if len(match) >= 5 && match[4] != "" {
+		if _, err := fmt.Sscanf(match[4], "%d", &parsed.build); err != nil {
+			return openClawVersion{}, false
 		}
 	}
+	return parsed, true
+}
 
-	// Version is 2026.1.24-1 or later, not vulnerable
-	return false
+func compareOpenClawVersion(left, right string) (int, bool) {
+	lv, lok := parseOpenClawVersion(left)
+	rv, rok := parseOpenClawVersion(right)
+	if !lok || !rok {
+		return 0, false
+	}
+
+	switch {
+	case lv.year != rv.year:
+		if lv.year < rv.year {
+			return -1, true
+		}
+		return 1, true
+	case lv.month != rv.month:
+		if lv.month < rv.month {
+			return -1, true
+		}
+		return 1, true
+	case lv.day != rv.day:
+		if lv.day < rv.day {
+			return -1, true
+		}
+		return 1, true
+	case lv.build != rv.build:
+		if lv.build < rv.build {
+			return -1, true
+		}
+		return 1, true
+	default:
+		return 0, true
+	}
+}
+
+func isVersionLowerThan(current, fixed string) bool {
+	diff, ok := compareOpenClawVersion(current, fixed)
+	if !ok {
+		// Fail closed when version parsing fails.
+		return true
+	}
+	return diff < 0
+}
+
+func lookupNestedValue(rawConfig map[string]interface{}, path ...string) (interface{}, bool) {
+	var current interface{} = rawConfig
+	for _, key := range path {
+		nextMap, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		val, ok := nextMap[key]
+		if !ok {
+			return nil, false
+		}
+		current = val
+	}
+	return current, true
+}
+
+func lookupNestedBool(rawConfig map[string]interface{}, path ...string) (bool, bool) {
+	value, ok := lookupNestedValue(rawConfig, path...)
+	if !ok {
+		return false, false
+	}
+	v, ok := value.(bool)
+	return v, ok
+}
+
+func lookupNestedStringSlice(rawConfig map[string]interface{}, path ...string) ([]string, bool) {
+	value, ok := lookupNestedValue(rawConfig, path...)
+	if !ok {
+		return nil, false
+	}
+
+	switch list := value.(type) {
+	case []string:
+		return list, true
+	case []interface{}:
+		result := make([]string, 0, len(list))
+		for _, item := range list {
+			text, ok := item.(string)
+			if !ok {
+				continue
+			}
+			result = append(result, text)
+		}
+		return result, true
+	default:
+		return nil, false
+	}
 }
