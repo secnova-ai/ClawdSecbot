@@ -47,6 +47,8 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
   bool _loading = true;
   bool _saving = false;
   bool _testing = false;
+  bool _showApiKey = false;
+  bool _showSecretKey = false;
   String? _error;
 
   /// 连通性测试版本号：每次发起测试自增，切换 provider / 关闭表单 /
@@ -260,15 +262,18 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
 
     // 后台 isolate 的真实 FFI 调用；完成后回填 completer，若已被取消则忽略。
     unawaited(
-      _service.testConnection(config).then((result) {
-        if (!completer.isCompleted) {
-          completer.complete(result);
-        }
-      }).catchError((Object e) {
-        if (!completer.isCompleted) {
-          completer.complete({'success': false, 'error': e.toString()});
-        }
-      }),
+      _service
+          .testConnection(config)
+          .then((result) {
+            if (!completer.isCompleted) {
+              completer.complete(result);
+            }
+          })
+          .catchError((Object e) {
+            if (!completer.isCompleted) {
+              completer.complete({'success': false, 'error': e.toString()});
+            }
+          }),
     );
 
     final result = await completer.future;
@@ -592,7 +597,12 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
                 : l10n.modelConfigApiKey,
             hint: providerInfo?.apiKeyHint ?? 'Your API key',
             icon: LucideIcons.key,
-            obscureText: true,
+            obscureText: !_showApiKey,
+            onToggleObscureText: widget.readOnly
+                ? null
+                : () => setState(() {
+                    _showApiKey = !_showApiKey;
+                  }),
           ),
         ],
         const SizedBox(height: 12),
@@ -609,7 +619,12 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
             label: l10n.modelConfigSecretKey,
             hint: 'Your Secret Key',
             icon: LucideIcons.keyRound,
-            obscureText: true,
+            obscureText: !_showSecretKey,
+            onToggleObscureText: widget.readOnly
+                ? null
+                : () => setState(() {
+                    _showSecretKey = !_showSecretKey;
+                  }),
           ),
         ],
       ],
@@ -622,7 +637,9 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
     required String hint,
     required IconData icon,
     bool obscureText = false,
+    VoidCallback? onToggleObscureText,
   }) {
+    final hasVisibilityToggle = onToggleObscureText != null;
     return TextField(
       controller: controller,
       obscureText: obscureText,
@@ -637,6 +654,17 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
         hintText: hint,
         hintStyle: AppFonts.inter(fontSize: 13, color: Colors.white30),
         prefixIcon: Icon(icon, color: Colors.white54, size: 18),
+        suffixIcon: hasVisibilityToggle
+            ? IconButton(
+                tooltip: obscureText ? '显示明文' : '隐藏明文',
+                icon: Icon(
+                  obscureText ? LucideIcons.eye : LucideIcons.eyeOff,
+                  color: Colors.white54,
+                  size: 18,
+                ),
+                onPressed: onToggleObscureText,
+              )
+            : null,
         filled: true,
         fillColor: const Color(0xFF1E1E2E),
         border: OutlineInputBorder(

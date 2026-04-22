@@ -183,6 +183,16 @@ function Test-NeedFlutterPubGet {
         if ($packageConfigTime -lt $overrideTime) { return $true }
     }
 
+    $windowsGeneratedFiles = @(
+        (Join-Path $ProjectRootPath "windows\flutter\generated_plugins.cmake"),
+        (Join-Path $ProjectRootPath "windows\flutter\generated_plugin_registrant.cc"),
+        (Join-Path $ProjectRootPath "windows\flutter\generated_plugin_registrant.h")
+    )
+    foreach ($generatedFile in $windowsGeneratedFiles) {
+        if (-not (Test-Path $generatedFile)) { return $true }
+        if ((Get-Item $generatedFile).LastWriteTimeUtc -lt $packageConfigTime) { return $true }
+    }
+
     return $false
 }
 
