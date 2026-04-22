@@ -428,6 +428,7 @@ type recoveryIntentLocalePack struct {
 	rejectReason     string
 	noneReason       string
 	noUserTextReason string
+	outOfScopeReason string
 	confirmKeywords  []string
 	rejectKeywords   []string
 }
@@ -443,7 +444,7 @@ func getRecoveryIntentLocalePack(lang string) recoveryIntentLocalePack {
 		"ok", "okay", "yes", "yep", "sure", "continue", "go ahead", "proceed", "no problem", "confirm",
 	}
 	enRejectKeywords := []string{
-		"cancel", "stop", "no", "nope", "reject", "abort", "don't", "do not", "not now", "nevermind", "never mind",
+		"cancel", "stop", "nope", "no thanks", "no thank you", "reject", "abort", "don't", "do not", "not now", "nevermind", "never mind",
 	}
 
 	if normalizeShepherdLanguage(lang) == "zh" {
@@ -464,6 +465,7 @@ func getRecoveryIntentLocalePack(lang string) recoveryIntentLocalePack {
 			rejectReason:     "Matched rejection keyword, user canceled the pending action.",
 			noneReason:       "No confirmation or rejection keyword matched, keep pending recovery.",
 			noUserTextReason: "No user reply found, keep pending recovery.",
+			outOfScopeReason: "Latest user reply does not respond to the pending recovery prompt.",
 			confirmKeywords:  deduplicateRecoveryIntentKeywords(append(zhConfirmKeywords, enConfirmKeywords...)),
 			rejectKeywords:   deduplicateRecoveryIntentKeywords(append(zhRejectKeywords, enRejectKeywords...)),
 		}
@@ -486,6 +488,7 @@ func getRecoveryIntentLocalePack(lang string) recoveryIntentLocalePack {
 		rejectReason:     "Matched rejection keyword, user canceled the pending action.",
 		noneReason:       "No confirmation or rejection keyword matched, keep pending recovery.",
 		noUserTextReason: "No user reply found, keep pending recovery.",
+		outOfScopeReason: "Latest user reply does not respond to the pending recovery prompt.",
 		confirmKeywords:  deduplicateRecoveryIntentKeywords(append(enConfirmKeywords, zhConfirmKeywords...)),
 		rejectKeywords:   deduplicateRecoveryIntentKeywords(append(enRejectKeywords, zhRejectKeywords...)),
 	}
@@ -522,13 +525,42 @@ func deduplicateRecoveryIntentKeywords(keywords []string) []string {
 	return out
 }
 
-func latestUserMessage(contextMessages []ConversationMessage) string {
+func latestUserMessageWithIndex(contextMessages []ConversationMessage) (int, string) {
 	for i := len(contextMessages) - 1; i >= 0; i-- {
 		if strings.EqualFold(strings.TrimSpace(contextMessages[i].Role), "user") {
+			return i, strings.TrimSpace(contextMessages[i].Content)
+		}
+	}
+	return -1, ""
+}
+
+func latestAssistantMessageBefore(contextMessages []ConversationMessage, beforeIndex int) string {
+	if beforeIndex <= 0 {
+		return ""
+	}
+	for i := beforeIndex - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(contextMessages[i].Role), "assistant") {
 			return strings.TrimSpace(contextMessages[i].Content)
 		}
 	}
 	return ""
+}
+
+func isRecoveryPromptMessage(message string) bool {
+	if strings.TrimSpace(message) == "" {
+		return false
+	}
+	if !strings.Contains(message, "[ShepherdGate]") {
+		return false
+	}
+	if strings.Contains(strings.ToUpper(message), "NEEDS_CONFIRMATION") {
+		return true
+	}
+
+	lower := strings.ToLower(message)
+	return strings.Contains(message, "需要确认") ||
+		strings.Contains(message, "继续可回复：") ||
+		strings.Contains(lower, "continue replies:")
 }
 
 func isCJKRune(r rune) bool {
@@ -579,6 +611,10 @@ func compactIntentText(text string) string {
 		}
 	}
 	return b.String()
+}
+
+func hasStandaloneNoReject(normalizedText string) bool {
+	return normalizedText == "no"
 }
 
 func hasRecoveryIntentKeyword(normalizedText, compactText string, keywords []string) bool {
@@ -640,11 +676,18 @@ func (sg *ShepherdGate) EvaluateRecoveryIntent(ctx context.Context, contextMessa
 		strings.TrimSpace(pendingReason),
 	)
 
-	userText := latestUserMessage(contextMessages)
+	userIndex, userText := latestUserMessageWithIndex(contextMessages)
 	if userText == "" {
 		return &RecoveryIntentDecision{
 			Intent: "NONE",
 			Reason: pack.noUserTextReason,
+		}, nil
+	}
+	assistantText := latestAssistantMessageBefore(contextMessages, userIndex)
+	if !isRecoveryPromptMessage(assistantText) {
+		return &RecoveryIntentDecision{
+			Intent: "NONE",
+			Reason: pack.outOfScopeReason,
 		}, nil
 	}
 
@@ -653,10 +696,12 @@ func (sg *ShepherdGate) EvaluateRecoveryIntent(ctx context.Context, contextMessa
 
 	intent := "NONE"
 	reason := pack.noneReason
-	if hasRecoveryIntentKeyword(normalized, compact, pack.rejectKeywords) {
+	rejectMatched := hasStandaloneNoReject(normalized) || hasRecoveryIntentKeyword(normalized, compact, pack.rejectKeywords)
+	confirmMatched := hasRecoveryIntentKeyword(normalized, compact, pack.confirmKeywords)
+	if rejectMatched {
 		intent = "REJECT"
 		reason = pack.rejectReason
-	} else if hasRecoveryIntentKeyword(normalized, compact, pack.confirmKeywords) {
+	} else if confirmMatched {
 		intent = "CONFIRM"
 		reason = pack.confirmReason
 	}
