@@ -6,15 +6,14 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"unicode"
 
-	"go_lib/chatmodel-routing/adapter"
 	"go_lib/core/logging"
 	"go_lib/core/modelfactory"
 	"go_lib/core/repository"
 	"go_lib/core/skillscan"
 
 	"github.com/cloudwego/eino/components/model"
-	"github.com/cloudwego/eino/schema"
 )
 
 // PostValidationOverrideTag is appended to a ReAct decision's reason when the
@@ -412,106 +411,267 @@ func normalizeRecoveryIntent(intent string) string {
 	}
 }
 
-// EvaluateRecoveryIntent uses the security model to determine if the user confirms continuation.
-func (sg *ShepherdGate) EvaluateRecoveryIntent(ctx context.Context, contextMessages []ConversationMessage, pendingToolCalls []ToolCallInfo, pendingReason string) (*RecoveryIntentDecision, error) {
-	sg.mu.RLock()
-	chatModel := sg.chatModel
-	modelCfg := sg.modelConfig
-	sg.mu.RUnlock()
-	lang := sg.getEffectiveLanguage()
-
-	if chatModel == nil {
-		return nil, fmt.Errorf("chat model is nil")
-	}
-
-	languageName := "English"
-	if lang == "zh" {
-		languageName = "Chinese (Simplified)"
-	}
-
-	maxTokens := 1024
-	if modelCfg != nil {
-		maxTokens = adapter.GetModelMaxOutputTokens(modelCfg.Model)
-	}
-
-	filtered := contextMessages
-	if len(filtered) > 80 {
-		filtered = filtered[len(filtered)-80:]
-	}
-	contextBytes, _ := json.MarshalIndent(filtered, "", "  ")
-	toolCallsBytes, _ := json.MarshalIndent(pendingToolCalls, "", "  ")
-
-	systemPrompt := fmt.Sprintf(`You are ShepherdGate Recovery Intent Analyzer.
-Your task: decide whether the latest user message confirms, rejects, or does not clearly decide execution of the pending blocked tool calls.
-
-Output STRICT JSON only with this schema:
-{
-  "intent": "CONFIRM" | "REJECT" | "NONE",
-  "reason": "short reason in %s, <= 40 words"
+type recoveryIntentLocalePack struct {
+	statusLabel      string
+	reasonLabel      string
+	actionLabel      string
+	riskTypeLabel    string
+	statusAllowed    string
+	statusNeedsConf  string
+	statusUnknown    string
+	mockIntroBlocked string
+	mockIntroConfirm string
+	agentSection     string
+	continueGuide    string
+	cancelGuide      string
+	confirmReason    string
+	rejectReason     string
+	noneReason       string
+	noUserTextReason string
+	confirmKeywords  []string
+	rejectKeywords   []string
 }
 
-Rules:
-1) Focus on semantic intent, not keyword matching.
-2) CONFIRM: user clearly agrees to proceed with the pending action.
-3) REJECT: user clearly refuses/cancels the pending action.
-4) NONE: unclear/irrelevant/new task/question.
-5) Use the latest user message as primary signal, but use conversation context for disambiguation.
-6) If user intent does not match pending action scope, return NONE.
-7) Return JSON only, no markdown and no extra text.
-`, languageName)
+func getRecoveryIntentLocalePack(lang string) recoveryIntentLocalePack {
+	zhConfirmKeywords := []string{
+		"好的", "继续", "ok", "okay", "没问题", "确认", "可以", "行", "继续执行", "同意",
+	}
+	zhRejectKeywords := []string{
+		"取消", "停止", "不要", "不执行", "算了", "拒绝", "终止", "不用了", "不继续", "别执行",
+	}
+	enConfirmKeywords := []string{
+		"ok", "okay", "yes", "yep", "sure", "continue", "go ahead", "proceed", "no problem", "confirm",
+	}
+	enRejectKeywords := []string{
+		"cancel", "stop", "no", "nope", "reject", "abort", "don't", "do not", "not now", "nevermind", "never mind",
+	}
 
-	userPrompt := fmt.Sprintf(`CONTEXT:
-%s
+	if normalizeShepherdLanguage(lang) == "zh" {
+		return recoveryIntentLocalePack{
+			statusLabel:      "状态",
+			reasonLabel:      "原因",
+			actionLabel:      "动作",
+			riskTypeLabel:    "风险类型",
+			statusAllowed:    "允许",
+			statusNeedsConf:  "需要确认",
+			statusUnknown:    "未知",
+			mockIntroBlocked: "抱歉，当前请求已被安全策略拦截，无法继续执行。",
+			mockIntroConfirm: "该操作存在风险，需要你先确认后才能继续执行。",
+			agentSection:     "安全智能体分析",
+			continueGuide:    "继续可回复：好的、继续、OK、没问题、确认、可以",
+			cancelGuide:      "取消可回复：取消、停止、不要执行、不继续",
+			confirmReason:    "Matched confirmation keyword, user agreed to continue.",
+			rejectReason:     "Matched rejection keyword, user canceled the pending action.",
+			noneReason:       "No confirmation or rejection keyword matched, keep pending recovery.",
+			noUserTextReason: "No user reply found, keep pending recovery.",
+			confirmKeywords:  deduplicateRecoveryIntentKeywords(append(zhConfirmKeywords, enConfirmKeywords...)),
+			rejectKeywords:   deduplicateRecoveryIntentKeywords(append(zhRejectKeywords, enRejectKeywords...)),
+		}
+	}
 
-PENDING_TOOL_CALLS:
-%s
+	return recoveryIntentLocalePack{
+		statusLabel:      "Status",
+		reasonLabel:      "Reason",
+		actionLabel:      "Action",
+		riskTypeLabel:    "Risk Type",
+		statusAllowed:    "Allowed",
+		statusNeedsConf:  "Needs Confirmation",
+		statusUnknown:    "Unknown",
+		mockIntroBlocked: "Sorry, this request has been blocked by security policy and cannot proceed.",
+		mockIntroConfirm: "This action is risky and requires your confirmation before continuing.",
+		agentSection:     "Security Agent Analysis",
+		continueGuide:    "Continue replies: OK, continue, yes, no problem, confirm",
+		cancelGuide:      "Cancel replies: cancel, stop, do not, reject",
+		confirmReason:    "Matched confirmation keyword, user agreed to continue.",
+		rejectReason:     "Matched rejection keyword, user canceled the pending action.",
+		noneReason:       "No confirmation or rejection keyword matched, keep pending recovery.",
+		noUserTextReason: "No user reply found, keep pending recovery.",
+		confirmKeywords:  deduplicateRecoveryIntentKeywords(append(enConfirmKeywords, zhConfirmKeywords...)),
+		rejectKeywords:   deduplicateRecoveryIntentKeywords(append(enRejectKeywords, zhRejectKeywords...)),
+	}
+}
 
-PENDING_RISK_REASON:
-%s
-`, string(contextBytes), string(toolCallsBytes), strings.TrimSpace(pendingReason))
+func localizeDecisionStatus(status string, pack recoveryIntentLocalePack) string {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "ALLOWED":
+		return pack.statusAllowed
+	case "NEEDS_CONFIRMATION":
+		return pack.statusNeedsConf
+	default:
+		return pack.statusUnknown
+	}
+}
 
-	logging.ShepherdGateInfo("[ShepherdGate][RecoveryIntent] Analyze start: contextMessages=%d, pendingToolCalls=%d", len(filtered), len(pendingToolCalls))
+func deduplicateRecoveryIntentKeywords(keywords []string) []string {
+	if len(keywords) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(keywords))
+	out := make([]string, 0, len(keywords))
+	for _, keyword := range keywords {
+		normalized := normalizeIntentText(keyword)
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, keyword)
+	}
+	return out
+}
 
-	resp, err := chatModel.Generate(ctx, []*schema.Message{
-		schema.SystemMessage(systemPrompt),
-		schema.UserMessage(userPrompt),
-	},
-		model.WithTemperature(0),
-		model.WithMaxTokens(maxTokens),
+func latestUserMessage(contextMessages []ConversationMessage) string {
+	for i := len(contextMessages) - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(contextMessages[i].Role), "user") {
+			return strings.TrimSpace(contextMessages[i].Content)
+		}
+	}
+	return ""
+}
+
+func isCJKRune(r rune) bool {
+	return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul)
+}
+
+func containsCJK(text string) bool {
+	for _, r := range text {
+		if isCJKRune(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeIntentText(text string) string {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	prevSpace := true
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || isCJKRune(r) {
+			b.WriteRune(r)
+			prevSpace = false
+			continue
+		}
+		if !prevSpace {
+			b.WriteByte(' ')
+			prevSpace = true
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func compactIntentText(text string) string {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || isCJKRune(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func hasRecoveryIntentKeyword(normalizedText, compactText string, keywords []string) bool {
+	if normalizedText == "" || len(keywords) == 0 {
+		return false
+	}
+
+	tokens := strings.Fields(normalizedText)
+	tokenSet := make(map[string]struct{}, len(tokens))
+	for _, token := range tokens {
+		tokenSet[token] = struct{}{}
+	}
+
+	for _, keyword := range keywords {
+		nk := normalizeIntentText(keyword)
+		if nk == "" {
+			continue
+		}
+
+		if containsCJK(nk) {
+			compactKeyword := compactIntentText(nk)
+			if compactKeyword != "" && strings.Contains(compactText, compactKeyword) {
+				return true
+			}
+			continue
+		}
+
+		if strings.Contains(nk, " ") {
+			if strings.Contains(normalizedText, nk) {
+				return true
+			}
+			continue
+		}
+
+		if len(nk) <= 3 {
+			if _, ok := tokenSet[nk]; ok {
+				return true
+			}
+			continue
+		}
+
+		if strings.Contains(normalizedText, nk) {
+			return true
+		}
+	}
+	return false
+}
+
+// EvaluateRecoveryIntent determines whether the latest user reply confirms or rejects continuation.
+func (sg *ShepherdGate) EvaluateRecoveryIntent(ctx context.Context, contextMessages []ConversationMessage, pendingToolCalls []ToolCallInfo, pendingReason string) (*RecoveryIntentDecision, error) {
+	_ = ctx
+	lang := sg.getEffectiveLanguage()
+	pack := getRecoveryIntentLocalePack(lang)
+
+	logging.ShepherdGateInfo(
+		"[ShepherdGate][RecoveryIntent] Keyword analysis start: contextMessages=%d, pendingToolCalls=%d, pendingReason=%q",
+		len(contextMessages),
+		len(pendingToolCalls),
+		strings.TrimSpace(pendingReason),
 	)
-	if err != nil {
-		logging.ShepherdGateError("[ShepherdGate][RecoveryIntent] LLM generation failed: %v", err)
-		return nil, err
-	}
 
-	content := extractJSON(resp.Content)
-	if strings.TrimSpace(content) == "" {
-		logging.ShepherdGateWarning("[ShepherdGate][RecoveryIntent] Empty model response")
+	userText := latestUserMessage(contextMessages)
+	if userText == "" {
 		return &RecoveryIntentDecision{
 			Intent: "NONE",
-			Reason: "Empty model response",
-			Usage:  extractUsage(resp.Extra, 0, 0),
+			Reason: pack.noUserTextReason,
 		}, nil
 	}
 
-	var parsed RecoveryIntentDecision
-	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
-		logging.ShepherdGateWarning("[ShepherdGate][RecoveryIntent] Parse response failed: %v, raw=%q", err, resp.Content)
-		return &RecoveryIntentDecision{
-			Intent: "NONE",
-			Reason: "Failed to parse model response",
-			Usage:  extractUsage(resp.Extra, 0, 0),
-		}, nil
+	normalized := normalizeIntentText(userText)
+	compact := compactIntentText(userText)
+
+	intent := "NONE"
+	reason := pack.noneReason
+	if hasRecoveryIntentKeyword(normalized, compact, pack.rejectKeywords) {
+		intent = "REJECT"
+		reason = pack.rejectReason
+	} else if hasRecoveryIntentKeyword(normalized, compact, pack.confirmKeywords) {
+		intent = "CONFIRM"
+		reason = pack.confirmReason
 	}
 
-	parsed.Intent = normalizeRecoveryIntent(parsed.Intent)
-	parsed.Reason = strings.TrimSpace(parsed.Reason)
-	if parsed.Reason == "" {
-		parsed.Reason = "No reason provided by model."
-	}
-	parsed.Usage = extractUsage(resp.Extra, 0, 0)
-	logging.ShepherdGateInfo("[ShepherdGate][RecoveryIntent] Analyze done: intent=%s, reason=%s, tokens=%d", parsed.Intent, parsed.Reason, parsed.Usage.TotalTokens)
-	return &parsed, nil
+	logging.ShepherdGateInfo(
+		"[ShepherdGate][RecoveryIntent] Keyword analysis done: intent=%s, reason=%s, userText=%q",
+		intent,
+		reason,
+		userText,
+	)
+
+	return &RecoveryIntentDecision{
+		Intent: intent,
+		Reason: reason,
+	}, nil
 }
 
 // NormalizeShepherdLanguage normalizes a language string to a standard form (e.g., "zh", "en").
@@ -554,28 +714,72 @@ func getIntFromMap(m map[string]interface{}, key string) int {
 	return 0
 }
 
-// FormatSecurityMessage formats the security warning message in English.
-func (sg *ShepherdGate) FormatSecurityMessage(decision *ShepherdDecision) string {
+func (sg *ShepherdGate) formatSecurityAnalysisLines(decision *ShepherdDecision, withHeader bool) string {
+	lang := sg.getEffectiveLanguage()
+	pack := getRecoveryIntentLocalePack(lang)
+	if decision == nil {
+		decision = &ShepherdDecision{}
+	}
+
 	status := decision.Status
 	if status == "" {
 		status = "UNKNOWN"
 	}
+	displayStatus := localizeDecisionStatus(status, pack)
 	reason := decision.Reason
 	if reason == "" {
-		reason = "Unknown reason"
+		if normalizeShepherdLanguage(lang) == "zh" {
+			reason = "未知原因"
+		} else {
+			reason = "Unknown reason"
+		}
 	}
 
-	formattedMsg := fmt.Sprintf("[ShepherdGate] Status: %s | Reason: %s", status, reason)
+	formattedMsg := fmt.Sprintf("%s: %s | %s: %s", pack.statusLabel, displayStatus, pack.reasonLabel, reason)
+	if withHeader {
+		formattedMsg = fmt.Sprintf("[ShepherdGate] %s", formattedMsg)
+	}
 	if decision.ActionDesc != "" {
-		formattedMsg += fmt.Sprintf("\nAction: %s", decision.ActionDesc)
+		formattedMsg += fmt.Sprintf("\n%s: %s", pack.actionLabel, decision.ActionDesc)
 	}
 	if decision.RiskType != "" {
-		formattedMsg += fmt.Sprintf("\nRisk Type: %s", decision.RiskType)
-	}
-	if status == "NEEDS_CONFIRMATION" {
-		formattedMsg += "\n\nPlease confirm to proceed."
+		formattedMsg += fmt.Sprintf("\n%s: %s", pack.riskTypeLabel, decision.RiskType)
 	}
 	return formattedMsg
+}
+
+// FormatSecurityMessage formats a localized security warning message.
+func (sg *ShepherdGate) FormatSecurityMessage(decision *ShepherdDecision) string {
+	return sg.formatSecurityAnalysisLines(decision, true)
+}
+
+// FormatSecurityMockReply builds the final mock reply shown to users.
+// It uses app-configured language and appends security agent analysis details.
+func (sg *ShepherdGate) FormatSecurityMockReply(decision *ShepherdDecision) string {
+	lang := sg.getEffectiveLanguage()
+	pack := getRecoveryIntentLocalePack(lang)
+
+	intro := pack.mockIntroBlocked
+	needsConfirmation := decision != nil && decision.Status == "NEEDS_CONFIRMATION"
+	if needsConfirmation {
+		intro = pack.mockIntroConfirm
+	}
+
+	lines := []string{
+		"[ShepherdGate] :",
+		intro,
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, sg.formatSecurityAnalysisLines(decision, false))
+
+	if needsConfirmation {
+		lines = append(lines, "")
+		lines = append(lines, pack.continueGuide)
+		lines = append(lines, pack.cancelGuide)
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func estimateStringTokens(text string) int {

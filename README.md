@@ -6,7 +6,7 @@ Migration docs:
 - [Version Upgrade Migration Guide (EN)](mds/version_upgrade_migration_en.md)
 - [版本升级迁移指南 (ZH-CN)](mds/version_upgrade_migration_zh-CN.md)
 
-Desktop security protection software for Bot-type endpoint AI agents.
+Desktop and WebUI security protection software for Bot-type endpoint AI agents.
 
 ClawSecbot monitors and secures local AI Bot agents (such as Openclaw) running on your machine. It acts as a protective layer between AI agents and LLM services — intercepting API requests, analyzing risks in real time, enforcing sandbox policies, and providing full audit trails.
 
@@ -24,16 +24,19 @@ ClawSecbot monitors and secures local AI Bot agents (such as Openclaw) running o
 - **LLM Protocol Translation** — Proxies requests in OpenAI-compatible format and translates to/from various LLM providers
 - **Audit Logging** — Records all requests, tool calls, risk detections, and token usage with full traceability
 - **Plugin Architecture** — Extensible plugin system for supporting different Bot types
+- **WebUI Mode** — Runs in browser via Go web bridge (`botsec_webd`) and serves API + static web assets on the same origin
 
 ## Supported Platforms
 
-| Platform | Architecture | Status |
-|----------|-------------|--------|
-| macOS    | arm64       | Supported |
-| macOS    | x86_64      | Supported |
-| Linux    | arm64       | Supported |
-| Linux    | x86_64      | Supported |
-| Windows  | x86_64      | Supported |
+| Platform | Target | Architecture | Status |
+|----------|--------|-------------|--------|
+| macOS    | Desktop | arm64      | Supported |
+| macOS    | Desktop | x86_64     | Supported |
+| Linux    | Desktop | arm64      | Supported |
+| Linux    | Desktop | x86_64     | Supported |
+| Linux    | WebUI   | arm64      | Supported |
+| Linux    | WebUI   | x86_64     | Supported |
+| Windows  | Desktop | x86_64     | Supported |
 
 ### Windows Privilege Requirement
 
@@ -76,11 +79,17 @@ ClawSecbot uses a **frontend-backend separation** architecture:
 - **Go Shared Library** — Contains all business logic, compiled as a single dynamic library (`botsec.dylib` / `botsec.so` / `botsec.dll`)
 - **FFI Communication** — Flutter calls Go functions via FFI with a unified JSON protocol; Go pushes events back via native callbacks
 
+WebUI mode reuses the same Go core and plugins, and exposes them through a Go web bridge:
+
+- **Flutter Web** — Built from `lib/main_web.dart` and served as static assets
+- **Go Web Bridge** — `go_lib/cmd/botsec_webd` serves both HTTP API and web static files
+- **HTTP Communication** — Browser UI communicates with backend through same-origin HTTP endpoints
+
 ## Tech Stack
 
 | Layer     | Technology                    |
 |-----------|-------------------------------|
-| UI        | Flutter Desktop (Dart)        |
+| UI        | Flutter (Desktop + WebUI)     |
 | Logic     | Go (CGO, c-shared)           |
 | Database  | SQLite (via modernc.org/sqlite) |
 | IPC       | FFI + JSON protocol           |
@@ -99,6 +108,7 @@ OpenAI · Anthropic (Claude) · DeepSeek · Google (Gemini) · Ollama · Moonsho
 bot_sec_manager/
 ├── lib/                        # Flutter application
 │   ├── main.dart               # App entry point
+│   ├── main_web.dart           # Web UI entry point
 │   ├── services/               # FFI service layer
 │   │   ├── native_library_service.dart
 │   │   ├── plugin_service.dart
@@ -109,6 +119,7 @@ bot_sec_manager/
 │   │   └── *_database_service.dart
 │   ├── pages/                  # UI pages
 │   ├── widgets/                # Reusable UI components
+│   ├── web/                    # Web UI pages and workflow
 │   ├── models/                 # Data models
 │   ├── l10n/                   # Internationalization
 │   └── utils/                  # Utilities
@@ -124,9 +135,11 @@ bot_sec_manager/
 │   │   ├── service/            # Business services
 │   │   ├── scanner/            # Asset scanner
 │   │   ├── sandbox/            # Sandbox policies
+│   │   ├── webbridge/          # HTTP bridge for WebUI API/session
 │   │   └── callback_bridge/    # FFI callback bridge
 │   ├── plugins/openclaw/       # Openclaw Bot plugin
 │   ├── skillagent/             # Skill Agent engine
+│   ├── cmd/botsec_webd/        # Go web bridge entry
 │   └── chatmodel-routing/      # LLM protocol translation
 │       ├── adapter/            # Provider adapter
 │       ├── providers/          # Per-provider implementations
@@ -146,7 +159,7 @@ bot_sec_manager/
 
 ## Prerequisites
 
-- **Flutter** >= 3.10 (with desktop support enabled)
+- **Flutter** >= 3.10 (with desktop/web support enabled)
 - **Go** >= 1.25
 - **Xcode** (macOS) / **GCC** (Linux) — for CGO compilation
 - **CMake** (Linux desktop builds)
@@ -164,13 +177,7 @@ This compiles the Go code into a platform-specific shared library:
 - Linux: `go_lib/botsec.so`
 - Windows: `go_lib/botsec.dll`
 
-### 2. Build the Openclaw Plugin
-
-```bash
-./scripts/build_openclaw_plugin.sh
-```
-
-### 3. Run in Development Mode
+### 2. Run in Development Mode
 
 ```bash
 ./scripts/run_with_pprof.sh
@@ -178,7 +185,28 @@ This compiles the Go code into a platform-specific shared library:
 
 This script builds the Go engine and launches the Flutter app with pprof profiling enabled, suitable for local development and debugging.
 
-### 4. Run the Flutter Application
+### 3. Run WebUI in Development Mode
+
+```bash
+./scripts/run_web_with_pprof.sh
+```
+
+Optional:
+
+```bash
+# pprof port (optional positional argument)
+./scripts/run_web_with_pprof.sh 6061
+
+# API/Web listen port and host
+BOTSEC_WEB_API_PORT=18080 BOTSEC_WEB_API_HOST=0.0.0.0 ./scripts/run_web_with_pprof.sh
+```
+
+After startup:
+
+- Local Web UI: `http://127.0.0.1:18080`
+- pprof endpoint: `http://127.0.0.1:6060/debug/pprof/`
+
+### 4. Run the Flutter Desktop Application
 
 ```bash
 flutter run -d macos   # or -d linux, -d windows
@@ -191,15 +219,18 @@ flutter run -d macos   # or -d linux, -d windows
 ./scripts/build_macos_release.sh
 ```
 
-**Linux (deb):**
-```bash
-./scripts/build_linux_deb.sh
-```
-
-**Linux (generic):**
+**Linux (Desktop + WebUI release in one run):**
 ```bash
 ./scripts/build_linux_release.sh
 ```
+
+By default this command builds both Desktop and WebUI artifacts:
+
+- Desktop package: `build/ClawdSecbot-desktop-<version>-<build>-<arch>-<type>.deb/.rpm`
+- WebUI package: `build/ClawdSecbot-web-<version>-<build>-<arch>-<type>.deb/.rpm`
+- WebUI tarball: `build/ClawdSecbot-web-<version>-<build>-<arch>-<type>.tar.gz`
+
+Use `--deb` or `--rpm` to build one package format only.
 
 **Windows (self-extracting EXE; requires 7-Zip, MinGW-w64, CMake, etc. — see script prerequisite checks):**
 The current package is a custom installer EXE and no longer depends on a 7-Zip shell on the target machine.
@@ -265,6 +296,7 @@ The shared foundation used by all plugins:
 | `sandbox/` | OS sandbox management — generates and applies Seatbelt/LD_PRELOAD/Windows hook policies |
 | `repository/` | Data access layer — SQLite CRUD operations |
 | `service/` | Business logic — protection, audit, metrics, version checking |
+| `webbridge/` | Web bridge service — HTTP API/session lock/static file serving for WebUI |
 | `callback_bridge/` | FFI callback mechanism — Go-to-Dart event push |
 | `logging/` | Structured logging |
 | `path_manager.go` | Centralized path management |

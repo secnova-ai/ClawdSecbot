@@ -29,8 +29,7 @@ func TestNormalizeShepherdLanguage(t *testing.T) {
 	}
 }
 
-// FormatSecurityMessage 始终输出英文，翻译由 TranslateForUser 按需完成。
-func TestFormatSecurityMessageAlwaysEnglish(t *testing.T) {
+func TestFormatSecurityMessageLocalizedByLanguage(t *testing.T) {
 	sg := &ShepherdGate{}
 	sg.SetLanguage("zh_Hant")
 
@@ -39,8 +38,64 @@ func TestFormatSecurityMessageAlwaysEnglish(t *testing.T) {
 		Reason: "删除工作区外文件需要确认",
 	})
 
-	if !strings.Contains(msg, "[ShepherdGate] Status: NEEDS_CONFIRMATION | Reason: 删除工作区外文件需要确认") {
-		t.Fatalf("expected english formatted message, got %q", msg)
+	if !strings.Contains(msg, "[ShepherdGate] 状态: 需要确认 | 原因: 删除工作区外文件需要确认") {
+		t.Fatalf("expected chinese formatted message, got %q", msg)
+	}
+	if strings.Contains(msg, "继续可回复：") {
+		t.Fatalf("did not expect reply guide in ShepherdGate analysis message, got %q", msg)
+	}
+}
+
+func TestFormatSecurityMockReply_Chinese(t *testing.T) {
+	sg := &ShepherdGate{}
+	sg.SetLanguage("zh")
+
+	msg := sg.FormatSecurityMockReply(&ShepherdDecision{
+		Status: "NEEDS_CONFIRMATION",
+		Reason: "删除工作区外文件需要确认",
+	})
+	if !strings.HasPrefix(msg, "[ShepherdGate] :\n") {
+		t.Fatalf("expected mock reply to start with [ShepherdGate] :, got %q", msg)
+	}
+	if !strings.Contains(msg, "需要你先确认后才能继续执行") {
+		t.Fatalf("expected chinese intro text, got %q", msg)
+	}
+	if !strings.Contains(msg, "继续可回复：好的、继续、OK、没问题、确认、可以") {
+		t.Fatalf("expected explicit continue keywords in intro, got %q", msg)
+	}
+	if strings.Count(msg, "继续可回复：") != 1 {
+		t.Fatalf("expected exactly one continue guide, got %q", msg)
+	}
+	if !strings.Contains(msg, "\n\n状态: 需要确认") {
+		t.Fatalf("expected analysis block after blank line, got %q", msg)
+	}
+	if strings.Contains(msg, "\n\n[ShepherdGate] 状态:") {
+		t.Fatalf("did not expect repeated [ShepherdGate] prefix in analysis block, got %q", msg)
+	}
+}
+
+func TestFormatSecurityMockReply_English(t *testing.T) {
+	sg := &ShepherdGate{}
+	sg.SetLanguage("en")
+
+	msg := sg.FormatSecurityMockReply(&ShepherdDecision{
+		Status: "ALLOWED",
+		Reason: "test reason",
+	})
+	if !strings.HasPrefix(msg, "[ShepherdGate] :\n") {
+		t.Fatalf("expected mock reply to start with [ShepherdGate] :, got %q", msg)
+	}
+	if !strings.Contains(msg, "has been blocked by security policy") {
+		t.Fatalf("expected english intro text, got %q", msg)
+	}
+	if !strings.Contains(msg, "\n\nStatus: Allowed | Reason: test reason") {
+		t.Fatalf("expected analysis block after blank line, got %q", msg)
+	}
+	if strings.Contains(msg, "\n\n[ShepherdGate] Status:") {
+		t.Fatalf("did not expect repeated [ShepherdGate] prefix in analysis block, got %q", msg)
+	}
+	if strings.Contains(msg, "Continue replies:") {
+		t.Fatalf("did not expect continue guide for ALLOWED status, got %q", msg)
 	}
 }
 

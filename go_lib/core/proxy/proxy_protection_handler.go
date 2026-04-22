@@ -761,8 +761,7 @@ func (pp *ProxyProtection) onRequest(ctx context.Context, req *openai.ChatComple
 
 					pp.storePendingToolCallRecovery(nil, "", decision.Reason, "tool_result")
 
-					securityMsg := pp.shepherdGate.FormatSecurityMessage(decision)
-					securityMsg = pp.shepherdGate.TranslateForUser(pp.ctx, securityMsg, cachedLastUserMsg)
+					securityMsg := pp.shepherdGate.FormatSecurityMockReply(decision)
 					pp.emitMonitorSecurityDecision(decision.Status, decision.Reason, true, securityMsg)
 					recordAction := "BLOCK"
 					recordRiskLevel := "BLOCKED"
