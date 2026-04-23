@@ -1,0 +1,63 @@
+name: Issue Auto Comment
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+
+jobs:
+  comment-on-issue:
+    name: Comment On New Issue
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create issue comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "<!-- issue-auto-comment:v1 -->"
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                per_page: 100
+              }
+            )
+
+            const hasAutoComment = comments.some((comment) =>
+              comment?.user?.type === "Bot" &&
+              typeof comment.body === "string" &&
+              comment.body.includes(marker)
+            )
+
+            if (hasAutoComment) {
+              core.info("Auto comment already exists, skip creating duplicate comment.")
+              return
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: [
+                marker,
+                "感谢提交 Issue，已收到。",
+                "",
+                "为便于快速定位，请尽量补充以下信息：",
+                "",
+                "### 建议补充",
+                "- 复现步骤（尽量可稳定复现）",
+                "- 预期结果 vs 实际结果",
+                "- 关键日志（可脱敏）",
+                "- 运行环境（OS/版本）",
+                "- 影响范围（是否阻塞核心流程）",
+                "",
+                "### 提速建议",
+                "- 如方便，可附最小复现配置或截图",
+                "- 如可临时规避，也欢迎补充 workaround"
+              ].join("\n")
+            })
