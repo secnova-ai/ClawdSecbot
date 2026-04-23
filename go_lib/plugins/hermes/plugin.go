@@ -96,8 +96,9 @@ func (p *HermesPlugin) ScanAssets() ([]core.Asset, error) {
 	return NewHermesAssetScanner(GetConfigPath()).ScanAssets()
 }
 
-func (p *HermesPlugin) AssessRisks(scannedHashes map[string]bool) ([]core.Risk, error) {
+func (p *HermesPlugin) AssessRisks(scannedHashes map[string]bool, assets []core.Asset) ([]core.Risk, error) {
 	_ = scannedHashes
+	_ = assets
 	logging.Info("[Hermes] assessing risks")
 
 	risks := []core.Risk{}
@@ -135,6 +136,14 @@ func (p *HermesPlugin) AssessRisks(scannedHashes map[string]bool) ([]core.Risk, 
 
 func (p *HermesPlugin) MitigateRisk(riskInfo string) string {
 	return MitigateRiskDispatch(riskInfo)
+}
+
+func (p *HermesPlugin) GetVulnInfoJSON() []byte {
+	return GetVulInfoJSON()
+}
+
+func (p *HermesPlugin) CompareVulnerabilityVersion(current, target string) (int, bool) {
+	return compareHermesVersion(current, target)
 }
 
 func (p *HermesPlugin) StartProtection(assetID string, config core.ProtectionConfig) error {

@@ -73,7 +73,9 @@ class ScanDatabaseService {
           RiskInfo(
             id: riskMap['id'] ?? 'unknown',
             title: riskMap['title'] ?? 'Unknown Risk',
+            titleEn: riskMap['title_en'] as String?,
             description: riskMap['description'] ?? '',
+            descriptionEn: riskMap['description_en'] as String?,
             level: _parseRiskLevel(riskMap['level']),
             icon: _getIconForRisk(riskMap['level']),
             args: args,

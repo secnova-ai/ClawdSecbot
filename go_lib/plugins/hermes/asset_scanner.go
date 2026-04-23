@@ -61,6 +61,9 @@ func (s *HermesAssetScanner) enrichAssetWithConfig(asset *core.Asset) {
 	asset.Metadata["model_base_url"] = strings.TrimSpace(cfg.Model.BaseURL)
 	asset.Metadata["terminal_backend"] = strings.TrimSpace(cfg.Terminal.Backend)
 	asset.Metadata["approvals_mode"] = strings.TrimSpace(cfg.Approvals.Mode)
+	if version := getHermesVersion(); version != "" {
+		asset.Version = version
+	}
 	if cfg.Security.RedactSecrets != nil {
 		if *cfg.Security.RedactSecrets {
 			asset.Metadata["redact_secrets"] = "true"

@@ -38,7 +38,16 @@ type BotPlugin interface {
 	// ========== Risk Assessment ==========
 
 	// AssessRisks evaluates risks for discovered assets.
-	AssessRisks(scannedHashes map[string]bool) ([]Risk, error)
+	AssessRisks(scannedHashes map[string]bool, assets []Asset) ([]Risk, error)
+
+	// GetVulnInfoJSON returns plugin-scoped vulnerability definitions.
+	GetVulnInfoJSON() []byte
+
+	// CompareVulnerabilityVersion compares current asset version with the
+	// vulnerability checkpoint version.
+	// Returns -1 when current < target, 0 when equal, 1 when current > target.
+	// ok=false indicates the plugin cannot compare the provided versions.
+	CompareVulnerabilityVersion(current, target string) (int, bool)
 
 	// MitigateRisk handles mitigation requests.
 	// riskInfo is a JSON string containing risk ID, args, form_data, etc.

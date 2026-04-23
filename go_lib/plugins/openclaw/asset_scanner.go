@@ -78,6 +78,10 @@ func (s *OpenclawAssetScanner) enrichAssetWithConfig(asset *core.Asset) {
 		asset.Metadata = make(map[string]string)
 	}
 
+	if version := resolveOpenClawVersion(asset.ProcessPaths, configPath); version != "" {
+		asset.Version = version
+	}
+
 	// Config file path
 	asset.Metadata["config_path"] = configPath
 

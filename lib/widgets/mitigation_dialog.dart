@@ -353,6 +353,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
 
   Widget _buildSuggestionDialog() {
     final mitigation = widget.risk.mitigation!;
+    final localeName = Localizations.localeOf(context).toLanguageTag();
     return Dialog(
       backgroundColor: const Color(0xFF1A1A2E),
       child: Container(
@@ -382,17 +383,18 @@ class _MitigationDialogState extends State<MitigationDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        mitigation.title ?? '安全建议',
+                        mitigation.displayTitle(localeName) ?? '安全建议',
                         style: AppFonts.inter(
                           color: Colors.white,
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      if (mitigation.description != null) ...[
+                      if (mitigation.displayDescription(localeName) !=
+                          null) ...[
                         const SizedBox(height: 4),
                         Text(
-                          mitigation.description!,
+                          mitigation.displayDescription(localeName)!,
                           style: AppFonts.inter(
                             color: Colors.white70,
                             fontSize: 12,
@@ -426,7 +428,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
                         ),
                       ),
                       child: Text(
-                        widget.risk.description,
+                        widget.risk.displayDescription(localeName),
                         style: AppFonts.inter(
                           color: Colors.white70,
                           fontSize: 14,
@@ -440,7 +442,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
                       ...mitigation.suggestions!.map((group) {
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 24),
-                          child: _buildSuggestionGroup(group),
+                          child: _buildSuggestionGroup(group, localeName),
                         );
                       }),
                   ],
@@ -465,7 +467,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
     );
   }
 
-  Widget _buildSuggestionGroup(SuggestionGroup group) {
+  Widget _buildSuggestionGroup(SuggestionGroup group, String localeName) {
     Color priorityColor;
     IconData priorityIcon;
     switch (group.priority) {
@@ -509,14 +511,18 @@ class _MitigationDialogState extends State<MitigationDialog> {
           final item = entry.value;
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: _buildSuggestionItem(item, index + 1),
+            child: _buildSuggestionItem(item, index + 1, localeName),
           );
         }),
       ],
     );
   }
 
-  Widget _buildSuggestionItem(SuggestionItem item, int index) {
+  Widget _buildSuggestionItem(
+    SuggestionItem item,
+    int index,
+    String localeName,
+  ) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -553,7 +559,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      item.action,
+                      item.displayAction(localeName),
                       style: AppFonts.inter(
                         color: Colors.white,
                         fontSize: 14,
@@ -562,7 +568,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      item.detail,
+                      item.displayDetail(localeName),
                       style: AppFonts.inter(
                         color: Colors.white70,
                         fontSize: 13,

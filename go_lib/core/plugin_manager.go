@@ -16,6 +16,7 @@ import (
 type AssetPluginInstance struct {
 	AssetID   string `json:"asset_id"`
 	AssetName string `json:"asset_name"`
+	Asset     Asset  `json:"asset"`
 	plugin    BotPlugin
 }
 
@@ -156,6 +157,7 @@ func (pm *PluginManager) bindAssetInstance(plugin BotPlugin, asset Asset) {
 	pm.instances[assetID] = &AssetPluginInstance{
 		AssetID:   assetID,
 		AssetName: assetName,
+		Asset:     asset,
 		plugin:    plugin,
 	}
 }
@@ -222,10 +224,18 @@ func (pm *PluginManager) AssessAllRisks(scannedHashes map[string]bool) ([]Risk, 
 		assetName := plugin.GetAssetName()
 		singleAssetID := pm.getSingleAssetIDByPlugin(assetName)
 		logging.Info("Assessing risks with plugin: %s", assetName)
-		risks, err := plugin.AssessRisks(scannedHashes)
+		pluginAssets := pm.getAssetsByPlugin(assetName)
+		risks, err := plugin.AssessRisks(scannedHashes, pluginAssets)
 		if err != nil {
 			logging.Warning("Plugin %s risk assessment failed: %v", assetName, err)
 			continue
+		}
+
+		vulnRisks, err := BuildVulnerabilityRisks(plugin, pluginAssets)
+		if err != nil {
+			logging.Warning("Plugin %s vulnerability matching failed: %v", assetName, err)
+		} else {
+			risks = append(risks, vulnRisks...)
 		}
 
 		for i := range risks {
@@ -256,6 +266,32 @@ func (pm *PluginManager) AssessAllRisks(scannedHashes map[string]bool) ([]Risk, 
 
 	logging.Info("Risk assessment completed, total risks: %d", len(allRisks))
 	return allRisks, nil
+}
+
+func (pm *PluginManager) getAssetsByPlugin(assetName string) []Asset {
+	key := normalizeAssetName(assetName)
+	if key == "" {
+		return []Asset{}
+	}
+
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	assets := make([]Asset, 0)
+	for _, inst := range pm.instances {
+		if inst == nil {
+			continue
+		}
+		instKey := normalizeAssetName(inst.AssetName)
+		if instKey == "" && inst.plugin != nil {
+			instKey = normalizeAssetName(inst.plugin.GetAssetName())
+		}
+		if instKey != key {
+			continue
+		}
+		assets = append(assets, inst.Asset)
+	}
+	return assets
 }
 
 // MitigateRisk routes a mitigation request by asset_id to the corresponding plugin instance.

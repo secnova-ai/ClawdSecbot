@@ -155,7 +155,7 @@ func TestHermesPlugin_AssessRisksAndMitigate(t *testing.T) {
 	t.Cleanup(func() { SetConfigPath(oldCfgPath) })
 
 	p := &HermesPlugin{protectionStatuses: map[string]core.ProtectionStatus{}}
-	risks, err := p.AssessRisks(nil)
+	risks, err := p.AssessRisks(nil, nil)
 	if err != nil {
 		t.Fatalf("AssessRisks failed: %v", err)
 	}
