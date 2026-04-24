@@ -26,6 +26,8 @@ class ScanResultView extends StatelessWidget {
   final void Function(Asset asset, {required bool isEditMode})
   onShowProtectionConfig;
   final void Function(Asset asset) onShowProtectionMonitor;
+  final Future<void> Function(Asset asset) onStopProtection;
+  final Set<String> stoppingProtectionAssets;
   final void Function(RiskInfo risk) onShowMitigation;
   final Future<void> Function(RiskInfo risk) onDeleteRiskSkill;
 
@@ -40,6 +42,8 @@ class ScanResultView extends StatelessWidget {
     required this.onViewSkillScanResults,
     required this.onShowProtectionConfig,
     required this.onShowProtectionMonitor,
+    required this.onStopProtection,
+    required this.stoppingProtectionAssets,
     required this.onShowMitigation,
     required this.onDeleteRiskSkill,
   });
@@ -130,8 +134,12 @@ class ScanResultView extends StatelessWidget {
                   initiallyExpanded: result.assets.length <= 1,
                   isProtected: protectedAssets.contains(asset.id),
                   isRestoringProtection: isRestoringProtection,
+                  isStoppingProtection: stoppingProtectionAssets.contains(
+                    asset.id,
+                  ),
                   onShowProtectionConfig: onShowProtectionConfig,
                   onShowProtectionMonitor: onShowProtectionMonitor,
+                  onStopProtection: onStopProtection,
                 ).animate().fadeIn().slideX(begin: 0.1, end: 0),
               ),
             ),
@@ -804,9 +812,11 @@ class _AssetCard extends StatefulWidget {
   final bool initiallyExpanded;
   final bool isProtected;
   final bool isRestoringProtection;
+  final bool isStoppingProtection;
   final void Function(Asset asset, {required bool isEditMode})
   onShowProtectionConfig;
   final void Function(Asset asset) onShowProtectionMonitor;
+  final Future<void> Function(Asset asset) onStopProtection;
 
   const _AssetCard({
     super.key,
@@ -814,8 +824,10 @@ class _AssetCard extends StatefulWidget {
     required this.initiallyExpanded,
     required this.isProtected,
     required this.isRestoringProtection,
+    required this.isStoppingProtection,
     required this.onShowProtectionConfig,
     required this.onShowProtectionMonitor,
+    required this.onStopProtection,
   });
 
   @override
@@ -1026,6 +1038,7 @@ class _AssetCardState extends State<_AssetCard> {
                         context,
                         asset,
                         widget.isProtected,
+                        widget.isStoppingProtection,
                         l10n,
                       ),
                     ],
@@ -1392,12 +1405,15 @@ class _AssetCardState extends State<_AssetCard> {
     BuildContext context,
     Asset asset,
     bool isProtected,
+    bool isStopping,
     AppLocalizations l10n,
   ) {
     if (isProtected) {
       // 已防护资产：显示防护监控和配置按钮
-      final isLoading = widget.isRestoringProtection;
-      return Row(
+      final isLoading = widget.isRestoringProtection || isStopping;
+      return Wrap(
+        spacing: 8,
+        runSpacing: 8,
         children: [
           MouseRegion(
             cursor: isLoading
@@ -1468,7 +1484,63 @@ class _AssetCardState extends State<_AssetCard> {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          MouseRegion(
+            cursor: isLoading
+                ? SystemMouseCursors.basic
+                : SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: isLoading ? null : () => widget.onStopProtection(asset),
+              child: Opacity(
+                opacity: isLoading && !isStopping ? 0.4 : 1.0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(
+                      0xFFEF4444,
+                    ).withValues(alpha: isLoading && !isStopping ? 0.10 : 0.16),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: const Color(0xFFEF4444).withValues(alpha: 0.35),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isStopping)
+                        const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            color: Color(0xFFFCA5A5),
+                            strokeWidth: 2,
+                          ),
+                        )
+                      else
+                        const Icon(
+                          LucideIcons.power,
+                          color: Color(0xFFFCA5A5),
+                          size: 14,
+                        ),
+                      const SizedBox(width: 4),
+                      Text(
+                        isStopping
+                            ? l10n.protectionStopping
+                            : l10n.stopProtection,
+                        style: AppFonts.inter(
+                          fontSize: 12,
+                          color: const Color(0xFFFCA5A5),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
           // 配置按钮（恢复防护期间禁用）
           MouseRegion(
             cursor: isLoading

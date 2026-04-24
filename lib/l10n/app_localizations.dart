@@ -1196,6 +1196,30 @@ abstract class AppLocalizations {
   /// **'防护启动中...'**
   String get protectionStarting;
 
+  /// No description provided for @stopProtection.
+  ///
+  /// In zh, this message translates to:
+  /// **'停止防护'**
+  String get stopProtection;
+
+  /// No description provided for @protectionStopping.
+  ///
+  /// In zh, this message translates to:
+  /// **'停止中...'**
+  String get protectionStopping;
+
+  /// No description provided for @stopProtectionSuccess.
+  ///
+  /// In zh, this message translates to:
+  /// **'防护已停止'**
+  String get stopProtectionSuccess;
+
+  /// No description provided for @stopProtectionFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'停止防护失败：{error}'**
+  String stopProtectionFailed(String error);
+
   /// No description provided for @launchAtStartup.
   ///
   /// In zh, this message translates to:

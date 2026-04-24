@@ -91,6 +91,7 @@ class _WebHomePageState extends State<WebHomePage> {
 
   final Set<String> _protectedAssetIDs = <String>{};
   final Map<String, String> _protectedAssetNamesByID = <String, String>{};
+  final Set<String> _stoppingProtectionAssetIDs = <String>{};
 
   final bool _isRestoringProtection = false;
   bool _bootstrapped = false;
@@ -871,6 +872,7 @@ class _WebHomePageState extends State<WebHomePage> {
         _result = null;
         _protectedAssetIDs.clear();
         _protectedAssetNamesByID.clear();
+        _stoppingProtectionAssetIDs.clear();
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1132,6 +1134,7 @@ class _WebHomePageState extends State<WebHomePage> {
 
         _protectedAssetIDs.clear();
         _protectedAssetNamesByID.clear();
+        _stoppingProtectionAssetIDs.clear();
       }
 
       if (!mounted) return;
@@ -1161,6 +1164,105 @@ class _WebHomePageState extends State<WebHomePage> {
         assetID: resolvedID,
       ),
     );
+  }
+
+  Future<void> _stopProtectionForAsset(Asset asset) async {
+    final scanAssetID = asset.id.trim();
+    if (_stoppingProtectionAssetIDs.contains(scanAssetID)) {
+      return;
+    }
+
+    setState(() {
+      _stoppingProtectionAssetIDs.add(scanAssetID);
+    });
+
+    String resolvedAssetID = scanAssetID;
+    String resolvedAssetName = asset.name;
+
+    try {
+      final config = await ProtectionDatabaseService().getProtectionConfig(
+        asset.name,
+        scanAssetID,
+      );
+      if (config != null) {
+        resolvedAssetID = config.assetID.trim().isNotEmpty
+            ? config.assetID.trim()
+            : resolvedAssetID;
+        resolvedAssetName = config.assetName.trim().isNotEmpty
+            ? config.assetName.trim()
+            : resolvedAssetName;
+      }
+
+      if (resolvedAssetID != scanAssetID && mounted) {
+        setState(() {
+          _stoppingProtectionAssetIDs.add(resolvedAssetID);
+        });
+        appLogger.info(
+          '[WebMain] Resolved stop protection asset_id: scan=$scanAssetID -> config=$resolvedAssetID',
+        );
+      }
+
+      final service = ProtectionService.forAsset(
+        resolvedAssetName,
+        resolvedAssetID,
+      );
+      service.setAssetName(resolvedAssetName, resolvedAssetID);
+      final stopResult = await service.stopProtectionProxy();
+      if (stopResult['success'] != true) {
+        throw Exception(stopResult['error'] ?? 'stop protection failed');
+      }
+
+      await ProtectionDatabaseService().setProtectionEnabled(
+        resolvedAssetName,
+        false,
+        resolvedAssetID,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _protectedAssetIDs
+          ..remove(scanAssetID)
+          ..remove(resolvedAssetID);
+        _protectedAssetNamesByID
+          ..remove(scanAssetID)
+          ..remove(resolvedAssetID);
+      });
+
+      final l10n = _currentL10n();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.stopProtectionSuccess),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      appLogger.info(
+        '[WebMain] Stopped protection for $resolvedAssetName/$resolvedAssetID',
+      );
+    } catch (e) {
+      appLogger.error(
+        '[WebMain] Failed to stop protection for $resolvedAssetName/$resolvedAssetID',
+        e,
+      );
+      if (mounted) {
+        final l10n = _currentL10n();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.stopProtectionFailed('$e')),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _stoppingProtectionAssetIDs
+            ..remove(scanAssetID)
+            ..remove(resolvedAssetID);
+        });
+      }
+    }
   }
 
   Future<void> _showProtectionConfigDialog(
@@ -1412,6 +1514,7 @@ class _WebHomePageState extends State<WebHomePage> {
         setState(() {
           _protectedAssetIDs.clear();
           _protectedAssetNamesByID.clear();
+          _stoppingProtectionAssetIDs.clear();
         });
       }
       return;
@@ -2116,12 +2219,14 @@ class _WebHomePageState extends State<WebHomePage> {
       result: result,
       protectedAssets: _protectedAssetIDs,
       isRestoringProtection: _isRestoringProtection,
+      stoppingProtectionAssets: _stoppingProtectionAssetIDs,
       selectedRescanAction: _selectedRescanAction,
       onRescanActionChanged: _handleRescanActionChanged,
       onRescan: _resetScan,
       onViewSkillScanResults: _showSkillScanResultsDialog,
       onShowProtectionConfig: _showProtectionConfigDialog,
       onShowProtectionMonitor: (asset) => _showProtectionMonitorResolved(asset),
+      onStopProtection: _stopProtectionForAsset,
       onShowMitigation: _showMitigationDialog,
       onDeleteRiskSkill: _deleteRiskSkill,
     );

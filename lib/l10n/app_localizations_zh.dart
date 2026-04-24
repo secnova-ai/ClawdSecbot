@@ -612,6 +612,20 @@ class AppLocalizationsZh extends AppLocalizations {
   String get protectionStarting => '防护启动中...';
 
   @override
+  String get stopProtection => '停止防护';
+
+  @override
+  String get protectionStopping => '停止中...';
+
+  @override
+  String get stopProtectionSuccess => '防护已停止';
+
+  @override
+  String stopProtectionFailed(String error) {
+    return '停止防护失败：$error';
+  }
+
+  @override
   String get launchAtStartup => '开机自启';
 
   @override

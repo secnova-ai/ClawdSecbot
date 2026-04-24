@@ -82,6 +82,7 @@ class _MainPageState extends State<MainPage>
 
   final Set<String> _protectedAssetIDs = {};
   final Map<String, String> _protectedAssetNamesByID = {};
+  final Set<String> _stoppingProtectionAssetIDs = {};
 
   /// 启动时后台恢复防护中，期间防护监控按钮显示 loading，防护配置按钮禁用
   bool _isRestoringProtection = false;
@@ -144,6 +145,7 @@ class _MainPageState extends State<MainPage>
       _result = null;
       _protectedAssetIDs.clear();
       _protectedAssetNamesByID.clear();
+      _stoppingProtectionAssetIDs.clear();
     });
   }
 
@@ -2216,6 +2218,112 @@ class _MainPageState extends State<MainPage>
     showProtectionMonitor(asset.name, resolvedID);
   }
 
+  Future<void> _stopProtectionForAsset(Asset asset) async {
+    final scanAssetID = asset.id.trim();
+    if (_stoppingProtectionAssetIDs.contains(scanAssetID)) {
+      return;
+    }
+
+    setState(() {
+      _stoppingProtectionAssetIDs.add(scanAssetID);
+    });
+
+    String resolvedAssetID = scanAssetID;
+    String resolvedAssetName = asset.name;
+
+    try {
+      final config = await ProtectionDatabaseService().getProtectionConfig(
+        asset.name,
+        scanAssetID,
+      );
+      if (config != null) {
+        resolvedAssetID = config.assetID.trim().isNotEmpty
+            ? config.assetID.trim()
+            : resolvedAssetID;
+        resolvedAssetName = config.assetName.trim().isNotEmpty
+            ? config.assetName.trim()
+            : resolvedAssetName;
+      }
+
+      if (resolvedAssetID != scanAssetID && mounted) {
+        setState(() {
+          _stoppingProtectionAssetIDs.add(resolvedAssetID);
+        });
+        appLogger.info(
+          '[MainPage] Resolved stop protection asset_id: scan=$scanAssetID -> config=$resolvedAssetID',
+        );
+      }
+
+      final service = ProtectionService.forAsset(
+        resolvedAssetName,
+        resolvedAssetID,
+      );
+      service.setAssetName(resolvedAssetName, resolvedAssetID);
+      final stopResult = await service.stopProtectionProxy();
+      if (stopResult['success'] != true) {
+        throw Exception(stopResult['error'] ?? 'stop protection failed');
+      }
+
+      await ProtectionDatabaseService().setProtectionEnabled(
+        resolvedAssetName,
+        false,
+        resolvedAssetID,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _protectedAssetIDs
+          ..remove(scanAssetID)
+          ..remove(resolvedAssetID);
+        _protectedAssetNamesByID
+          ..remove(scanAssetID)
+          ..remove(resolvedAssetID);
+      });
+      await notifyMonitorWindowsProtectionConfigReload();
+
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.stopProtectionSuccess),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      appLogger.info(
+        '[MainPage] Stopped protection for $resolvedAssetName/$resolvedAssetID',
+      );
+    } catch (e) {
+      appLogger.error(
+        '[MainPage] Failed to stop protection for $resolvedAssetName/$resolvedAssetID',
+        e,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppLocalizations.of(context)!.stopProtectionFailed('$e'),
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _stoppingProtectionAssetIDs
+            ..remove(scanAssetID)
+            ..remove(resolvedAssetID);
+        });
+      }
+    }
+  }
+
   // ============ 防护配置 ============
 
   void _showProtectionConfigDialog(
@@ -2940,6 +3048,7 @@ class _MainPageState extends State<MainPage>
       result: result,
       protectedAssets: _protectedAssetIDs,
       isRestoringProtection: _isRestoringProtection,
+      stoppingProtectionAssets: _stoppingProtectionAssetIDs,
       selectedRescanAction: _selectedRescanAction,
       onRescanActionChanged: (action) {
         if (!mounted) return;
@@ -2951,6 +3060,7 @@ class _MainPageState extends State<MainPage>
       onViewSkillScanResults: _showSkillScanResultsDialog,
       onShowProtectionConfig: _showProtectionConfigDialog,
       onShowProtectionMonitor: (asset) => _showProtectionMonitorResolved(asset),
+      onStopProtection: _stopProtectionForAsset,
       onShowMitigation: (risk) => _showMitigationDialog(context, risk),
       onDeleteRiskSkill: _deleteRiskSkillFromFinding,
     );

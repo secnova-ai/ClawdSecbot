@@ -283,6 +283,15 @@
   "protectionAssetNotRunning": "Asset not running, cannot enable protection",
   "protectionMonitor": "Protection Monitor",
   "protectionStarting": "Starting...",
+  "stopProtection": "Stop Protection",
+  "protectionStopping": "Stopping...",
+  "stopProtectionSuccess": "Protection stopped",
+  "stopProtectionFailed": "Failed to stop protection: {error}",
+  "@stopProtectionFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
   "launchAtStartup": "Launch at Startup",
   "auditLog": "Audit Log",
   "protectionConfirmTitle": "Enable Protection",

@@ -330,6 +330,15 @@
   "protectionAssetNotRunning": "资产未运行，无法开启防护",
   "protectionMonitor": "防护监控",
   "protectionStarting": "防护启动中...",
+  "stopProtection": "停止防护",
+  "protectionStopping": "停止中...",
+  "stopProtectionSuccess": "防护已停止",
+  "stopProtectionFailed": "停止防护失败：{error}",
+  "@stopProtectionFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
   "launchAtStartup": "开机自启",
   "auditLog": "审计日志",
   "protectionConfirmTitle": "开启防护",

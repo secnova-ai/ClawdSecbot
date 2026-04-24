@@ -629,6 +629,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get protectionStarting => 'Starting...';
 
   @override
+  String get stopProtection => 'Stop Protection';
+
+  @override
+  String get protectionStopping => 'Stopping...';
+
+  @override
+  String get stopProtectionSuccess => 'Protection stopped';
+
+  @override
+  String stopProtectionFailed(String error) {
+    return 'Failed to stop protection: $error';
+  }
+
+  @override
   String get launchAtStartup => 'Launch at Startup';
 
   @override
