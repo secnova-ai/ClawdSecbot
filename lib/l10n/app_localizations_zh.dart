@@ -312,6 +312,26 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get riskOpenclawInsecureOrDangerousFlags => 'OpenClaw 网关危险开关已启用';
+
+  @override
+  String riskOpenclawInsecureOrDangerousFlagsDesc(String flags) {
+    return 'OpenClaw 网关开关削弱了认证或来源信任保护：$flags。除非有明确且已验证的威胁模型例外，否则应关闭这些开关。';
+  }
+
+  @override
+  String get riskOpenclawConfigPatchOutdated => 'OpenClaw 配置安全补丁缺失';
+
+  @override
+  String riskOpenclawConfigPatchOutdatedDesc(
+    String currentVersion,
+    String requiredVersion,
+    String advisories,
+  ) {
+    return '当前 OpenClaw 版本 $currentVersion 缺少配置安全修复。请升级到 $requiredVersion 或更高版本。公告：$advisories。';
+  }
+
+  @override
   String get riskOneClickRce => '1-click RCE 远程代码执行漏洞';
 
   @override

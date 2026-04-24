@@ -132,6 +132,22 @@
       "baseUrl": {"type": "String"}
     }
   },
+  "riskOpenclawInsecureOrDangerousFlags": "Dangerous OpenClaw Gateway Flags Enabled",
+  "riskOpenclawInsecureOrDangerousFlagsDesc": "OpenClaw gateway flags weaken authentication or origin trust protections: {flags}. Disable them unless there is a verified threat-model exception.",
+  "@riskOpenclawInsecureOrDangerousFlagsDesc": {
+    "placeholders": {
+      "flags": {"type": "String"}
+    }
+  },
+  "riskOpenclawConfigPatchOutdated": "OpenClaw Config Security Patches Missing",
+  "riskOpenclawConfigPatchOutdatedDesc": "Current OpenClaw version {currentVersion} is missing configuration-security fixes. Upgrade to {requiredVersion} or later. Advisories: {advisories}.",
+  "@riskOpenclawConfigPatchOutdatedDesc": {
+    "placeholders": {
+      "currentVersion": {"type": "String"},
+      "requiredVersion": {"type": "String"},
+      "advisories": {"type": "String"}
+    }
+  },
 
   "riskOneClickRce": "1-click RCE Remote Code Execution Vulnerability",
   "riskOneClickRceDesc": "OpenClaw has a critical 1-click RCE vulnerability (CVSS 10.0). Attackers can execute arbitrary code by tricking users into visiting malicious websites. Affected versions: < 2026.1.24-1, current version: {version}. Upgrade to the latest version immediately.",

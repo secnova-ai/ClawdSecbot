@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../l10n/app_localizations.dart';
 import '../utils/app_fonts.dart';
 import '../models/risk_model.dart';
 import '../services/plugin_service.dart';
 import '../utils/runtime_platform.dart';
+import 'scan_result_risk_text.dart';
 
 class MitigationDialog extends StatefulWidget {
   final RiskInfo risk;
@@ -138,7 +140,10 @@ class _MitigationDialogState extends State<MitigationDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                widget.risk.title,
+                localizeScanRiskTitle(
+                  widget.risk,
+                  AppLocalizations.of(context)!,
+                ),
                 style: AppFonts.inter(color: Colors.white70, fontSize: 14),
               ),
               const SizedBox(height: 16),
@@ -354,6 +359,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
   Widget _buildSuggestionDialog() {
     final mitigation = widget.risk.mitigation!;
     final localeName = Localizations.localeOf(context).toLanguageTag();
+    final l10n = AppLocalizations.of(context)!;
     return Dialog(
       backgroundColor: const Color(0xFF1A1A2E),
       child: Container(
@@ -428,7 +434,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
                         ),
                       ),
                       child: Text(
-                        widget.risk.displayDescription(localeName),
+                        localizeScanRiskDescription(widget.risk, l10n),
                         style: AppFonts.inter(
                           color: Colors.white70,
                           fontSize: 14,
@@ -496,7 +502,7 @@ class _MitigationDialogState extends State<MitigationDialog> {
             Icon(priorityIcon, color: priorityColor, size: 20),
             const SizedBox(width: 8),
             Text(
-              '${group.priority} - ${group.category}',
+              '${group.priority} - ${group.displayCategory(localeName)}',
               style: AppFonts.inter(
                 color: priorityColor,
                 fontSize: 15,
