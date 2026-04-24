@@ -10,7 +10,6 @@ import (
 
 	"go_lib/core"
 	"go_lib/core/logging"
-	"go_lib/core/repository"
 )
 
 // getSkillsDirs 返回 dintalclaw 技能扫描目录
@@ -119,21 +118,12 @@ func calculateFileHash(filePath string) (string, error) {
 }
 
 // checkUnscannedSkills 检查未扫描的技能，添加风险项
+// 仅按 hash 与 scannedHashes 对齐，与 GetScannedSkillHashes 主口径一致。
 func checkUnscannedSkills(scannedHashes map[string]bool, risks *[]core.Risk) {
 	logging.Info("[checkUnscannedSkills] scannedHashes count: %d", len(scannedHashes))
 	skills, err := listSkills()
 	if err != nil {
 		return
-	}
-
-	scanRepo := repository.NewSkillSecurityScanRepository(nil)
-	scannedNames := make(map[string]bool)
-	if records, err := scanRepo.GetAllSkillScans(); err == nil {
-		for _, r := range records {
-			if r.RiskLevel != "error" {
-				scannedNames[r.SkillName] = true
-			}
-		}
 	}
 
 	var unscannedSkills []string
@@ -143,10 +133,6 @@ func checkUnscannedSkills(scannedHashes map[string]bool, risks *[]core.Risk) {
 			continue
 		}
 		if _, ok := scannedHashes[skill.Hash]; ok {
-			continue
-		}
-		if scannedNames[skill.Name] {
-			logging.Info("[checkUnscannedSkills] Skill %s hash changed but has a previous scan record, skipping", skill.Name)
 			continue
 		}
 		logging.Warning("[checkUnscannedSkills] Skill %s is unscanned (hash=%s...)", skill.Name, skill.Hash[:min(12, len(skill.Hash))])
