@@ -139,7 +139,11 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
           final skillName = entry.key;
           final data = entry.value as Map<String, dynamic>;
           final skillPath = data['skill_path'] as String? ?? '';
+          final batchSkillHash = data['skill_hash'] as String? ?? '';
           _skillPaths[skillName] = skillPath;
+          if (batchSkillHash.isNotEmpty) {
+            _skillHashes[skillName] = batchSkillHash;
+          }
 
           if (data['success'] == true && data['result'] != null) {
             final resultMap = data['result'] as Map<String, dynamic>;

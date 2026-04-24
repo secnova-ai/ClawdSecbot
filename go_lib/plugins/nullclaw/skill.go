@@ -7,7 +7,6 @@ import (
 
 	"go_lib/core"
 	"go_lib/core/logging"
-	"go_lib/core/repository"
 )
 
 // getSkillsDirs returns all skill directories to scan (bot-specific, depends on nullclaw config)
@@ -60,9 +59,8 @@ func listSkills() ([]SkillInfo, error) {
 }
 
 // checkUnscannedSkills checks for unscanned skills and adds risks.
-// Uses a two-tier check: first by skill_name in DB (robust), then by hash match.
-// A skill with a DB record (by name) but mismatched hash means it was modified since
-// last scan; a skill with no DB record at all was never scanned.
+// Uses hash-only matching so the UI risk aligns with GetScannedSkillHashes:
+// any skill whose current content hash is not in scannedHashes is treated as unscanned.
 func checkUnscannedSkills(scannedHashes map[string]bool, risks *[]core.Risk) {
 	logging.Info("[checkUnscannedSkills] scannedHashes count: %d", len(scannedHashes))
 	skills, err := listSkills()
@@ -70,30 +68,12 @@ func checkUnscannedSkills(scannedHashes map[string]bool, risks *[]core.Risk) {
 		return
 	}
 
-	// Query all successfully scanned skill names from DB for name-based lookup.
-	// Error scans (risk_level='error') are excluded so they can be retried.
-	scanRepo := repository.NewSkillSecurityScanRepository(nil)
-	scannedNames := make(map[string]bool)
-	if records, err := scanRepo.GetAllSkillScans(); err == nil {
-		for _, r := range records {
-			if r.RiskLevel != "error" {
-				scannedNames[r.SkillName] = true
-			}
-		}
-	}
-
 	var unscannedSkills []string
 	// skillName -> absolute path for Flutter to use
 	skillPaths := make(map[string]string)
 	for _, skill := range skills {
 		if skill.HasSkillMd && skill.Hash != "" {
-			// Primary check: hash-based (exact version match)
 			if _, ok := scannedHashes[skill.Hash]; ok {
-				continue
-			}
-			// Fallback: name-based (skill was scanned before but content changed)
-			if scannedNames[skill.Name] {
-				logging.Info("[checkUnscannedSkills] Skill %s hash changed but has a previous scan record, skipping", skill.Name)
 				continue
 			}
 			logging.Warning("[checkUnscannedSkills] Skill %s is unscanned (hash=%s...)", skill.Name, skill.Hash[:min(12, len(skill.Hash))])
