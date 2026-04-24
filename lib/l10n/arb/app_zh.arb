@@ -163,6 +163,22 @@
       "baseUrl": {"type": "String"}
     }
   },
+  "riskOpenclawInsecureOrDangerousFlags": "OpenClaw 网关危险开关已启用",
+  "riskOpenclawInsecureOrDangerousFlagsDesc": "OpenClaw 网关开关削弱了认证或来源信任保护：{flags}。除非有明确且已验证的威胁模型例外，否则应关闭这些开关。",
+  "@riskOpenclawInsecureOrDangerousFlagsDesc": {
+    "placeholders": {
+      "flags": {"type": "String"}
+    }
+  },
+  "riskOpenclawConfigPatchOutdated": "OpenClaw 配置安全补丁缺失",
+  "riskOpenclawConfigPatchOutdatedDesc": "当前 OpenClaw 版本 {currentVersion} 缺少配置安全修复。请升级到 {requiredVersion} 或更高版本。公告：{advisories}。",
+  "@riskOpenclawConfigPatchOutdatedDesc": {
+    "placeholders": {
+      "currentVersion": {"type": "String"},
+      "requiredVersion": {"type": "String"},
+      "advisories": {"type": "String"}
+    }
+  },
   "@riskPlaintextSecretsDesc": {
     "placeholders": {
       "pattern": {"type": "String"}

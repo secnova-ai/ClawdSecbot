@@ -204,11 +204,13 @@ class Mitigation {
 class SuggestionGroup {
   final String priority;
   final String category;
+  final String? categoryEn;
   final List<SuggestionItem> items;
 
   SuggestionGroup({
     required this.priority,
     required this.category,
+    this.categoryEn,
     required this.items,
   });
 
@@ -216,6 +218,7 @@ class SuggestionGroup {
     return SuggestionGroup(
       priority: json['priority'],
       category: json['category'],
+      categoryEn: json['category_en'],
       items: (json['items'] as List)
           .map((e) => SuggestionItem.fromJson(e))
           .toList(),
@@ -226,8 +229,17 @@ class SuggestionGroup {
     return {
       'priority': priority,
       'category': category,
+      if (categoryEn != null) 'category_en': categoryEn,
       'items': items.map((e) => e.toJson()).toList(),
     };
+  }
+
+  String displayCategory(String localeName) {
+    final isEnglish = localeName.toLowerCase().startsWith('en');
+    if (isEnglish && (categoryEn?.trim().isNotEmpty ?? false)) {
+      return categoryEn!.trim();
+    }
+    return category;
   }
 }
 

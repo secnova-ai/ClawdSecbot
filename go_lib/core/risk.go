@@ -31,9 +31,10 @@ type Mitigation struct {
 }
 
 type SuggestionGroup struct {
-	Priority string           `json:"priority"`
-	Category string           `json:"category"`
-	Items    []SuggestionItem `json:"items"`
+	Priority   string           `json:"priority"`
+	Category   string           `json:"category"`
+	CategoryEN string           `json:"category_en,omitempty"`
+	Items      []SuggestionItem `json:"items"`
 }
 
 type SuggestionItem struct {

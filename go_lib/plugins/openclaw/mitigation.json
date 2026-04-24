@@ -267,38 +267,52 @@
     "risk_id": "openclaw_insecure_or_dangerous_flags",
     "mitigation": {
       "type": "suggestion",
-      "title": "Disable dangerous gateway flags",
-      "description": "This risk requires manual hardening. Insecure and dangerous flags reduce auth and origin protections and should not stay enabled in normal deployments.",
+      "title": "关闭危险网关开关",
+      "title_en": "Disable dangerous gateway flags",
+      "description": "此风险需要手动加固。不安全或危险开关会削弱认证与来源保护，不应在常规部署中保持启用。",
+      "description_en": "This risk requires manual hardening. Insecure and dangerous flags reduce auth and origin protections and should not stay enabled in normal deployments.",
       "suggestions": [
         {
           "priority": "P0",
-          "category": "Immediate actions",
+          "category": "立即处理",
+          "category_en": "Immediate actions",
           "items": [
             {
-              "action": "Disable dangerous control UI flags",
-              "detail": "Set gateway.controlUi.allowInsecureAuth=false and gateway.controlUi.dangerouslyDisableDeviceAuth=false."
+              "action": "关闭危险的控制界面开关",
+              "action_en": "Disable dangerous control UI flags",
+              "detail": "设置 gateway.controlUi.allowInsecureAuth=false，并设置 gateway.controlUi.dangerouslyDisableDeviceAuth=false。",
+              "detail_en": "Set gateway.controlUi.allowInsecureAuth=false and gateway.controlUi.dangerouslyDisableDeviceAuth=false."
             },
             {
-              "action": "Disable host header origin fallback",
-              "detail": "Set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback=false to avoid trusting spoofable host headers."
+              "action": "关闭 Host Header 来源回退",
+              "action_en": "Disable host header origin fallback",
+              "detail": "设置 gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback=false，避免信任可伪造的 Host Header。",
+              "detail_en": "Set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback=false to avoid trusting spoofable host headers."
             },
             {
-              "action": "Avoid wildcard browser origins",
-              "detail": "Remove '*' from gateway.controlUi.allowedOrigins and keep an explicit allowlist."
+              "action": "避免浏览器来源通配符",
+              "action_en": "Avoid wildcard browser origins",
+              "detail": "从 gateway.controlUi.allowedOrigins 中移除 '*'，并保留明确的来源白名单。",
+              "detail_en": "Remove '*' from gateway.controlUi.allowedOrigins and keep an explicit allowlist."
             }
           ]
         },
         {
           "priority": "P1",
-          "category": "Network trust hardening",
+          "category": "网络信任加固",
+          "category_en": "Network trust hardening",
           "items": [
             {
-              "action": "Disable real IP fallback",
-              "detail": "Set gateway.allowRealIpFallback=false unless you have a verified reverse-proxy trust chain."
+              "action": "关闭真实 IP 回退",
+              "action_en": "Disable real IP fallback",
+              "detail": "除非已有经过验证的反向代理信任链，否则设置 gateway.allowRealIpFallback=false。",
+              "detail_en": "Set gateway.allowRealIpFallback=false unless you have a verified reverse-proxy trust chain."
             },
             {
-              "action": "Validate trusted-proxy auth prerequisites",
-              "detail": "If gateway.auth.mode is trusted-proxy, configure gateway.trustedProxies with explicit proxy addresses."
+              "action": "校验 trusted-proxy 认证前提",
+              "action_en": "Validate trusted-proxy auth prerequisites",
+              "detail": "如果 gateway.auth.mode 为 trusted-proxy，请用明确的代理地址配置 gateway.trustedProxies。",
+              "detail_en": "If gateway.auth.mode is trusted-proxy, configure gateway.trustedProxies with explicit proxy addresses."
             }
           ]
         }

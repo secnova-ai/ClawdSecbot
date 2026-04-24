@@ -35,30 +35,40 @@
     "risk_id": "process_running_as_root",
     "mitigation": {
       "type": "suggestion",
-      "title": "Stop running DinTalClaw as root",
-      "description": "This risk requires manual remediation and should only display operational guidance. Move the service to a restricted non root account.",
+      "title": "停止以 root 身份运行 DinTalClaw",
+      "title_en": "Stop running DinTalClaw as root",
+      "description": "此风险需要手动处理。请将服务迁移到受限的非 root 账号运行。",
+      "description_en": "This risk requires manual remediation and should only display operational guidance. Move the service to a restricted non root account.",
       "suggestions": [
         {
           "priority": "P0",
-          "category": "Immediate actions",
+          "category": "立即处理",
+          "category_en": "Immediate actions",
           "items": [
             {
-              "action": "Restart the service as a non root user",
-              "detail": "Stop the current root owned process and relaunch DinTalClaw with a dedicated low privilege account."
+              "action": "使用非 root 用户重启服务",
+              "action_en": "Restart the service as a non root user",
+              "detail": "停止当前 root 拥有的进程，并使用专用低权限账号重新启动 DinTalClaw。",
+              "detail_en": "Stop the current root owned process and relaunch DinTalClaw with a dedicated low privilege account."
             }
           ]
         },
         {
           "priority": "P1",
-          "category": "Hardening actions",
+          "category": "加固措施",
+          "category_en": "Hardening actions",
           "items": [
             {
-              "action": "Review startup scripts and service units",
-              "detail": "Verify that systemd units, container entry points, or shell scripts do not explicitly launch DinTalClaw as root."
+              "action": "检查启动脚本和服务单元",
+              "action_en": "Review startup scripts and service units",
+              "detail": "确认 systemd 单元、容器入口或 shell 脚本没有显式以 root 身份启动 DinTalClaw。",
+              "detail_en": "Verify that systemd units, container entry points, or shell scripts do not explicitly launch DinTalClaw as root."
             },
             {
-              "action": "Minimize writable paths",
-              "detail": "Grant the runtime account only the minimum write access needed for config, logs, and working directories."
+              "action": "最小化可写路径",
+              "action_en": "Minimize writable paths",
+              "detail": "仅授予运行账号对配置、日志和工作目录所需的最小写权限。",
+              "detail_en": "Grant the runtime account only the minimum write access needed for config, logs, and working directories."
             }
           ]
         }

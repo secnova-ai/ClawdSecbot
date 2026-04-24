@@ -51,20 +51,27 @@
     "risk_id": "terminal_backend_local",
     "mitigation": {
       "type": "suggestion",
-      "title": "Evaluate local execution boundary",
-      "description": "Local terminal backend runs commands directly on host. Consider moving to a safer execution backend where possible.",
+      "title": "评估本地执行边界",
+      "title_en": "Evaluate local execution boundary",
+      "description": "本地终端后端会直接在宿主机执行命令。条件允许时，建议迁移到更安全的执行后端。",
+      "description_en": "Local terminal backend runs commands directly on host. Consider moving to a safer execution backend where possible.",
       "suggestions": [
         {
           "priority": "P1",
-          "category": "Execution Boundary",
+          "category": "执行边界",
+          "category_en": "Execution Boundary",
           "items": [
             {
-              "action": "Review whether this Hermes instance should execute tools on the local host",
-              "detail": "Confirm host-level command execution is required for this workload."
+              "action": "确认此 Hermes 实例是否必须在宿主机执行工具",
+              "action_en": "Review whether this Hermes instance should execute tools on the local host",
+              "detail": "确认当前工作负载是否确实需要宿主机级命令执行。",
+              "detail_en": "Confirm host-level command execution is required for this workload."
             },
             {
-              "action": "Use stricter approval policies for local terminal backend",
-              "detail": "Enforce gated approvals to reduce direct host-side execution risk."
+              "action": "为本地终端后端使用更严格的审批策略",
+              "action_en": "Use stricter approval policies for local terminal backend",
+              "detail": "强制启用审批闸门，降低直接在宿主机执行带来的风险。",
+              "detail_en": "Enforce gated approvals to reduce direct host-side execution risk."
             }
           ]
         }
@@ -92,20 +99,27 @@
     "risk_id": "model_base_url_public",
     "mitigation": {
       "type": "suggestion",
-      "title": "Review custom endpoint exposure",
-      "description": "A custom non-local base_url can bypass expected trust boundaries if endpoint ownership is unclear.",
+      "title": "检查自定义端点暴露",
+      "title_en": "Review custom endpoint exposure",
+      "description": "如果端点归属不清晰，自定义非本地 base_url 可能绕过预期信任边界。",
+      "description_en": "A custom non-local base_url can bypass expected trust boundaries if endpoint ownership is unclear.",
       "suggestions": [
         {
           "priority": "P1",
-          "category": "Endpoint Trust",
+          "category": "端点信任",
+          "category_en": "Endpoint Trust",
           "items": [
             {
-              "action": "Validate ownership and TLS settings of custom model endpoint",
-              "detail": "Ensure endpoint certificate, domain ownership, and transport security meet policy."
+              "action": "校验自定义模型端点的归属与 TLS 设置",
+              "action_en": "Validate ownership and TLS settings of custom model endpoint",
+              "detail": "确保端点证书、域名归属和传输安全符合策略要求。",
+              "detail_en": "Ensure endpoint certificate, domain ownership, and transport security meet policy."
             },
             {
-              "action": "Prefer local or private network endpoint where feasible",
-              "detail": "Reduce external exposure by routing model traffic to trusted internal infrastructure."
+              "action": "条件允许时优先使用本地或私网端点",
+              "action_en": "Prefer local or private network endpoint where feasible",
+              "detail": "将模型流量路由到可信内部基础设施，减少外部暴露。",
+              "detail_en": "Reduce external exposure by routing model traffic to trusted internal infrastructure."
             }
           ]
         }

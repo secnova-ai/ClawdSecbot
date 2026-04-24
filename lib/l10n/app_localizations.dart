@@ -644,6 +644,34 @@ abstract class AppLocalizations {
   /// **'model.base_url 指向非本地地址：{baseUrl}。建议改为本地或受控私网地址。'**
   String riskModelBaseUrlPublicDesc(String baseUrl);
 
+  /// No description provided for @riskOpenclawInsecureOrDangerousFlags.
+  ///
+  /// In zh, this message translates to:
+  /// **'OpenClaw 网关危险开关已启用'**
+  String get riskOpenclawInsecureOrDangerousFlags;
+
+  /// No description provided for @riskOpenclawInsecureOrDangerousFlagsDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'OpenClaw 网关开关削弱了认证或来源信任保护：{flags}。除非有明确且已验证的威胁模型例外，否则应关闭这些开关。'**
+  String riskOpenclawInsecureOrDangerousFlagsDesc(String flags);
+
+  /// No description provided for @riskOpenclawConfigPatchOutdated.
+  ///
+  /// In zh, this message translates to:
+  /// **'OpenClaw 配置安全补丁缺失'**
+  String get riskOpenclawConfigPatchOutdated;
+
+  /// No description provided for @riskOpenclawConfigPatchOutdatedDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前 OpenClaw 版本 {currentVersion} 缺少配置安全修复。请升级到 {requiredVersion} 或更高版本。公告：{advisories}。'**
+  String riskOpenclawConfigPatchOutdatedDesc(
+    String currentVersion,
+    String requiredVersion,
+    String advisories,
+  );
+
   /// No description provided for @riskOneClickRce.
   ///
   /// In zh, this message translates to:

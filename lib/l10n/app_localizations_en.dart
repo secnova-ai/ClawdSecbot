@@ -326,6 +326,28 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get riskOpenclawInsecureOrDangerousFlags =>
+      'Dangerous OpenClaw Gateway Flags Enabled';
+
+  @override
+  String riskOpenclawInsecureOrDangerousFlagsDesc(String flags) {
+    return 'OpenClaw gateway flags weaken authentication or origin trust protections: $flags. Disable them unless there is a verified threat-model exception.';
+  }
+
+  @override
+  String get riskOpenclawConfigPatchOutdated =>
+      'OpenClaw Config Security Patches Missing';
+
+  @override
+  String riskOpenclawConfigPatchOutdatedDesc(
+    String currentVersion,
+    String requiredVersion,
+    String advisories,
+  ) {
+    return 'Current OpenClaw version $currentVersion is missing configuration-security fixes. Upgrade to $requiredVersion or later. Advisories: $advisories.';
+  }
+
+  @override
   String get riskOneClickRce =>
       '1-click RCE Remote Code Execution Vulnerability';
 
