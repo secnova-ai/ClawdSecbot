@@ -113,10 +113,14 @@ func TestGetSkillsDirsIncludesExpectedQClawDirs(t *testing.T) {
 
 	content := []byte(`{
   "agents": {
-    "defaults": {}
+    "defaults": {
+      "workspace": "~/workspace"
+    }
   },
   "skills": {
-    "load": {}
+    "load": {
+      "extraDirs": ["~/custom-skills"]
+    }
   }
 }`)
 	if err := os.WriteFile(configPath, content, 0644); err != nil {
@@ -138,6 +142,8 @@ func TestGetSkillsDirsIncludesExpectedQClawDirs(t *testing.T) {
 
 	expected := map[string]bool{
 		strings.ToLower(filepath.Join(dir, "skills")):                                              true,
+		strings.ToLower(filepath.Join(homeDir, "workspace", "skills")):                             true,
+		strings.ToLower(filepath.Join(homeDir, "custom-skills")):                                   true,
 		strings.ToLower(filepath.Clean(`C:\Program Files\QClaw\resources\openclaw\config\skills`)): true,
 	}
 

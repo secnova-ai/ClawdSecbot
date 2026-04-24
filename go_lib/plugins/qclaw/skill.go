@@ -13,13 +13,21 @@ import (
 )
 
 func getSkillsDirs() ([]string, error) {
-	_, _, configPath, err := loadConfig()
+	config, _, configPath, err := loadConfig()
 	if err != nil {
 		return nil, err
 	}
 
 	dirs := []string{
 		filepath.Join(filepath.Dir(configPath), "skills"),
+	}
+	if workspace := strings.TrimSpace(config.Agents.Defaults.Workspace); workspace != "" {
+		dirs = append(dirs, filepath.Join(expandQClawPath(workspace), "skills"))
+	}
+	for _, extraDir := range config.Skills.Load.ExtraDirs {
+		if expanded := strings.TrimSpace(expandQClawPath(extraDir)); expanded != "" {
+			dirs = append(dirs, expanded)
+		}
 	}
 
 	if state, err := loadQClawRuntimeState(); err == nil && state != nil {

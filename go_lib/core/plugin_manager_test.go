@@ -220,6 +220,40 @@ func TestPluginManager_ScanAssets_PrunesStaleInstancesForPlugin(t *testing.T) {
 	}
 }
 
+func TestPluginManager_ScanAssetsByPlugin_PrunesStaleInstancesForPlugin(t *testing.T) {
+	pm := &PluginManager{
+		registeredPlugins: make(map[string]BotPlugin),
+		instances:         make(map[string]*AssetPluginInstance),
+	}
+
+	p := newTestPlugin("Openclaw")
+	p.assets = []Asset{
+		{ID: "openclaw:old001", Name: "Openclaw", SourcePlugin: "Openclaw"},
+	}
+	pm.Register(p)
+
+	if _, err := pm.ScanAssetsByPlugin("openclaw"); err != nil {
+		t.Fatalf("first ScanAssetsByPlugin failed: %v", err)
+	}
+	if got := pm.GetPluginByAssetID("openclaw:old001"); got == nil {
+		t.Fatal("expected old asset instance after first plugin scan")
+	}
+
+	p.assets = []Asset{
+		{ID: "openclaw:new002", Name: "Openclaw", SourcePlugin: "Openclaw"},
+	}
+	if _, err := pm.ScanAssetsByPlugin("OPENCLAW"); err != nil {
+		t.Fatalf("second ScanAssetsByPlugin failed: %v", err)
+	}
+
+	if got := pm.GetPluginByAssetID("openclaw:old001"); got != nil {
+		t.Fatal("expected stale old asset instance to be pruned by plugin scan")
+	}
+	if got := pm.GetPluginByAssetID("openclaw:new002"); got == nil {
+		t.Fatal("expected new asset instance after second plugin scan")
+	}
+}
+
 func TestPluginManager_GetProtectionStatus_ResolvedByAssetID(t *testing.T) {
 	pm := &PluginManager{
 		registeredPlugins: make(map[string]BotPlugin),
@@ -464,5 +498,113 @@ func TestPluginManager_AssessAllRisks_AppendsVersionMatchedVulnerabilities(t *te
 	}
 	if got := risks[0].AssetID; got != "openclaw:abc123" {
 		t.Fatalf("expected vulnerability asset_id openclaw:abc123, got %s", got)
+	}
+}
+
+func TestPluginManager_AssessRisksByPlugin_IncludesAssetNameAndAssetIDInArgs(t *testing.T) {
+	pm := &PluginManager{
+		registeredPlugins: make(map[string]BotPlugin),
+		instances:         make(map[string]*AssetPluginInstance),
+	}
+	p := &riskAssessPlugin{
+		testPlugin: *newTestPlugin("Openclaw"),
+		risks: []Risk{
+			{
+				ID:    "sample_risk",
+				Title: "Sample Risk",
+				Level: RiskLevelMedium,
+			},
+			{
+				ID:    "sample_risk_with_args",
+				Title: "Sample Risk with Args",
+				Level: RiskLevelHigh,
+				Args: map[string]interface{}{
+					"asset_name": "custom_asset",
+					"asset_id":   "custom:id",
+				},
+			},
+		},
+	}
+	p.assets = []Asset{
+		{ID: "openclaw:abc123", Name: "Openclaw", SourcePlugin: "Openclaw"},
+	}
+	pm.Register(p)
+	if _, err := pm.ScanAssetsByPlugin("openclaw"); err != nil {
+		t.Fatalf("ScanAssetsByPlugin failed: %v", err)
+	}
+
+	risks, err := pm.AssessRisksByPlugin("OPENCLAW", nil)
+	if err != nil {
+		t.Fatalf("AssessRisksByPlugin failed: %v", err)
+	}
+	if len(risks) != 2 {
+		t.Fatalf("expected 2 risks, got %d", len(risks))
+	}
+
+	if got := risks[0].SourcePlugin; got != "Openclaw" {
+		t.Fatalf("expected source plugin Openclaw, got %q", got)
+	}
+	if got := risks[0].Args["asset_name"]; got != "Openclaw" {
+		t.Fatalf("expected injected asset_name Openclaw, got %#v", got)
+	}
+	if got := risks[0].AssetID; got != "openclaw:abc123" {
+		t.Fatalf("expected injected asset_id openclaw:abc123, got %#v", got)
+	}
+	if got := risks[0].Args["asset_id"]; got != "openclaw:abc123" {
+		t.Fatalf("expected injected args.asset_id openclaw:abc123, got %#v", got)
+	}
+	if got := risks[1].Args["asset_name"]; got != "custom_asset" {
+		t.Fatalf("expected existing asset_name to be kept, got %#v", got)
+	}
+	if got := risks[1].AssetID; got != "custom:id" {
+		t.Fatalf("expected existing asset_id to be kept, got %#v", got)
+	}
+}
+
+func TestPluginManager_AssessRisksByPlugin_AppendsVersionMatchedVulnerabilities(t *testing.T) {
+	pm := &PluginManager{
+		registeredPlugins: make(map[string]BotPlugin),
+		instances:         make(map[string]*AssetPluginInstance),
+	}
+	p := &vulnAwarePlugin{
+		testPlugin: *newTestPlugin("Openclaw"),
+		vulnInfo: []byte(`[
+			{
+				"risk_id": "openclaw_cve-xxxx-xxxxx",
+				"check_point": {"operation": "<", "version": "2026.3.8"},
+				"mitigation": {
+					"type": "suggestion",
+					"risk": "High",
+					"title": "Upgrade Openclaw",
+					"description": "Known vulnerable build.",
+					"suggestions": "Update Version"
+				}
+			}
+		]`),
+	}
+	p.assets = []Asset{
+		{ID: "openclaw:abc123", Name: "Openclaw", SourcePlugin: "Openclaw", Version: "2026.3.7"},
+	}
+
+	pm.Register(p)
+	if _, err := pm.ScanAssetsByPlugin("openclaw"); err != nil {
+		t.Fatalf("ScanAssetsByPlugin failed: %v", err)
+	}
+
+	risks, err := pm.AssessRisksByPlugin("openclaw", nil)
+	if err != nil {
+		t.Fatalf("AssessRisksByPlugin failed: %v", err)
+	}
+	if len(risks) != 1 {
+		t.Fatalf("expected 1 vulnerability risk, got %d", len(risks))
+	}
+	if got := risks[0].ID; got != "openclaw_cve-xxxx-xxxxx" {
+		t.Fatalf("unexpected risk id: %s", got)
+	}
+	if got := risks[0].AssetID; got != "openclaw:abc123" {
+		t.Fatalf("expected vulnerability asset_id openclaw:abc123, got %s", got)
+	}
+	if got := risks[0].Args["asset_id"]; got != "openclaw:abc123" {
+		t.Fatalf("expected vulnerability args.asset_id openclaw:abc123, got %#v", got)
 	}
 }
