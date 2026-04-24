@@ -60,8 +60,23 @@ func (p *apiTestPlugin) ScanAssets() ([]core.Asset, error) {
 	return p.assets, nil
 }
 
-func (p *apiTestPlugin) AssessRisks(scannedHashes map[string]bool) ([]core.Risk, error) {
+func (p *apiTestPlugin) AssessRisks(scannedHashes map[string]bool, assets []core.Asset) ([]core.Risk, error) {
 	return nil, nil
+}
+
+func (p *apiTestPlugin) GetVulnInfoJSON() []byte {
+	return nil
+}
+
+func (p *apiTestPlugin) CompareVulnerabilityVersion(current, target string) (int, bool) {
+	switch {
+	case current < target:
+		return -1, true
+	case current > target:
+		return 1, true
+	default:
+		return 0, true
+	}
 }
 
 func (p *apiTestPlugin) MitigateRisk(riskInfo string) string {

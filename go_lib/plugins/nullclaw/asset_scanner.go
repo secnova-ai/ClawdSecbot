@@ -78,6 +78,10 @@ func (s *NullclawAssetScanner) enrichAssetWithConfig(asset *core.Asset) {
 		asset.Metadata = make(map[string]string)
 	}
 
+	if version := getNullclawVersion(); version != "" {
+		asset.Version = version
+	}
+
 	// Config file path
 	asset.Metadata["config_path"] = configPath
 

@@ -1,6 +1,7 @@
 package openclaw
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -282,10 +283,11 @@ func checkCredentialsInConfig(configPath string, risks *[]core.Risk) {
 var openClawVersionPattern = regexp.MustCompile(`(?i)\bv?(\d{4})\.(\d{1,2})\.(\d{1,2})(?:-(\d+))?\b`)
 
 type openClawVersion struct {
-	year  int
-	month int
-	day   int
-	build int
+	year     int
+	month    int
+	day      int
+	build    int
+	hasBuild bool
 }
 
 type openClawConfigAdvisory struct {
@@ -461,6 +463,100 @@ func getOpenClawVersion() string {
 	return extractOpenClawVersion(string(output))
 }
 
+func resolveOpenClawVersion(processPaths []string, configPath string) string {
+	if version := getOpenClawVersion(); version != "" {
+		return version
+	}
+
+	candidates := make([]string, 0, len(processPaths)+1)
+	for _, path := range processPaths {
+		if trimmed := strings.TrimSpace(path); trimmed != "" {
+			candidates = append(candidates, trimmed)
+		}
+	}
+	if trimmed := strings.TrimSpace(configPath); trimmed != "" {
+		candidates = append(candidates, trimmed)
+	}
+
+	for _, candidate := range candidates {
+		if version := extractOpenClawVersionFromPath(candidate); version != "" {
+			return version
+		}
+	}
+
+	return ""
+}
+
+func extractOpenClawVersionFromPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+
+	info, err := os.Stat(path)
+	if err == nil && !info.IsDir() {
+		path = filepath.Dir(path)
+	}
+
+	current := path
+	for i := 0; i < 6; i++ {
+		version, ok := extractOpenClawVersionFromPackageJSON(filepath.Join(current, "package.json"))
+		if ok {
+			return version
+		}
+		version, ok = extractOpenClawVersionFromSiblingPackage(current)
+		if ok {
+			return version
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+
+	return ""
+}
+
+func extractOpenClawVersionFromSiblingPackage(dir string) (string, bool) {
+	base := strings.ToLower(strings.TrimSpace(filepath.Base(dir)))
+	switch base {
+	case ".bin", "bin":
+		return extractOpenClawVersionFromPackageJSON(filepath.Join(filepath.Dir(dir), "openclaw", "package.json"))
+	case "node_modules":
+		return extractOpenClawVersionFromPackageJSON(filepath.Join(dir, "openclaw", "package.json"))
+	default:
+		return "", false
+	}
+}
+
+func extractOpenClawVersionFromPackageJSON(path string) (string, bool) {
+	content, err := os.ReadFile(path)
+	if err != nil || len(content) == 0 {
+		return "", false
+	}
+
+	var payload struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(content, &payload); err != nil {
+		return "", false
+	}
+
+	name := strings.ToLower(strings.TrimSpace(payload.Name))
+	if name != "" && name != "openclaw" && name != "@openclaw/openclaw" && !strings.HasSuffix(name, "/openclaw") {
+		return "", false
+	}
+
+	version := extractOpenClawVersion(payload.Version)
+	if version == "" {
+		return "", false
+	}
+	return version, true
+}
+
 func extractOpenClawVersion(raw string) string {
 	match := openClawVersionPattern.FindStringSubmatch(strings.TrimSpace(raw))
 	if len(match) < 4 {
@@ -490,10 +586,12 @@ func parseOpenClawVersion(value string) (openClawVersion, bool) {
 		return openClawVersion{}, false
 	}
 	parsed.build = 0
+	parsed.hasBuild = false
 	if len(match) >= 5 && match[4] != "" {
 		if _, err := fmt.Sscanf(match[4], "%d", &parsed.build); err != nil {
 			return openClawVersion{}, false
 		}
+		parsed.hasBuild = true
 	}
 	return parsed, true
 }
@@ -518,6 +616,11 @@ func compareOpenClawVersion(left, right string) (int, bool) {
 		return 1, true
 	case lv.day != rv.day:
 		if lv.day < rv.day {
+			return -1, true
+		}
+		return 1, true
+	case lv.hasBuild != rv.hasBuild:
+		if !lv.hasBuild && rv.hasBuild {
 			return -1, true
 		}
 		return 1, true

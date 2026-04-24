@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'asset_model.dart';
 
-// 风险等级
 enum RiskLevel { low, medium, high, critical }
 
-// 风险信息
 class RiskInfo {
-  final String id; // 用于国际化的 Key
-  final Map<String, Object>? args; // 动态参数
+  final String id;
+  final Map<String, Object>? args;
   final String? assetID;
-  final String title; // 默认/日志标题
-  final String description; // 默认/日志描述
+  final String title;
+  final String? titleEn;
+  final String description;
+  final String? descriptionEn;
   final RiskLevel level;
   final IconData icon;
   final Mitigation? mitigation;
@@ -21,7 +21,9 @@ class RiskInfo {
     this.args,
     this.assetID,
     required this.title,
+    this.titleEn,
     required this.description,
+    this.descriptionEn,
     required this.level,
     required this.icon,
     this.mitigation,
@@ -47,8 +49,10 @@ class RiskInfo {
       'args': args,
       'asset_id': assetID,
       'title': title,
+      'title_en': titleEn,
       'description': description,
-      'level': level.name, // 使用字符串名称与Go端兼容
+      'description_en': descriptionEn,
+      'level': level.name,
       'icon_code_point': icon.codePoint,
       'icon_font_family': icon.fontFamily,
       'icon_font_package': icon.fontPackage,
@@ -84,8 +88,10 @@ class RiskInfo {
         json['asset_id'],
         (json['args'] as Map?)?.cast<String, Object>(),
       ),
-      title: json['title'],
-      description: json['description'],
+      title: json['title'] ?? '',
+      titleEn: json['title_en'],
+      description: json['description'] ?? '',
+      descriptionEn: json['description_en'],
       level: parseLevel(json['level']),
       icon: IconData(
         json['icon_code_point'] as int? ?? Icons.warning.codePoint,
@@ -110,21 +116,40 @@ class RiskInfo {
     }
     return fromArgs;
   }
+
+  String displayTitle(String localeName) {
+    final isEnglish = localeName.toLowerCase().startsWith('en');
+    if (isEnglish && (titleEn?.trim().isNotEmpty ?? false)) {
+      return titleEn!.trim();
+    }
+    return title;
+  }
+
+  String displayDescription(String localeName) {
+    final isEnglish = localeName.toLowerCase().startsWith('en');
+    if (isEnglish && (descriptionEn?.trim().isNotEmpty ?? false)) {
+      return descriptionEn!.trim();
+    }
+    return description;
+  }
 }
 
 class Mitigation {
   final String type;
   final List<FormItem> formSchema;
-  // For suggestion type
   final String? title;
+  final String? titleEn;
   final String? description;
+  final String? descriptionEn;
   final List<SuggestionGroup>? suggestions;
 
   Mitigation({
     required this.type,
     required this.formSchema,
     this.title,
+    this.titleEn,
     this.description,
+    this.descriptionEn,
     this.suggestions,
   });
 
@@ -137,7 +162,9 @@ class Mitigation {
               .toList() ??
           [],
       title: json['title'],
+      titleEn: json['title_en'],
       description: json['description'],
+      descriptionEn: json['description_en'],
       suggestions: (json['suggestions'] as List?)
           ?.map((e) => SuggestionGroup.fromJson(e))
           .toList(),
@@ -149,10 +176,28 @@ class Mitigation {
       'type': type,
       'form_schema': formSchema.map((e) => e.toJson()).toList(),
       if (title != null) 'title': title,
+      if (titleEn != null) 'title_en': titleEn,
       if (description != null) 'description': description,
+      if (descriptionEn != null) 'description_en': descriptionEn,
       if (suggestions != null)
         'suggestions': suggestions!.map((e) => e.toJson()).toList(),
     };
+  }
+
+  String? displayTitle(String localeName) {
+    final isEnglish = localeName.toLowerCase().startsWith('en');
+    if (isEnglish && (titleEn?.trim().isNotEmpty ?? false)) {
+      return titleEn!.trim();
+    }
+    return title;
+  }
+
+  String? displayDescription(String localeName) {
+    final isEnglish = localeName.toLowerCase().startsWith('en');
+    if (isEnglish && (descriptionEn?.trim().isNotEmpty ?? false)) {
+      return descriptionEn!.trim();
+    }
+    return description;
   }
 }
 
@@ -188,15 +233,25 @@ class SuggestionGroup {
 
 class SuggestionItem {
   final String action;
+  final String? actionEn;
   final String detail;
+  final String? detailEn;
   final String? command;
 
-  SuggestionItem({required this.action, required this.detail, this.command});
+  SuggestionItem({
+    required this.action,
+    this.actionEn,
+    required this.detail,
+    this.detailEn,
+    this.command,
+  });
 
   factory SuggestionItem.fromJson(Map<String, dynamic> json) {
     return SuggestionItem(
       action: json['action'],
+      actionEn: json['action_en'],
       detail: json['detail'],
+      detailEn: json['detail_en'],
       command: json['command'],
     );
   }
@@ -204,9 +259,27 @@ class SuggestionItem {
   Map<String, dynamic> toJson() {
     return {
       'action': action,
+      if (actionEn != null) 'action_en': actionEn,
       'detail': detail,
+      if (detailEn != null) 'detail_en': detailEn,
       if (command != null) 'command': command,
     };
+  }
+
+  String displayAction(String localeName) {
+    final isEnglish = localeName.toLowerCase().startsWith('en');
+    if (isEnglish && (actionEn?.trim().isNotEmpty ?? false)) {
+      return actionEn!.trim();
+    }
+    return action;
+  }
+
+  String displayDetail(String localeName) {
+    final isEnglish = localeName.toLowerCase().startsWith('en');
+    if (isEnglish && (detailEn?.trim().isNotEmpty ?? false)) {
+      return detailEn!.trim();
+    }
+    return detail;
   }
 }
 
@@ -216,7 +289,6 @@ class FormItem {
   final String type;
   final dynamic defaultValue;
   final List<String>? options;
-  // Validation
   final bool required;
   final int minLength;
   final String? regex;
@@ -263,7 +335,6 @@ class FormItem {
   }
 }
 
-// 扫描结果
 class ScanResult {
   final Map<String, dynamic>? config;
   final List<RiskInfo> riskInfo;
@@ -327,5 +398,4 @@ class ScanResult {
   }
 }
 
-// 扫描状态
 enum ScanState { idle, scanning, completed }

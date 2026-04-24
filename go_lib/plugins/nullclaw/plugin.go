@@ -111,8 +111,9 @@ func (p *NullclawPlugin) ScanAssets() ([]core.Asset, error) {
 }
 
 // AssessRisks 对已发现的资产进行风险评估
-func (p *NullclawPlugin) AssessRisks(scannedHashes map[string]bool) ([]core.Risk, error) {
+func (p *NullclawPlugin) AssessRisks(scannedHashes map[string]bool, assets []core.Asset) ([]core.Risk, error) {
 	logging.Info("NullclawPlugin: Assessing risks")
+	_ = assets
 
 	risks := []core.Risk{}
 
@@ -154,6 +155,14 @@ func (p *NullclawPlugin) AssessRisks(scannedHashes map[string]bool) ([]core.Risk
 // MitigateRisk handles risk mitigation requests for Nullclaw-specific risks.
 func (p *NullclawPlugin) MitigateRisk(riskInfo string) string {
 	return MitigateRiskDispatch(riskInfo)
+}
+
+func (p *NullclawPlugin) GetVulnInfoJSON() []byte {
+	return GetVulInfoJSON()
+}
+
+func (p *NullclawPlugin) CompareVulnerabilityVersion(current, target string) (int, bool) {
+	return compareNullclawVersion(current, target)
 }
 
 // StartProtection 启动指定资产实例的防护

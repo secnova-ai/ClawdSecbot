@@ -103,8 +103,9 @@ func (p *DintalclawPlugin) ScanAssets() ([]core.Asset, error) {
 }
 
 // AssessRisks 对已发现的资产进行风险评估
-func (p *DintalclawPlugin) AssessRisks(scannedHashes map[string]bool) ([]core.Risk, error) {
+func (p *DintalclawPlugin) AssessRisks(scannedHashes map[string]bool, assets []core.Asset) ([]core.Risk, error) {
 	logging.Info("DintalclawPlugin: Assessing risks")
+	_ = assets
 
 	risks := []core.Risk{}
 
@@ -134,6 +135,14 @@ func (p *DintalclawPlugin) AssessRisks(scannedHashes map[string]bool) ([]core.Ri
 // MitigateRisk 处理风险缓解请求
 func (p *DintalclawPlugin) MitigateRisk(riskInfo string) string {
 	return MitigateRiskDispatch(riskInfo)
+}
+
+func (p *DintalclawPlugin) GetVulnInfoJSON() []byte {
+	return GetVulInfoJSON()
+}
+
+func (p *DintalclawPlugin) CompareVulnerabilityVersion(current, target string) (int, bool) {
+	return compareDintalclawVersion(current, target)
 }
 
 // StartProtection 启动指定资产实例的防护

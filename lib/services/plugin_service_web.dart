@@ -227,7 +227,9 @@ class PluginService {
     return RiskInfo(
       id: json['id'] ?? 'unknown',
       title: json['title'] ?? 'Unknown Risk',
+      titleEn: json['title_en'] as String?,
       description: json['description'] ?? '',
+      descriptionEn: json['description_en'] as String?,
       level: _parseRiskLevel(json['level']),
       icon: _getIconForRisk(json['level']),
       args: args,

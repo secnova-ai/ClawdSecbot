@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"go_lib/core"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -201,6 +202,55 @@ func TestExtractOpenClawVersion(t *testing.T) {
 	}
 }
 
+func TestExtractOpenClawVersionFromPath_FallsBackToPackageJSON(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "openclaw-version-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	installDir := filepath.Join(tmpDir, "node_modules", "openclaw")
+	binDir := filepath.Join(tmpDir, "node_modules", ".bin")
+	if err := os.MkdirAll(installDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	packageJSON := `{"name":"openclaw","version":"2026.2.17"}`
+	if err := os.WriteFile(filepath.Join(installDir, "package.json"), []byte(packageJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	processPath := filepath.Join(binDir, "openclaw")
+	if err := os.WriteFile(processPath, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := extractOpenClawVersionFromPath(processPath); got != "2026.2.17" {
+		t.Fatalf("extractOpenClawVersionFromPath()=%q, want %q", got, "2026.2.17")
+	}
+}
+
+func TestExtractOpenClawVersionFromPackageJSON_IgnoresOtherPackages(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "openclaw-other-package-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	packagePath := filepath.Join(tmpDir, "package.json")
+	packageJSON := `{"name":"not-openclaw","version":"2026.2.17"}`
+	if err := os.WriteFile(packagePath, []byte(packageJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, ok := extractOpenClawVersionFromPackageJSON(packagePath); ok || got != "" {
+		t.Fatalf("expected unrelated package to be ignored, got version=%q ok=%v", got, ok)
+	}
+}
+
 func TestIsVersionLowerThan(t *testing.T) {
 	tests := []struct {
 		current string
@@ -210,6 +260,8 @@ func TestIsVersionLowerThan(t *testing.T) {
 		{current: "2026.1.28", fixed: "2026.1.29", want: true},
 		{current: "2026.1.29", fixed: "2026.1.29", want: false},
 		{current: "2026.1.29-1", fixed: "2026.1.29", want: false},
+		{current: "2026.2.9-0", fixed: "2026.2.9", want: false},
+		{current: "2026.2.9", fixed: "2026.2.9-0", want: true},
 		{current: "2026.4.10", fixed: "2026.4.20", want: true},
 		{current: "2026.4.20", fixed: "2026.4.20", want: false},
 		{current: "bad-version", fixed: "2026.4.20", want: true},

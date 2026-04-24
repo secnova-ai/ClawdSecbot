@@ -258,6 +258,7 @@ func (s *DintalclawAssetScanner) enrichAsset(asset *core.Asset) {
 
 	version := extractVersionFromInstallRoot(root)
 	if version != "" {
+		asset.Version = version
 		asset.Metadata["asset_version"] = version
 	}
 

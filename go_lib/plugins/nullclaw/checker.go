@@ -272,26 +272,8 @@ func checkCredentialsInConfig(configPath string, risks *[]core.Risk) {
 	}
 }
 
-// checkOneClickRCEVulnerability detects known RCE chain in old nullclaw builds.
-// Vulnerability affects versions before 2026.1.24-1.
-func checkOneClickRCEVulnerability(risks *[]core.Risk) {
-	version := getOpenClawVersion()
-	if version == "" || isVulnerableVersion(version) {
-		*risks = append(*risks, core.Risk{
-			ID:          "nullclaw_1click_rce_vulnerability",
-			Title:       "1-click RCE Vulnerability (Historical)",
-			Description: "Detected nullclaw version may be affected by historical 1-click RCE chain. Upgrade to >= 2026.1.24-1.",
-			Level:       core.RiskLevelCritical,
-			Args: map[string]interface{}{
-				"vulnerable_below": "2026.1.24-1",
-				"current_version":  version,
-			},
-		})
-	}
-}
-
-// getOpenClawVersion tries to get nullclaw version.
-func getOpenClawVersion() string {
+// getNullclawVersion tries to get nullclaw version.
+func getNullclawVersion() string {
 	cmd := cmdutil.Command("nullclaw", "--version")
 	output, err := cmd.Output()
 	if err != nil {
@@ -300,25 +282,54 @@ func getOpenClawVersion() string {
 	return strings.TrimSpace(string(output))
 }
 
-// isVulnerableVersion checks if version is vulnerable (< 2026.1.24-1).
-func isVulnerableVersion(version string) bool {
-	if version == "" {
-		return true
-	}
-	parts := strings.Split(version, "-")
-	if len(parts) < 2 {
-		return true
-	}
-	datePart := parts[0]
-	buildPart := parts[1]
-	if datePart < "2026.1.24" {
-		return true
-	}
-	if datePart == "2026.1.24" {
-		buildNum, err := strconv.Atoi(buildPart)
-		if err != nil || buildNum < 1 {
-			return true
+func compareNullclawVersion(current, target string) (int, bool) {
+	parse := func(version string) (string, int, bool, bool) {
+		version = strings.TrimSpace(version)
+		if version == "" {
+			return "", 0, false, false
 		}
+		parts := strings.SplitN(version, "-", 2)
+		datePart := parts[0]
+		build := 0
+		hasBuild := false
+		if len(parts) == 2 {
+			value, err := strconv.Atoi(parts[1])
+			if err != nil {
+				return "", 0, false, false
+			}
+			build = value
+			hasBuild = true
+		}
+		dateSegs := strings.Split(datePart, ".")
+		if len(dateSegs) != 3 {
+			return "", 0, false, false
+		}
+		return datePart, build, hasBuild, true
 	}
-	return false
+
+	currentDate, currentBuild, currentHasBuild, ok := parse(current)
+	if !ok {
+		return 0, false
+	}
+	targetDate, targetBuild, targetHasBuild, ok := parse(target)
+	if !ok {
+		return 0, false
+	}
+	switch {
+	case currentDate < targetDate:
+		return -1, true
+	case currentDate > targetDate:
+		return 1, true
+	case currentHasBuild != targetHasBuild:
+		if !currentHasBuild && targetHasBuild {
+			return -1, true
+		}
+		return 1, true
+	case currentBuild < targetBuild:
+		return -1, true
+	case currentBuild > targetBuild:
+		return 1, true
+	default:
+		return 0, true
+	}
 }
