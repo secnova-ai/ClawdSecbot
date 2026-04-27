@@ -107,6 +107,12 @@ func (s *assetScanner) enrichAsset(asset *core.Asset) {
 	if strings.TrimSpace(asset.Metadata["node_binary"]) == "" {
 		asset.Metadata["node_binary"] = qclawDefaultNodeBinaryPath()
 	}
+	// Windows can read PE FileVersion; other platforms return an empty version.
+	if exe := strings.TrimSpace(asset.Metadata["node_binary"]); exe != "" {
+		if v := strings.TrimSpace(readQClawExecutableVersion(exe)); v != "" {
+			asset.Version = v
+		}
+	}
 	if strings.TrimSpace(asset.Metadata["openclaw_mjs"]) == "" {
 		asset.Metadata["openclaw_mjs"] = qclawDefaultOpenclawMjsPath()
 	}

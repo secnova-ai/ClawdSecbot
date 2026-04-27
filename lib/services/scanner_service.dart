@@ -419,4 +419,3 @@ class BotScanner {
     _logController.close();
   }
 }
-

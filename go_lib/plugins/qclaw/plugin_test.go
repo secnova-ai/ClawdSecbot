@@ -126,11 +126,16 @@ func TestGetSkillsDirsIncludesExpectedQClawDirs(t *testing.T) {
 	if err := os.WriteFile(configPath, content, 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	stateContent := []byte(`{
-  "cli": {
-    "openclawMjs": "C:\\Program Files\\QClaw\\resources\\openclaw\\node_modules\\openclaw\\openclaw.mjs"
-  }
-}`)
+	openclawMjs := filepath.Join(dir, "runtime", "openclaw", "node_modules", "openclaw", "openclaw.mjs")
+	statePayload := map[string]interface{}{
+		"cli": map[string]interface{}{
+			"openclawMjs": openclawMjs,
+		},
+	}
+	stateContent, err := json.Marshal(statePayload)
+	if err != nil {
+		t.Fatalf("marshal state: %v", err)
+	}
 	if err := os.WriteFile(statePath, stateContent, 0644); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
@@ -141,10 +146,10 @@ func TestGetSkillsDirsIncludesExpectedQClawDirs(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		strings.ToLower(filepath.Join(dir, "skills")):                                              true,
-		strings.ToLower(filepath.Join(homeDir, "workspace", "skills")):                             true,
-		strings.ToLower(filepath.Join(homeDir, "custom-skills")):                                   true,
-		strings.ToLower(filepath.Clean(`C:\Program Files\QClaw\resources\openclaw\config\skills`)): true,
+		strings.ToLower(filepath.Join(dir, "skills")):                                  true,
+		strings.ToLower(filepath.Join(homeDir, "workspace", "skills")):                 true,
+		strings.ToLower(filepath.Join(homeDir, "custom-skills")):                       true,
+		strings.ToLower(filepath.Join(dir, "runtime", "openclaw", "config", "skills")): true,
 	}
 
 	for _, skillDir := range dirs {
