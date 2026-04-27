@@ -307,6 +307,7 @@
     }
   },
   "modelConfigUseRecommendedModels": "Use a recommended model from the list or type manually.",
+  "modelConfigRefreshModelListRequirement": "Fill in the Base URL and API key before refreshing the model list.",
   "modelConfigGroupRecommended": "Recommended",
   "modelConfigGroupCompatible": "Compatible",
   "modelConfigGroupChina": "China",

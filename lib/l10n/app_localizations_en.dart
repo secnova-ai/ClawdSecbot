@@ -665,6 +665,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Use a recommended model from the list or type manually.';
 
   @override
+  String get modelConfigRefreshModelListRequirement =>
+      'Fill in the Base URL and API key before refreshing the model list.';
+
+  @override
   String get modelConfigGroupRecommended => 'Recommended';
 
   @override

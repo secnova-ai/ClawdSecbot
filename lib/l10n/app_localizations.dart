@@ -1248,6 +1248,12 @@ abstract class AppLocalizations {
   /// **'可从列表选择推荐模型，或直接手动输入。'**
   String get modelConfigUseRecommendedModels;
 
+  /// No description provided for @modelConfigRefreshModelListRequirement.
+  ///
+  /// In zh, this message translates to:
+  /// **'刷新模型列表前，请先填写 Base URL 和 API 密钥。'**
+  String get modelConfigRefreshModelListRequirement;
+
   /// No description provided for @modelConfigGroupRecommended.
   ///
   /// In zh, this message translates to:

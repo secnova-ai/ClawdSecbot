@@ -646,6 +646,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get modelConfigUseRecommendedModels => '可从列表选择推荐模型，或直接手动输入。';
 
   @override
+  String get modelConfigRefreshModelListRequirement =>
+      '刷新模型列表前，请先填写 Base URL 和 API 密钥。';
+
+  @override
   String get modelConfigGroupRecommended => '推荐';
 
   @override
