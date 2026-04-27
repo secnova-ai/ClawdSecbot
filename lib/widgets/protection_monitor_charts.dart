@@ -92,6 +92,7 @@ class ProtectionMonitorCharts {
             _formatNumber(calculatedTotalTokens),
             LucideIcons.coins,
             const Color(0xFF10B981),
+            tooltip: l10n.totalTokenTooltip,
           ),
         ),
         const SizedBox(width: 12),

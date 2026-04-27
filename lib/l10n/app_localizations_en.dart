@@ -1210,6 +1210,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get totalTokens => 'Total Tokens';
 
   @override
+  String get totalTokenTooltip =>
+      'Token consumption from the AI Bot itself (excludes security protection analysis)';
+
+  @override
   String get promptTokens => 'Prompt Tokens';
 
   @override

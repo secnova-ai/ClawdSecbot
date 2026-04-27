@@ -1178,6 +1178,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get totalTokens => 'Token总量';
 
   @override
+  String get totalTokenTooltip => '此部分为AI Bot自身产生的Token消耗，不包含安全防护分析部分';
+
+  @override
   String get promptTokens => '输入Token';
 
   @override

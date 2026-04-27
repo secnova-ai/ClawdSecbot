@@ -759,6 +759,7 @@
   },
 
   "totalTokens": "Total Tokens",
+  "totalTokenTooltip": "Token consumption from the AI Bot itself (excludes security protection analysis)",
   "promptTokens": "Prompt Tokens",
   "completionTokens": "Completion Tokens",
   "toolCallCount": "Tool Calls",

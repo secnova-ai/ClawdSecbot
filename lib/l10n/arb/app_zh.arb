@@ -806,6 +806,7 @@
   },
 
   "totalTokens": "Token总量",
+  "totalTokenTooltip": "此部分为AI Bot自身产生的Token消耗，不包含安全防护分析部分",
   "promptTokens": "输入Token",
   "completionTokens": "输出Token",
   "toolCallCount": "工具调用",

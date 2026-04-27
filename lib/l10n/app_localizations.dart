@@ -2062,6 +2062,12 @@ abstract class AppLocalizations {
   /// **'Token总量'**
   String get totalTokens;
 
+  /// No description provided for @totalTokenTooltip.
+  ///
+  /// In zh, this message translates to:
+  /// **'此部分为AI Bot自身产生的Token消耗，不包含安全防护分析部分'**
+  String get totalTokenTooltip;
+
   /// No description provided for @promptTokens.
   ///
   /// In zh, this message translates to:
