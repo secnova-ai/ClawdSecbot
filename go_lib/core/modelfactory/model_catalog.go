@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +18,11 @@ import (
 	"go_lib/core/logging"
 )
 
-const modelCatalogCacheTTL = 5 * time.Minute
+const (
+	modelCatalogCacheTTL        = 5 * time.Minute
+	modelCatalogCacheMaxEntries = 256
+	modelCatalogResolveTimeout  = 2 * time.Second
+)
 
 // catalogRequest 为 GetProviderModelsJSON 的入参（JSON），不包含明文缓存 key。
 type catalogRequest struct {
@@ -62,6 +68,12 @@ func GetProviderModelsJSON(requestJSON string) string {
 		return mustJSON(catalogResponse{Success: false, Error: "provider is required"})
 	}
 	base := strings.TrimSpace(req.BaseURL)
+	validateCtx, validateCancel := context.WithTimeout(context.Background(), modelCatalogResolveTimeout)
+	defer validateCancel()
+	if err := validateModelCatalogBaseURL(validateCtx, p, base); err != nil {
+		return mustJSON(catalogResponse{Success: false, Error: err.Error()})
+	}
+
 	key := catalogCacheKey(string(p), base, req.APIKey)
 	if hit, ok := getCatalogCache(key); ok {
 		return mustJSON(catalogResponse{
@@ -125,12 +137,135 @@ func getCatalogCache(key string) (catalogCacheEntry, bool) {
 func setCatalogCache(key string, models []string, source, message string) {
 	modelCatalogMu.Lock()
 	defer modelCatalogMu.Unlock()
+	now := time.Now()
+	pruneExpiredCatalogCacheLocked(now)
+	if _, exists := modelCatalogByKey[key]; !exists && len(modelCatalogByKey) >= modelCatalogCacheMaxEntries {
+		evictOldestCatalogCacheLocked()
+	}
 	modelCatalogByKey[key] = catalogCacheEntry{
 		models:  models,
 		source:  source,
 		message: message,
-		expires: time.Now().Add(modelCatalogCacheTTL),
+		expires: now.Add(modelCatalogCacheTTL),
 	}
+}
+
+func pruneExpiredCatalogCacheLocked(now time.Time) {
+	for k, e := range modelCatalogByKey {
+		if now.After(e.expires) {
+			delete(modelCatalogByKey, k)
+		}
+	}
+}
+
+func evictOldestCatalogCacheLocked() {
+	var oldestKey string
+	var oldestExpires time.Time
+	for k, e := range modelCatalogByKey {
+		if oldestKey == "" || e.expires.Before(oldestExpires) {
+			oldestKey = k
+			oldestExpires = e.expires
+		}
+	}
+	if oldestKey != "" {
+		delete(modelCatalogByKey, oldestKey)
+	}
+}
+
+func validateModelCatalogBaseURL(ctx context.Context, provider adapter.ProviderName, baseURL string) error {
+	trimmed := strings.TrimSpace(baseURL)
+	if trimmed == "" {
+		return nil
+	}
+	allowPrivateHost := provider == adapter.ProviderOpenAICompatible || provider == adapter.ProviderAnthropicCompatible
+
+	u, err := url.Parse(trimmed)
+	if err != nil || u == nil {
+		return fmt.Errorf("invalid base_url")
+	}
+	scheme := strings.ToLower(strings.TrimSpace(u.Scheme))
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("base_url must use http or https")
+	}
+	if u.User != nil {
+		return fmt.Errorf("base_url must not include userinfo")
+	}
+
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host == "" {
+		return fmt.Errorf("base_url host is required")
+	}
+	routed := adapter.EffectiveRoutingProvider(provider)
+
+	if ip := net.ParseIP(host); ip != nil {
+		if allowPrivateHost {
+			if isInvalidTargetIP(ip) {
+				return fmt.Errorf("base_url host is invalid")
+			}
+			return nil
+		}
+		if routed == adapter.ProviderOllama && ip.IsLoopback() {
+			return nil
+		}
+		if isPrivateOrLocalIP(ip) {
+			return fmt.Errorf("base_url host must not point to private or local network")
+		}
+		return nil
+	}
+
+	if host == "localhost" {
+		if allowPrivateHost {
+			return nil
+		}
+		if routed == adapter.ProviderOllama {
+			return nil
+		}
+		return fmt.Errorf("base_url host must not use localhost for this provider")
+	}
+
+	// Reject obvious internal hostnames for non-compatible providers.
+	if !allowPrivateHost && (!strings.Contains(host, ".") || strings.HasSuffix(host, ".local")) {
+		return fmt.Errorf("base_url host must be a public DNS name")
+	}
+
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve base_url host")
+	}
+	if len(addrs) == 0 {
+		return fmt.Errorf("base_url host resolves to empty address set")
+	}
+	for _, addr := range addrs {
+		if allowPrivateHost {
+			if isInvalidTargetIP(addr.IP) {
+				return fmt.Errorf("base_url host resolves to invalid address")
+			}
+			continue
+		}
+		if isPrivateOrLocalIP(addr.IP) {
+			return fmt.Errorf("base_url host resolves to private or local network")
+		}
+	}
+	return nil
+}
+
+func isPrivateOrLocalIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		isInvalidTargetIP(ip)
+}
+
+func isInvalidTargetIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	return ip.IsMulticast() ||
+		ip.IsUnspecified()
 }
 
 func resolveProviderModels(ctx context.Context, p adapter.ProviderName, baseURL, apiKey string) (models []string, source string, message string) {

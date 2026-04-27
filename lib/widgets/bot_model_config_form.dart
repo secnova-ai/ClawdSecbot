@@ -493,9 +493,8 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
       return false;
     }
     final info = _getSelectedProviderInfo();
-    final endpointOk =
-        !(info?.needsEndpoint ?? true) ||
-        _endpointController.text.trim().isNotEmpty;
+    // Proxy forwarding always requires a base URL.
+    final endpointOk = _endpointController.text.trim().isNotEmpty;
     final apiKeyOk =
         !(info?.needsAPIKey ?? true) ||
         _apiKeyController.text.trim().isNotEmpty;
@@ -560,20 +559,18 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
   Widget _buildFormFields() {
     final l10n = AppLocalizations.of(context)!;
     final providerInfo = _getSelectedProviderInfo();
-    final needsEndpoint = providerInfo?.needsEndpoint ?? true;
     final needsApiKey = providerInfo?.needsAPIKey ?? true;
     final needsSecretKey = providerInfo?.needsSecretKey ?? false;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (needsEndpoint)
-          _buildTextField(
-            controller: _endpointController,
-            label: l10n.modelConfigBaseUrl,
-            hint: providerInfo?.defaultBaseURL ?? '',
-            icon: LucideIcons.link,
-          ),
+        _buildTextField(
+          controller: _endpointController,
+          label: l10n.modelConfigBaseUrl,
+          hint: providerInfo?.defaultBaseURL ?? '',
+          icon: LucideIcons.link,
+        ),
         if (needsApiKey) ...[
           const SizedBox(height: 12),
           _buildTextField(

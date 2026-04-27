@@ -191,9 +191,9 @@ var supportedProviders = []ProviderInfo{
 	},
 	{
 		Name: ProviderARK, DisplayName: "ARK", Icon: "flame", Scope: ScopeSecurity,
-		NeedsEndpoint: true, NeedsAPIKey: true, AutoV1Suffix: false,
+		NeedsEndpoint: false, NeedsAPIKey: true, AutoV1Suffix: false,
 		DefaultBaseURL: "https://ark.cn-beijing.volces.com/api/v3", DefaultModel: "ep-xxxxx-xxxxx",
-		APIKeyHint: "Your ARK API key", ModelHint: "Model name",
+		APIKeyHint: "Your ARK API key", ModelHint: "Endpoint ID (ep-xxxxxx)",
 		Group: "china",
 	},
 	{

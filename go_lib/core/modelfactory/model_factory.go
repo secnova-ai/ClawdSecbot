@@ -27,8 +27,8 @@ func ValidateSecurityModelConfig(config *repository.SecurityModelConfig) error {
 		if config.APIKey == "" {
 			return fmt.Errorf("ARK API key is required")
 		}
-		if config.Endpoint == "" {
-			return fmt.Errorf("ARK endpoint ID is required")
+		if config.Model == "" {
+			return fmt.Errorf("ARK model name is required")
 		}
 	case "openai":
 		if config.APIKey == "" {
@@ -166,13 +166,13 @@ func createARKModel(ctx context.Context, config *repository.SecurityModelConfig)
 	if config.APIKey == "" {
 		return nil, fmt.Errorf("ARK API key is required")
 	}
-	if config.Endpoint == "" {
-		return nil, fmt.Errorf("ARK endpoint ID is required")
+	if config.Model == "" {
+		return nil, fmt.Errorf("ARK model name is required")
 	}
 	timeout := 120 * time.Second
 	return ark.NewChatModel(ctx, &ark.ChatModelConfig{
 		APIKey:  config.APIKey,
-		Model:   config.Endpoint,
+		Model:   config.Model,
 		Timeout: &timeout,
 	})
 }

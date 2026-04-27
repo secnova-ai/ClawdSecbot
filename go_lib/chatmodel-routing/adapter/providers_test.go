@@ -121,3 +121,16 @@ func TestBuildEndpointURL(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderARKMetadata(t *testing.T) {
+	info := GetProviderInfo(ProviderARK)
+	if info == nil {
+		t.Fatal("ProviderARK metadata not found")
+	}
+	if info.NeedsEndpoint {
+		t.Fatal("ProviderARK should not require endpoint field")
+	}
+	if info.DefaultModel == "" {
+		t.Fatal("ProviderARK should provide default model hint value")
+	}
+}
