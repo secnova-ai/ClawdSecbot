@@ -24,6 +24,10 @@ class ProviderInfo {
   final String defaultModel;
   final String apiKeyHint;
   final String modelHint;
+  final String routingCanonical;
+  final String group;
+  final bool supportsModelList;
+  final bool autoV1Suffix;
 
   const ProviderInfo({
     required this.name,
@@ -37,6 +41,10 @@ class ProviderInfo {
     required this.defaultModel,
     required this.apiKeyHint,
     required this.modelHint,
+    this.routingCanonical = '',
+    this.group = '',
+    this.supportsModelList = false,
+    this.autoV1Suffix = true,
   });
 
   factory ProviderInfo.fromJson(Map<String, dynamic> json) {
@@ -52,6 +60,10 @@ class ProviderInfo {
       defaultModel: json['default_model'] ?? '',
       apiKeyHint: json['api_key_hint'] ?? '',
       modelHint: json['model_hint'] ?? '',
+      routingCanonical: json['routing_canonical'] ?? '',
+      group: json['group'] ?? '',
+      supportsModelList: json['supports_model_list'] == true,
+      autoV1Suffix: json['auto_v1_suffix'] != false,
     );
   }
 }

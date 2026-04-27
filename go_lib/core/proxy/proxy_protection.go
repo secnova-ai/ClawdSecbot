@@ -186,10 +186,11 @@ func findAvailablePort(startPort int) (int, error) {
 // adapter.BuildEndpointURL is called to construct the full API endpoint URL based on
 // the provider type (e.g., appending "/chat/completions" for OpenAI-compatible providers).
 func createForwardingProvider(providerName adapter.ProviderName, baseURL string, apiKey string) adapter.Provider {
+	routed := adapter.EffectiveRoutingProvider(providerName)
 	endpointURL := adapter.BuildEndpointURL(providerName, baseURL)
-	logging.Info("[createForwardingProvider] provider=%s, baseURL=%s → endpointURL=%s", providerName, baseURL, endpointURL)
+	logging.Info("[createForwardingProvider] provider=%s routed=%s baseURL=%s endpointURL=%s", providerName, routed, baseURL, endpointURL)
 
-	switch providerName {
+	switch routed {
 	case adapter.ProviderAnthropic, adapter.ProviderMiniMax:
 		// MiniMax 使用 Anthropic 兼容协议
 		p := anthropic.New(apiKey)
@@ -711,7 +712,7 @@ func (pp *ProxyProtection) sendLogForRequest(requestID, key string, params map[s
 }
 
 func (pp *ProxyProtection) providerProtocol() string {
-	switch adapter.NormalizeProviderName(pp.providerName) {
+	switch adapter.EffectiveRoutingProvider(adapter.NormalizeProviderName(pp.providerName)) {
 	case adapter.ProviderAnthropic, adapter.ProviderMiniMax:
 		return "anthropic_native"
 	case adapter.ProviderGoogle:

@@ -10,7 +10,8 @@ import '../services/model_config_service.dart';
 import '../services/protection_service.dart';
 import '../services/provider_service.dart';
 import '../utils/app_logger.dart';
-import '../utils/locale_utils.dart';
+import 'model_id_picker.dart';
+import 'model_provider_selector.dart';
 
 /// 安全模型配置表单（纯表单组件）
 /// 用于 ShepherdGate 风险检测的 LLM 配置
@@ -80,6 +81,7 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
     'flame': LucideIcons.flame,
     'cloud': LucideIcons.cloud,
     'bot': LucideIcons.bot,
+    'plug': LucideIcons.workflow,
   };
 
   @override
@@ -124,16 +126,6 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
     } catch (_) {
       return null;
     }
-  }
-
-  /// 根据当前语言解析 provider 的默认 baseURL。
-  /// Moonshot AI 中文环境使用 .cn 域名，其它语言使用默认 .ai 域名。
-  String _resolveBaseURL(ProviderInfo provider) {
-    if (provider.name == 'moonshot' &&
-        LocaleUtils.resolveLanguageCode() == 'zh') {
-      return 'https://api.moonshot.cn/v1';
-    }
-    return provider.defaultBaseURL;
   }
 
   /// Loads current configuration into the form.
@@ -300,7 +292,9 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
     }
 
     setState(() {
-      _error = l10n.modelConfigTestFailed(result['error'] ?? 'Unknown error');
+      _error = l10n.modelConfigTestFailed(
+        result['error']?.toString() ?? l10n.modelConfigUnknownError,
+      );
       _testing = false;
     });
     return false;
@@ -362,6 +356,23 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
     _providerDrafts[_selectedType] = _buildCurrentConfig();
   }
 
+  /// 首次切换到无草稿的 provider 时填入 Go 默认 endpoint / model；兼容协议保持空白。
+  void _applyProviderDefaultsForSelection(ProviderInfo p) {
+    if (p.name == 'openai_compatible' || p.name == 'anthropic_compatible') {
+      _endpointController.clear();
+      _apiKeyController.clear();
+      _modelController.clear();
+      return;
+    }
+    if (p.defaultBaseURL.isNotEmpty &&
+        _endpointController.text.trim().isEmpty) {
+      _endpointController.text = p.defaultBaseURL;
+    }
+    if (p.defaultModel.isNotEmpty && _modelController.text.trim().isEmpty) {
+      _modelController.text = p.defaultModel;
+    }
+  }
+
   /// 切换 provider 时加载其对应草稿，避免输入被清空。
   /// 同步作废可能在途的连通性测试结果，并立即停止 loading 指示。
   Future<void> _handleProviderSelected(ProviderInfo provider) async {
@@ -371,6 +382,7 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
       pending.complete(null);
     }
     _activeTestCompleter = null;
+    final hadDraft = _providerDrafts.containsKey(provider.name);
     _captureCurrentProviderDraft();
     final targetConfig =
         _providerDrafts[provider.name] ?? _createEmptyConfig(provider.name);
@@ -378,6 +390,9 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
     setState(() {
       _selectedType = provider.name;
       _applyConfigToControllers(targetConfig);
+      if (!hadDraft) {
+        _applyProviderDefaultsForSelection(provider);
+      }
       _error = null;
       _testing = false;
     });
@@ -480,93 +495,15 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
 
   /// Builds the model provider selector.
   Widget _buildTypeSelector() {
-    final l10n = AppLocalizations.of(context)!;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          l10n.modelConfigProvider,
-          style: AppFonts.inter(
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-            color: Colors.white70,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _getVisibleProviders().map((provider) {
-            final isSelected = _selectedType == provider.name;
-            return _buildProviderChip(
-              label: provider.displayName,
-              icon: _getIconForProvider(provider.icon),
-              isSelected: isSelected,
-              onTap: widget.readOnly
-                  ? null
-                  : () => unawaited(_handleProviderSelected(provider)),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildProviderChip({
-    required String label,
-    required IconData icon,
-    required bool isSelected,
-    required VoidCallback? onTap,
-  }) {
-    final bool isDisabled = onTap == null;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? const Color(
-                    0xFF6366F1,
-                  ).withValues(alpha: isDisabled ? 0.15 : 0.3)
-                : const Color(0xFF1E1E2E),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: isSelected
-                  ? const Color(
-                      0xFF6366F1,
-                    ).withValues(alpha: isDisabled ? 0.5 : 1.0)
-                  : Colors.white.withValues(alpha: 0.1),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color: isSelected
-                    ? (isDisabled ? Colors.white54 : Colors.white)
-                    : (isDisabled ? Colors.white38 : Colors.white70),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: AppFonts.inter(
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: isSelected
-                      ? (isDisabled ? Colors.white54 : Colors.white)
-                      : (isDisabled ? Colors.white38 : Colors.white70),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return ModelProviderSelector(
+      providers: _getVisibleProviders(),
+      selectedName: _selectedType,
+      onProviderSelected: (p) {
+        unawaited(_handleProviderSelected(p));
+      },
+      iconForName: _getIconForProvider,
+      readOnly: widget.readOnly,
+      accentColor: const Color(0xFF6366F1),
     );
   }
 
@@ -585,7 +522,7 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
           _buildTextField(
             controller: _endpointController,
             label: l10n.modelConfigBaseUrl,
-            hint: providerInfo != null ? _resolveBaseURL(providerInfo) : '',
+            hint: providerInfo?.defaultBaseURL ?? '',
             icon: LucideIcons.link,
           ),
         if (needsApiKey) ...[
@@ -606,11 +543,16 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
           ),
         ],
         const SizedBox(height: 12),
-        _buildTextField(
+        ModelIdPicker(
           controller: _modelController,
+          providerId: _selectedType,
+          baseUrl: () => _endpointController.text.trim(),
+          apiKey: () => _apiKeyController.text.trim(),
           label: l10n.modelConfigModelName,
           hint: providerInfo?.modelHint ?? 'Model name',
           icon: LucideIcons.box,
+          useFiraCode: false,
+          enabled: !widget.readOnly,
         ),
         if (needsSecretKey) ...[
           const SizedBox(height: 12),
@@ -656,7 +598,9 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
         prefixIcon: Icon(icon, color: Colors.white54, size: 18),
         suffixIcon: hasVisibilityToggle
             ? IconButton(
-                tooltip: obscureText ? '显示明文' : '隐藏明文',
+                tooltip: obscureText
+                    ? AppLocalizations.of(context)!.modelConfigToggleShowSecret
+                    : AppLocalizations.of(context)!.modelConfigToggleHideSecret,
                 icon: Icon(
                   obscureText ? LucideIcons.eye : LucideIcons.eyeOff,
                   color: Colors.white54,

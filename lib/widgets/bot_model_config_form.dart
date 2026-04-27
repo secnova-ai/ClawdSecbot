@@ -9,7 +9,8 @@ import '../services/model_config_database_service.dart';
 import '../services/protection_service.dart';
 import '../services/provider_service.dart';
 import '../utils/app_logger.dart';
-import '../utils/locale_utils.dart';
+import 'model_id_picker.dart';
+import 'model_provider_selector.dart';
 import 'processing_notice_card.dart';
 
 /// Bot 模型配置表单（纯表单组件）
@@ -84,6 +85,7 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
     'flame': LucideIcons.flame,
     'cloud': LucideIcons.cloud,
     'bot': LucideIcons.bot,
+    'plug': LucideIcons.workflow,
   };
 
   @override
@@ -131,16 +133,6 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
     } catch (_) {
       return null;
     }
-  }
-
-  /// 根据当前语言解析 provider 的默认 baseURL。
-  /// Moonshot AI 中文环境使用 .cn 域名，其它语言使用默认 .ai 域名。
-  String _resolveBaseURL(ProviderInfo provider) {
-    if (provider.name == 'moonshot' &&
-        LocaleUtils.resolveLanguageCode() == 'zh') {
-      return 'https://api.moonshot.cn/v1';
-    }
-    return provider.defaultBaseURL;
   }
 
   /// Resolves the provider type for form behavior.
@@ -374,7 +366,9 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
       return true;
     }
     setState(() {
-      _error = l10n.modelConfigTestFailed(result['error'] ?? 'Unknown error');
+      _error = l10n.modelConfigTestFailed(
+        result['error']?.toString() ?? l10n.modelConfigUnknownError,
+      );
       _testing = false;
     });
     return false;
@@ -396,8 +390,9 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
           elevation: 0,
           insetPadding: const EdgeInsets.symmetric(horizontal: 28),
           child: ProcessingNoticeCard(
-            title: '正在更新配置',
-            message: '在此期间Openclaw Dashboard页面会提示断开连接，稍后将恢复正常',
+            title: AppLocalizations.of(dialogContext)!.modelConfigUpdatingBotTitle,
+            message:
+                AppLocalizations.of(dialogContext)!.modelConfigUpdatingBotMessage,
           ),
         ),
       ),
@@ -441,6 +436,24 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
     _providerDrafts[_selectedType] = _buildCurrentConfig();
   }
 
+  /// 首次切换到无草稿的 provider 时，按 Go 元数据填入默认 endpoint / model；
+  /// 兼容协议模板保持空白。
+  void _applyProviderDefaultsForSelection(ProviderInfo p) {
+    if (p.name == 'openai_compatible' || p.name == 'anthropic_compatible') {
+      _endpointController.clear();
+      _apiKeyController.clear();
+      _modelController.clear();
+      return;
+    }
+    if (p.defaultBaseURL.isNotEmpty &&
+        _endpointController.text.trim().isEmpty) {
+      _endpointController.text = p.defaultBaseURL;
+    }
+    if (p.defaultModel.isNotEmpty && _modelController.text.trim().isEmpty) {
+      _modelController.text = p.defaultModel;
+    }
+  }
+
   /// 切换 provider 时只在内存中缓存当前草稿并恢复目标 provider 的内存草稿。
   /// 不执行任何磁盘/FFI 持久化，避免阻塞主线程导致 Windows 界面未响应。
   /// 同步作废可能在途的连通性测试结果，并立即停止 loading 指示。
@@ -451,6 +464,7 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
       pending.complete(null);
     }
     _activeTestCompleter = null;
+    final hadDraft = _providerDrafts.containsKey(provider.name);
     _captureCurrentProviderDraft();
     final targetConfig =
         _providerDrafts[provider.name] ?? _createEmptyConfig(provider.name);
@@ -458,6 +472,9 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
     setState(() {
       _selectedType = provider.name;
       _applyConfigToControllers(targetConfig);
+      if (!hadDraft) {
+        _applyProviderDefaultsForSelection(provider);
+      }
       _error = null;
       _testing = false;
     });
@@ -469,12 +486,24 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
   /// Returns whether the form is currently testing.
   bool get isTesting => _testing;
 
-  /// Returns whether required bot model fields are filled.
+  /// Returns whether required bot model fields are filled。
   bool get hasRequiredConfig {
     final resolvedType = _resolveProviderType(_selectedType);
-    return resolvedType.isNotEmpty &&
-        _endpointController.text.trim().isNotEmpty &&
-        _modelController.text.trim().isNotEmpty;
+    if (resolvedType.isEmpty) {
+      return false;
+    }
+    final info = _getSelectedProviderInfo();
+    final endpointOk =
+        !(info?.needsEndpoint ?? true) ||
+        _endpointController.text.trim().isNotEmpty;
+    final apiKeyOk =
+        !(info?.needsAPIKey ?? true) ||
+        _apiKeyController.text.trim().isNotEmpty;
+    final secretOk =
+        !(info?.needsSecretKey ?? false) ||
+        _secretKeyController.text.trim().isNotEmpty;
+    final modelOk = _modelController.text.trim().isNotEmpty;
+    return endpointOk && apiKeyOk && secretOk && modelOk;
   }
 
   /// 返回当前表单配置是否与已保存配置不同。
@@ -517,82 +546,13 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
 
   /// Builds the model provider selector.
   Widget _buildTypeSelector() {
-    final l10n = AppLocalizations.of(context)!;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          l10n.modelConfigProvider,
-          style: AppFonts.inter(
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-            color: Colors.white70,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _getVisibleProviders().map((provider) {
-            final isSelected = _selectedType == provider.name;
-            return _buildProviderChip(
-              label: provider.displayName,
-              icon: _getIconForProvider(provider.icon),
-              isSelected: isSelected,
-              onTap: () => _handleProviderSelected(provider),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildProviderChip({
-    required String label,
-    required IconData icon,
-    required bool isSelected,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? const Color(0xFF10B981).withValues(alpha: 0.3)
-                : const Color(0xFF1E1E2E),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: isSelected
-                  ? const Color(0xFF10B981)
-                  : Colors.white.withValues(alpha: 0.1),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color: isSelected ? Colors.white : Colors.white70,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: AppFonts.inter(
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: isSelected ? Colors.white : Colors.white70,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return ModelProviderSelector(
+      providers: _getVisibleProviders(),
+      selectedName: _selectedType,
+      onProviderSelected: _handleProviderSelected,
+      iconForName: _getIconForProvider,
+      readOnly: false,
+      accentColor: const Color(0xFF10B981),
     );
   }
 
@@ -611,7 +571,7 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
           _buildTextField(
             controller: _endpointController,
             label: l10n.modelConfigBaseUrl,
-            hint: providerInfo != null ? _resolveBaseURL(providerInfo) : '',
+            hint: providerInfo?.defaultBaseURL ?? '',
             icon: LucideIcons.link,
           ),
         if (needsApiKey) ...[
@@ -630,11 +590,16 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
           ),
         ],
         const SizedBox(height: 12),
-        _buildTextField(
+        ModelIdPicker(
           controller: _modelController,
+          providerId: _selectedType,
+          baseUrl: () => _endpointController.text.trim(),
+          apiKey: () => _apiKeyController.text.trim(),
           label: l10n.modelConfigModelName,
           hint: providerInfo?.modelHint ?? 'Model name',
           icon: LucideIcons.box,
+          useFiraCode: true,
+          enabled: true,
         ),
         if (needsSecretKey) ...[
           const SizedBox(height: 12),
@@ -684,7 +649,9 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
             prefixIcon: Icon(icon, color: Colors.white54, size: 18),
             suffixIcon: hasVisibilityToggle
                 ? IconButton(
-                    tooltip: obscureText ? '显示明文' : '隐藏明文',
+                    tooltip: obscureText
+                        ? AppLocalizations.of(context)!.modelConfigToggleShowSecret
+                        : AppLocalizations.of(context)!.modelConfigToggleHideSecret,
                     icon: Icon(
                       obscureText ? LucideIcons.eye : LucideIcons.eyeOff,
                       color: Colors.white54,

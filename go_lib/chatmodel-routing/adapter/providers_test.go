@@ -2,6 +2,39 @@ package adapter
 
 import "testing"
 
+func TestEffectiveRoutingProvider(t *testing.T) {
+	if got := EffectiveRoutingProvider(ProviderMiniMaxCN); got != ProviderMiniMax {
+		t.Fatalf("EffectiveRoutingProvider(minimax_cn) = %q, want minimax", got)
+	}
+	if got := EffectiveRoutingProvider(ProviderMoonshotCN); got != ProviderMoonshot {
+		t.Fatalf("EffectiveRoutingProvider(moonshot_cn) = %q, want moonshot", got)
+	}
+	if got := EffectiveRoutingProvider(ProviderAnthropicCompatible); got != ProviderAnthropic {
+		t.Fatalf("EffectiveRoutingProvider(anthropic_compatible) = %q, want anthropic", got)
+	}
+	if got := EffectiveRoutingProvider(ProviderZhipuEN); got != ProviderZhipu {
+		t.Fatalf("EffectiveRoutingProvider(zhipu_en) = %q, want zhipu", got)
+	}
+	if got := EffectiveRoutingProvider(ProviderOpenAICompatible); got != ProviderOpenAICompatible {
+		t.Fatalf("EffectiveRoutingProvider(openai_compatible) = %q, want openai_compatible", got)
+	}
+}
+
+func TestIsOpenAICompatible_MiniMaxNotOpenAI(t *testing.T) {
+	if IsOpenAICompatible(ProviderMiniMax) {
+		t.Fatal("MiniMax must not be OpenAI-compatible for routing")
+	}
+	if IsOpenAICompatible(ProviderMiniMaxCN) {
+		t.Fatal("MiniMax CN must not be OpenAI-compatible for routing")
+	}
+	if !IsOpenAICompatible(ProviderOpenAI) {
+		t.Fatal("OpenAI must be OpenAI-compatible")
+	}
+	if IsOpenAICompatible(ProviderAnthropicCompatible) {
+		t.Fatal("anthropic_compatible must not be OpenAI-compatible")
+	}
+}
+
 func TestBuildEndpointURL(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -64,6 +97,18 @@ func TestBuildEndpointURL(t *testing.T) {
 			provider: ProviderMiniMax,
 			baseURL:  "",
 			want:     "",
+		},
+		{
+			name:     "MiniMax CN region provider uses same Anthropic path rules",
+			provider: ProviderMiniMaxCN,
+			baseURL:  "https://api.minimaxi.com/anthropic",
+			want:     "https://api.minimaxi.com/anthropic/v1/messages",
+		},
+		{
+			name:     "Anthropic-compatible template routes like Anthropic",
+			provider: ProviderAnthropicCompatible,
+			baseURL:  "https://example.com/v1",
+			want:     "https://example.com/v1/messages",
 		},
 	}
 

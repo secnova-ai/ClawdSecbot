@@ -620,6 +620,63 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get modelConfigUnknownError => '未知错误';
+
+  @override
+  String get modelConfigBotTitle => 'Bot 模型';
+
+  @override
+  String get modelConfigSearchProvider => '搜索供应商';
+
+  @override
+  String get modelConfigSelectProviderTitle => '选择供应商';
+
+  @override
+  String get modelConfigSelectModel => '模型';
+
+  @override
+  String get modelConfigRefreshModelList => '刷新模型列表';
+
+  @override
+  String modelConfigModelListFailed(String message) {
+    return '模型列表加载失败: $message';
+  }
+
+  @override
+  String get modelConfigUseRecommendedModels => '可从列表选择推荐模型，或直接手动输入。';
+
+  @override
+  String get modelConfigGroupRecommended => '推荐';
+
+  @override
+  String get modelConfigGroupCompatible => '兼容协议';
+
+  @override
+  String get modelConfigGroupChina => '国内';
+
+  @override
+  String get modelConfigGroupGlobal => '国际';
+
+  @override
+  String get modelConfigGroupLocal => '本地';
+
+  @override
+  String get modelConfigGroupOther => '其他';
+
+  @override
+  String get modelConfigUpdatingBotTitle => '正在更新配置';
+
+  @override
+  String get modelConfigUpdatingBotMessage =>
+      '此期间 Openclaw Dashboard 可能短暂提示断开，随后将恢复。';
+
+  @override
+  String get modelConfigToggleShowSecret => '显示明文';
+
+  @override
+  String get modelConfigToggleHideSecret => '隐藏明文';
+
+  @override
   String get oneClickProtection => '一键防护';
 
   @override

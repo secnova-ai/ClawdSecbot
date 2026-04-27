@@ -1200,6 +1200,114 @@ abstract class AppLocalizations {
   /// **'连接测试失败: {error}'**
   String modelConfigTestFailed(String error);
 
+  /// No description provided for @modelConfigUnknownError.
+  ///
+  /// In zh, this message translates to:
+  /// **'未知错误'**
+  String get modelConfigUnknownError;
+
+  /// No description provided for @modelConfigBotTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'Bot 模型'**
+  String get modelConfigBotTitle;
+
+  /// No description provided for @modelConfigSearchProvider.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索供应商'**
+  String get modelConfigSearchProvider;
+
+  /// No description provided for @modelConfigSelectProviderTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择供应商'**
+  String get modelConfigSelectProviderTitle;
+
+  /// No description provided for @modelConfigSelectModel.
+  ///
+  /// In zh, this message translates to:
+  /// **'模型'**
+  String get modelConfigSelectModel;
+
+  /// No description provided for @modelConfigRefreshModelList.
+  ///
+  /// In zh, this message translates to:
+  /// **'刷新模型列表'**
+  String get modelConfigRefreshModelList;
+
+  /// No description provided for @modelConfigModelListFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'模型列表加载失败: {message}'**
+  String modelConfigModelListFailed(String message);
+
+  /// No description provided for @modelConfigUseRecommendedModels.
+  ///
+  /// In zh, this message translates to:
+  /// **'可从列表选择推荐模型，或直接手动输入。'**
+  String get modelConfigUseRecommendedModels;
+
+  /// No description provided for @modelConfigGroupRecommended.
+  ///
+  /// In zh, this message translates to:
+  /// **'推荐'**
+  String get modelConfigGroupRecommended;
+
+  /// No description provided for @modelConfigGroupCompatible.
+  ///
+  /// In zh, this message translates to:
+  /// **'兼容协议'**
+  String get modelConfigGroupCompatible;
+
+  /// No description provided for @modelConfigGroupChina.
+  ///
+  /// In zh, this message translates to:
+  /// **'国内'**
+  String get modelConfigGroupChina;
+
+  /// No description provided for @modelConfigGroupGlobal.
+  ///
+  /// In zh, this message translates to:
+  /// **'国际'**
+  String get modelConfigGroupGlobal;
+
+  /// No description provided for @modelConfigGroupLocal.
+  ///
+  /// In zh, this message translates to:
+  /// **'本地'**
+  String get modelConfigGroupLocal;
+
+  /// No description provided for @modelConfigGroupOther.
+  ///
+  /// In zh, this message translates to:
+  /// **'其他'**
+  String get modelConfigGroupOther;
+
+  /// No description provided for @modelConfigUpdatingBotTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在更新配置'**
+  String get modelConfigUpdatingBotTitle;
+
+  /// No description provided for @modelConfigUpdatingBotMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'此期间 Openclaw Dashboard 可能短暂提示断开，随后将恢复。'**
+  String get modelConfigUpdatingBotMessage;
+
+  /// No description provided for @modelConfigToggleShowSecret.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示明文'**
+  String get modelConfigToggleShowSecret;
+
+  /// No description provided for @modelConfigToggleHideSecret.
+  ///
+  /// In zh, this message translates to:
+  /// **'隐藏明文'**
+  String get modelConfigToggleHideSecret;
+
   /// No description provided for @oneClickProtection.
   ///
   /// In zh, this message translates to:

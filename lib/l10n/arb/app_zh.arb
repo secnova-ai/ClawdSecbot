@@ -341,6 +341,29 @@
       "error": {"type": "String"}
     }
   },
+  "modelConfigUnknownError": "未知错误",
+  "modelConfigBotTitle": "Bot 模型",
+  "modelConfigSearchProvider": "搜索供应商",
+  "modelConfigSelectProviderTitle": "选择供应商",
+  "modelConfigSelectModel": "模型",
+  "modelConfigRefreshModelList": "刷新模型列表",
+  "modelConfigModelListFailed": "模型列表加载失败: {message}",
+  "@modelConfigModelListFailed": {
+    "placeholders": {
+      "message": {"type": "String"}
+    }
+  },
+  "modelConfigUseRecommendedModels": "可从列表选择推荐模型，或直接手动输入。",
+  "modelConfigGroupRecommended": "推荐",
+  "modelConfigGroupCompatible": "兼容协议",
+  "modelConfigGroupChina": "国内",
+  "modelConfigGroupGlobal": "国际",
+  "modelConfigGroupLocal": "本地",
+  "modelConfigGroupOther": "其他",
+  "modelConfigUpdatingBotTitle": "正在更新配置",
+  "modelConfigUpdatingBotMessage": "此期间 Openclaw Dashboard 可能短暂提示断开，随后将恢复。",
+  "modelConfigToggleShowSecret": "显示明文",
+  "modelConfigToggleHideSecret": "隐藏明文",
 
   "oneClickProtection": "一键防护",
   "protectionAssetNotRunning": "资产未运行，无法开启防护",

@@ -15,6 +15,7 @@ import (
 	"go_lib/chatmodel-routing/adapter"
 	"go_lib/core"
 	"go_lib/core/callback_bridge"
+	"go_lib/core/modelfactory"
 	"go_lib/core/proxy"
 	"go_lib/core/sandbox"
 	"go_lib/core/service"
@@ -470,6 +471,12 @@ func (s *Server) dispatch(method string, req rpcRequest) (string, error) {
 			providers = adapter.GetAllProviders()
 		}
 		return toJSON(providers), nil
+	case "GetProviderModels":
+		payload, err := arg(0)
+		if err != nil {
+			return "", err
+		}
+		return modelfactory.GetProviderModelsJSON(payload), nil
 	case "IsCallbackBridgeRunning":
 		if s.bridge != nil && s.bridge.IsRunning() {
 			return toJSON(map[string]interface{}{"success": true, "running": true}), nil

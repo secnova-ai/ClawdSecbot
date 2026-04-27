@@ -76,26 +76,46 @@ func ValidateSecurityModelConfig(config *repository.SecurityModelConfig) error {
 		if config.Model == "" {
 			return fmt.Errorf("Qwen model name is required")
 		}
-	case "zhipu":
+	case "zhipu", "zhipu_en":
 		if config.APIKey == "" {
 			return fmt.Errorf("Zhipu API key is required")
 		}
 		if config.Model == "" {
 			return fmt.Errorf("Zhipu model name is required")
 		}
-	case "minimax":
+	case "minimax", "minimax_cn":
 		if config.APIKey == "" {
 			return fmt.Errorf("MiniMax API key is required")
 		}
 		if config.Model == "" {
 			return fmt.Errorf("MiniMax model name is required")
 		}
-	case "moonshot":
+	case "moonshot", "moonshot_cn":
 		if config.APIKey == "" {
 			return fmt.Errorf("Moonshot API key is required")
 		}
 		if config.Model == "" {
 			return fmt.Errorf("Moonshot model name is required")
+		}
+	case "openai_compatible":
+		if config.APIKey == "" {
+			return fmt.Errorf("OpenAI-compatible API key is required")
+		}
+		if config.Endpoint == "" {
+			return fmt.Errorf("OpenAI-compatible base URL is required")
+		}
+		if config.Model == "" {
+			return fmt.Errorf("OpenAI-compatible model name is required")
+		}
+	case "anthropic_compatible":
+		if config.APIKey == "" {
+			return fmt.Errorf("Anthropic-compatible API key is required")
+		}
+		if config.Endpoint == "" {
+			return fmt.Errorf("Anthropic-compatible base URL is required")
+		}
+		if config.Model == "" {
+			return fmt.Errorf("Anthropic-compatible model name is required")
 		}
 	default:
 		if config.APIKey == "" {
@@ -127,12 +147,16 @@ func CreateChatModelFromConfig(ctx context.Context, config *repository.SecurityM
 		return createQianfanModel(ctx, config)
 	case "qwen":
 		return createQwenModel(ctx, config)
-	case "zhipu":
+	case "zhipu", "zhipu_en":
 		return createZhipuModel(ctx, config)
-	case "minimax":
+	case "minimax", "minimax_cn":
 		return createMiniMaxModel(ctx, config)
-	case "moonshot":
+	case "moonshot", "moonshot_cn":
 		return createMoonshotModel(ctx, config)
+	case "openai_compatible":
+		return createOpenAICompatibleModel(ctx, config)
+	case "anthropic_compatible":
+		return createAnthropicCompatibleModel(ctx, config)
 	default:
 		return createOpenAICompatibleModel(ctx, config)
 	}
@@ -216,6 +240,31 @@ func createClaudeModel(ctx context.Context, config *repository.SecurityModelConf
 		Model:     config.Model,
 		MaxTokens: adapter.GetModelMaxOutputTokens(config.Model),
 	}
+	if ep := strings.TrimSpace(config.Endpoint); ep != "" {
+		u := strings.TrimSuffix(ep, "/")
+		cfg.BaseURL = &u
+	}
+	return claude.NewChatModel(ctx, cfg)
+}
+
+// createAnthropicCompatibleModel 使用 Claude 组件连接任意 Anthropic Messages 兼容端点。
+func createAnthropicCompatibleModel(ctx context.Context, config *repository.SecurityModelConfig) (model.ChatModel, error) {
+	if config.APIKey == "" {
+		return nil, fmt.Errorf("Anthropic-compatible API key is required")
+	}
+	if config.Model == "" {
+		return nil, fmt.Errorf("Anthropic-compatible model name is required")
+	}
+	if config.Endpoint == "" {
+		return nil, fmt.Errorf("Anthropic-compatible base URL is required")
+	}
+	baseURL := strings.TrimSuffix(strings.TrimSpace(config.Endpoint), "/")
+	cfg := &claude.Config{
+		APIKey:    config.APIKey,
+		Model:     config.Model,
+		MaxTokens: adapter.GetModelMaxOutputTokens(config.Model),
+		BaseURL:   &baseURL,
+	}
 	return claude.NewChatModel(ctx, cfg)
 }
 
@@ -290,7 +339,10 @@ func createZhipuModel(ctx context.Context, config *repository.SecurityModelConfi
 	}
 	baseURL := config.Endpoint
 	if baseURL == "" {
-		baseURL = "https://open.bigmodel.cn/api/paas/v4"
+		baseURL = adapter.GetDefaultBaseURL(adapter.ProviderName(config.Provider))
+		if baseURL == "" {
+			baseURL = "https://open.bigmodel.cn/api/paas/v4"
+		}
 	}
 	return openai.NewChatModel(ctx, &openai.ChatModelConfig{
 		APIKey:  config.APIKey,
@@ -310,9 +362,12 @@ func createMiniMaxModel(ctx context.Context, config *repository.SecurityModelCon
 	if config.Model == "" {
 		return nil, fmt.Errorf("MiniMax model name is required")
 	}
-	baseURL := config.Endpoint
+	baseURL := strings.TrimSpace(config.Endpoint)
 	if baseURL == "" {
-		baseURL = "https://api.minimax.io/anthropic"
+		baseURL = adapter.GetDefaultBaseURL(adapter.ProviderName(config.Provider))
+		if baseURL == "" {
+			baseURL = "https://api.minimax.io/anthropic"
+		}
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/v1")
 	baseURL = strings.TrimSuffix(baseURL, "/")
@@ -334,9 +389,12 @@ func createMoonshotModel(ctx context.Context, config *repository.SecurityModelCo
 	if config.Model == "" {
 		return nil, fmt.Errorf("Moonshot model name is required")
 	}
-	baseURL := config.Endpoint
+	baseURL := strings.TrimSpace(config.Endpoint)
 	if baseURL == "" {
-		baseURL = "https://api.moonshot.cn/v1"
+		baseURL = adapter.GetDefaultBaseURL(adapter.ProviderName(config.Provider))
+		if baseURL == "" {
+			baseURL = "https://api.moonshot.ai/v1"
+		}
 	}
 	return deepseek.NewChatModel(ctx, &deepseek.ChatModelConfig{
 		APIKey:  config.APIKey,
@@ -352,6 +410,9 @@ func createOpenAICompatibleModel(ctx context.Context, config *repository.Securit
 	}
 	if config.Model == "" {
 		return nil, fmt.Errorf("%s model name is required", config.Provider)
+	}
+	if strings.TrimSpace(config.Endpoint) == "" {
+		return nil, fmt.Errorf("%s base URL is required", config.Provider)
 	}
 	cfg := &openai.ChatModelConfig{
 		APIKey:  config.APIKey,

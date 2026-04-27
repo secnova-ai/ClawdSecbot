@@ -64,6 +64,7 @@ import (
 	"go_lib/core"
 	"go_lib/core/api"
 	"go_lib/core/callback_bridge"
+	"go_lib/core/modelfactory"
 	"go_lib/core/proxy"
 	"go_lib/core/sandbox"
 	"go_lib/core/service"
@@ -853,6 +854,13 @@ func GetSupportedProviders(scopeC *C.char) *C.char {
 	}
 
 	return jsonToCString(providers)
+}
+
+// GetProviderModels 拉取指定供应商可用模型列表（JSON 入参/出参，供 Flutter 配置页使用）。
+//export GetProviderModels
+func GetProviderModels(payloadC *C.char) *C.char {
+	payload := C.GoString(payloadC)
+	return C.CString(modelfactory.GetProviderModelsJSON(payload))
 }
 
 // ==================== 回调桥接 FFI ====================

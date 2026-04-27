@@ -638,6 +638,64 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get modelConfigUnknownError => 'Unknown error';
+
+  @override
+  String get modelConfigBotTitle => 'Bot Model';
+
+  @override
+  String get modelConfigSearchProvider => 'Search providers';
+
+  @override
+  String get modelConfigSelectProviderTitle => 'Select provider';
+
+  @override
+  String get modelConfigSelectModel => 'Model';
+
+  @override
+  String get modelConfigRefreshModelList => 'Refresh model list';
+
+  @override
+  String modelConfigModelListFailed(String message) {
+    return 'Failed to load model list: $message';
+  }
+
+  @override
+  String get modelConfigUseRecommendedModels =>
+      'Use a recommended model from the list or type manually.';
+
+  @override
+  String get modelConfigGroupRecommended => 'Recommended';
+
+  @override
+  String get modelConfigGroupCompatible => 'Compatible';
+
+  @override
+  String get modelConfigGroupChina => 'China';
+
+  @override
+  String get modelConfigGroupGlobal => 'Global';
+
+  @override
+  String get modelConfigGroupLocal => 'Local';
+
+  @override
+  String get modelConfigGroupOther => 'Other';
+
+  @override
+  String get modelConfigUpdatingBotTitle => 'Updating configuration';
+
+  @override
+  String get modelConfigUpdatingBotMessage =>
+      'Openclaw Dashboard may show disconnected briefly, then recover.';
+
+  @override
+  String get modelConfigToggleShowSecret => 'Show secret';
+
+  @override
+  String get modelConfigToggleHideSecret => 'Hide secret';
+
+  @override
   String get oneClickProtection => 'Enable Protection';
 
   @override
