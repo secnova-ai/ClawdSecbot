@@ -156,9 +156,7 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
             if (skillHash.isNotEmpty) {
               _skillHashes[skillName] = skillHash;
             }
-            final analysisResult = SkillAnalysisResult.fromJson(
-              resultMap,
-            );
+            final analysisResult = SkillAnalysisResult.fromJson(resultMap);
             _results[skillName] = analysisResult;
           } else if (data['error'] != null) {
             _failedSkills[skillName] = data['error'] as String;
@@ -201,9 +199,9 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
       );
       if (mounted) {
         final l10n = AppLocalizations.of(context)!;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(l10n.deleteRiskSkillUnavailable)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.deleteRiskSkillUnavailable)),
+        );
       }
       return;
     }
@@ -217,9 +215,7 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
       });
       if (mounted && deleteResult.alreadyMissing) {
         final l10n = AppLocalizations.of(context)!;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(l10n.deleteRiskSkillAlreadyMissing)),
         );
       }
@@ -498,6 +494,7 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
     SkillAnalysisResult result,
     AppLocalizations l10n,
   ) {
+    final skillPath = _skillPaths[skillName] ?? '';
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -552,6 +549,7 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
                     ),
                   ],
                 ),
+                _buildSkillPathLine(skillPath),
                 if (result.summary.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
@@ -575,6 +573,7 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
     final deleted = _deleteConfirmed[skillName] == true;
     final trusted = _trustConfirmed[skillName] == true;
     final isExpanded = _expandedSkills.contains(skillName);
+    final skillPath = _skillPaths[skillName] ?? '';
 
     final riskColor = _getRiskLevelColor(result.riskLevel);
 
@@ -676,6 +675,7 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
                         ),
                       )
                     else ...[
+                      _buildSkillPathLine(skillPath),
                       const SizedBox(height: 4),
                       Text(
                         result.summary,
@@ -729,7 +729,9 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
             ),
             if (isExpanded) ...[
               const SizedBox(height: 8),
-              ...result.issues.map((issue) => _buildIssueItem(issue, l10n)),
+              ...result.issues.map(
+                (issue) => _buildIssueItem(issue, l10n, skillPath),
+              ),
             ],
           ],
           // Action buttons (Trust and Delete)
@@ -775,7 +777,34 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
     );
   }
 
-  Widget _buildIssueItem(SkillSecurityIssue issue, AppLocalizations l10n) {
+  Widget _buildSkillPathLine(String skillPath) {
+    if (skillPath.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          const Icon(LucideIcons.folder, size: 12, color: Colors.white38),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              skillPath,
+              style: AppFonts.firaCode(fontSize: 11, color: Colors.white54),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIssueItem(
+    SkillSecurityIssue issue,
+    AppLocalizations l10n,
+    String skillPath,
+  ) {
+    final issuePath = _resolveIssueDisplayPath(skillPath, issue.file);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
@@ -795,7 +824,7 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
             ],
           ),
           // File path
-          if (issue.file.isNotEmpty) ...[
+          if (issuePath.isNotEmpty) ...[
             const SizedBox(height: 8),
             Row(
               children: [
@@ -803,7 +832,7 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
-                    issue.file,
+                    issuePath,
                     style: AppFonts.firaCode(
                       fontSize: 11,
                       color: Colors.white54,
@@ -839,6 +868,22 @@ class _SkillScanDialogState extends State<SkillScanDialog> {
         ],
       ),
     );
+  }
+
+  String _resolveIssueDisplayPath(String skillPath, String issueFile) {
+    final normalizedIssueFile = issueFile.trim();
+    if (normalizedIssueFile.isEmpty) {
+      return skillPath.trim();
+    }
+    if (normalizedIssueFile.startsWith('/')) {
+      return normalizedIssueFile;
+    }
+    final normalizedSkillPath = skillPath.trim();
+    if (normalizedSkillPath.isEmpty) {
+      return normalizedIssueFile;
+    }
+    final separator = normalizedSkillPath.endsWith('/') ? '' : '/';
+    return '$normalizedSkillPath$separator$normalizedIssueFile';
   }
 
   Widget _buildSeverityBadge(String severity) {

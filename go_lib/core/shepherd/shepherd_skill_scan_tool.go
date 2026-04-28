@@ -96,7 +96,7 @@ func (t *scanSkillSecurityTool) InvokableRun(ctx context.Context, argumentsInJSO
 		logging.ShepherdGateWarning("[ScanSkillSecurity] cache lookup failed: %v", err)
 	}
 
-	if cached != nil {
+	if cached != nil && storedSkillScanReusable(skillPath, cached) {
 		logging.ShepherdGateInfo("[ScanSkillSecurity] cache hit: hash=%s, safe=%v", hash, cached.Safe)
 
 		riskLevel := cached.RiskLevel
@@ -166,6 +166,17 @@ func (t *scanSkillSecurityTool) InvokableRun(ctx context.Context, argumentsInJSO
 		Cached:     false,
 	}
 	return t.successResponse(result), nil
+}
+
+func storedSkillScanReusable(skillPath string, record *repository.SkillScanRecord) bool {
+	if record == nil {
+		return false
+	}
+	if record.Safe || len(record.Issues) == 0 {
+		return true
+	}
+	filteredIssues, _ := skillscan.ValidateStoredIssueStrings(skillPath, record.Issues)
+	return len(filteredIssues) > 0
 }
 
 func (t *scanSkillSecurityTool) errorResponse(errMsg string) string {

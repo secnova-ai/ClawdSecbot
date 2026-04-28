@@ -2326,6 +2326,7 @@ class _MainPageState extends State<MainPage>
   }
 
   Future<void> _stopProtectionForAsset(Asset asset) async {
+    final loadingStartedAt = DateTime.now();
     final scanAssetID = asset.id.trim();
     if (_stoppingProtectionAssetIDs.contains(scanAssetID)) {
       return;
@@ -2334,6 +2335,7 @@ class _MainPageState extends State<MainPage>
     setState(() {
       _stoppingProtectionAssetIDs.add(scanAssetID);
     });
+    await WidgetsBinding.instance.endOfFrame;
 
     String resolvedAssetID = scanAssetID;
     String resolvedAssetName = asset.name;
@@ -2421,6 +2423,11 @@ class _MainPageState extends State<MainPage>
         );
       }
     } finally {
+      final elapsed = DateTime.now().difference(loadingStartedAt);
+      const minimumLoadingDuration = Duration(milliseconds: 350);
+      if (elapsed < minimumLoadingDuration) {
+        await Future<void>.delayed(minimumLoadingDuration - elapsed);
+      }
       if (mounted) {
         setState(() {
           _stoppingProtectionAssetIDs

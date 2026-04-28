@@ -7,6 +7,7 @@ import (
 	"go_lib/core"
 	"go_lib/core/logging"
 	"go_lib/core/repository"
+	"go_lib/core/skillscan"
 )
 
 // ========== 扫描结果操作 ==========
@@ -234,6 +235,7 @@ func GetRiskySkills() map[string]interface{} {
 		return errorResult(err)
 	}
 
+	records = sanitizeRiskySkillScanRecords(records)
 	return successDataResult(records)
 }
 
@@ -246,7 +248,50 @@ func GetAllSkillScans() map[string]interface{} {
 		return errorResult(err)
 	}
 
+	records = sanitizeSkillScanRecords(records)
 	return successDataResult(records)
+}
+
+func sanitizeSkillScanRecords(records []repository.SkillScanRecord) []repository.SkillScanRecord {
+	if len(records) == 0 {
+		return records
+	}
+
+	sanitized := make([]repository.SkillScanRecord, 0, len(records))
+	for _, record := range records {
+		if record.SkillPath == "" || len(record.Issues) == 0 {
+			sanitized = append(sanitized, record)
+			continue
+		}
+		filteredIssues, dropped := skillscan.ValidateStoredIssueStrings(record.SkillPath, record.Issues)
+		if dropped > 0 {
+			logging.Warning(
+				"Dropped unverifiable stored skill scan issues: skill=%s, path=%s, dropped=%d",
+				record.SkillName,
+				record.SkillPath,
+				dropped,
+			)
+		}
+		record.Issues = filteredIssues
+		if !record.Safe && len(record.Issues) == 0 {
+			record.Safe = true
+			record.RiskLevel = "none"
+		}
+		sanitized = append(sanitized, record)
+	}
+	return sanitized
+}
+
+func sanitizeRiskySkillScanRecords(records []repository.SkillScanRecord) []repository.SkillScanRecord {
+	sanitized := sanitizeSkillScanRecords(records)
+	risky := make([]repository.SkillScanRecord, 0, len(sanitized))
+	for _, record := range sanitized {
+		if record.Safe {
+			continue
+		}
+		risky = append(risky, record)
+	}
+	return risky
 }
 
 // TrustSkill marks a skill as trusted (user accepts known risks)

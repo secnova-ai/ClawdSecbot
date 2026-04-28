@@ -640,10 +640,10 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       _isSaving = true;
       _savingProgressMessage = _defaultSavingMessage;
     });
+    final l10n = AppLocalizations.of(context)!;
+    await Future<void>.delayed(Duration.zero);
 
     try {
-      final l10n = AppLocalizations.of(context)!;
-
       bool botModelSaved = false;
       final botTabIndex = _botTabIndex;
       if (_requiresBotModelConfig) {

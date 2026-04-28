@@ -228,6 +228,9 @@ class ScanDatabaseService {
 
     return (response['data'] as List).map((item) {
       final data = item as Map<String, dynamic>;
+      final rawIssues =
+          (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
+          <String>[];
       return {
         'skill_name': data['skill_name'],
         'skill_hash': data['skill_hash'],
@@ -236,9 +239,9 @@ class ScanDatabaseService {
         'asset_id': data['asset_id'] ?? '',
         'scanned_at': data['scanned_at'],
         'safe': data['safe'] as bool? ?? false,
-        'issues':
-            (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
-            <String>[],
+        'risk_level': data['risk_level'] as String? ?? '',
+        'issues': rawIssues.map(_formatSkillIssue).toList(),
+        'issue_details': _parseSkillIssueDetails(rawIssues),
       };
     }).toList();
   }
@@ -251,17 +254,53 @@ class ScanDatabaseService {
 
     return (response['data'] as List).map((item) {
       final data = item as Map<String, dynamic>;
+      final rawIssues =
+          (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
+          <String>[];
       return {
         'skill_name': data['skill_name'],
         'skill_hash': data['skill_hash'],
+        'skill_path': data['skill_path'] ?? '',
+        'source_plugin': data['source_plugin'] ?? '',
+        'asset_id': data['asset_id'] ?? '',
         'scanned_at': data['scanned_at'],
         'safe': data['safe'] as bool? ?? false,
         'risk_level': data['risk_level'] as String? ?? '',
         'trusted': data['trusted'] as bool? ?? false,
-        'issues':
-            (data['issues'] as List?)?.map((e) => e.toString()).toList() ??
-            <String>[],
+        'issues': rawIssues.map(_formatSkillIssue).toList(),
+        'issue_details': _parseSkillIssueDetails(rawIssues),
       };
+    }).toList();
+  }
+
+  String _formatSkillIssue(String issue) {
+    try {
+      final parsed = jsonDecode(issue);
+      if (parsed is Map<String, dynamic>) {
+        final description = parsed['description']?.toString().trim();
+        if (description != null && description.isNotEmpty) {
+          return description;
+        }
+      }
+    } catch (_) {
+      // Keep legacy plain issue strings as-is.
+    }
+    return issue;
+  }
+
+  List<Map<String, String>> _parseSkillIssueDetails(List<String> issues) {
+    return issues.map((issue) {
+      try {
+        final parsed = jsonDecode(issue);
+        if (parsed is Map<String, dynamic>) {
+          return parsed.map(
+            (key, value) => MapEntry(key, value?.toString() ?? ''),
+          );
+        }
+      } catch (_) {
+        // Legacy plain issue strings do not have structured details.
+      }
+      return <String, String>{};
     }).toList();
   }
 

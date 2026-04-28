@@ -1,5 +1,6 @@
 // ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
 
@@ -100,13 +101,40 @@ class HttpTransportWeb extends BotsecTransport {
   }
 
   @override
+  Future<String> callRawNoArgAsync(String method) {
+    final payload = jsonEncode({
+      'strings': const <String>[],
+      'ints': const <int>[],
+    });
+    return _postRawAsync('/api/v1/rpc/$method', payload);
+  }
+
+  @override
   String callRawOneArg(String method, String arg) {
     return callRaw(method, strings: [arg]);
   }
 
   @override
+  Future<String> callRawOneArgAsync(String method, String arg) {
+    final payload = jsonEncode({
+      'strings': [arg],
+      'ints': const <int>[],
+    });
+    return _postRawAsync('/api/v1/rpc/$method', payload);
+  }
+
+  @override
   String callRawTwoArgs(String method, String arg1, String arg2) {
     return callRaw(method, strings: [arg1, arg2]);
+  }
+
+  @override
+  Future<String> callRawTwoArgsAsync(String method, String arg1, String arg2) {
+    final payload = jsonEncode({
+      'strings': [arg1, arg2],
+      'ints': const <int>[],
+    });
+    return _postRawAsync('/api/v1/rpc/$method', payload);
   }
 
   @override
@@ -163,6 +191,28 @@ class HttpTransportWeb extends BotsecTransport {
     return lastError ?? _errorJson('POST $path failed: unknown error');
   }
 
+  Future<String> _postRawAsync(String path, String body) async {
+    if (_apiBaseUrl.isEmpty) {
+      return _errorJson('empty api base url');
+    }
+
+    final candidates = _candidateBaseUrls(_apiBaseUrl);
+    String? lastError;
+
+    for (final base in candidates) {
+      final raw = await _postRawOnceAsync(base, path, body);
+      if (!_isConnectivityFailure(raw)) {
+        if (base != _apiBaseUrl) {
+          _apiBaseUrl = base;
+        }
+        return raw;
+      }
+      lastError = raw;
+    }
+
+    return lastError ?? _errorJson('POST $path failed: unknown error');
+  }
+
   String _postRawOnce(String baseUrl, String path, String body) {
     try {
       final req = html.HttpRequest();
@@ -182,6 +232,47 @@ class HttpTransportWeb extends BotsecTransport {
     } catch (e) {
       return _errorJson('POST $path failed: $e');
     }
+  }
+
+  Future<String> _postRawOnceAsync(String baseUrl, String path, String body) {
+    final completer = Completer<String>();
+    try {
+      final req = html.HttpRequest();
+      req.open('POST', '$baseUrl$path', async: true);
+      req.withCredentials = false;
+      req.timeout = 60000;
+      void complete(String raw) {
+        if (!completer.isCompleted) {
+          completer.complete(raw);
+        }
+      }
+
+      req.onLoadEnd.listen((_) {
+        final status = req.status ?? 0;
+        final respBody = req.responseText ?? '';
+        if (status >= 200 && status < 300 && respBody.isNotEmpty) {
+          complete(respBody);
+          return;
+        }
+        if (respBody.isNotEmpty) {
+          complete(respBody);
+          return;
+        }
+        complete(_errorJson('POST $path failed: HTTP $status'));
+      });
+      req.onError.listen((_) {
+        complete(_errorJson('POST $path failed: XMLHttpRequest error'));
+      });
+      req.onTimeout.listen((_) {
+        complete(_errorJson('POST $path failed: timeout'));
+      });
+      req.send(body);
+    } catch (e) {
+      if (!completer.isCompleted) {
+        completer.complete(_errorJson('POST $path failed: $e'));
+      }
+    }
+    return completer.future;
   }
 
   List<String> _candidateBaseUrls(String baseUrl) {

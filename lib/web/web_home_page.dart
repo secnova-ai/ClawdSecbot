@@ -247,6 +247,27 @@ class _WebHomePageState extends State<WebHomePage> {
 
     if (result['success'] != true) {
       final rawError = result['error']?.toString() ?? 'bootstrap failed';
+      final autoRepairedVersion = _tryRepairCurrentVersionForDowngradeError(
+        rawError,
+      );
+      if (autoRepairedVersion) {
+        if (mounted) {
+          setState(() {
+            _bootstrapping = false;
+            _bootstrapped = false;
+            _bootstrapError = _txt(
+              '已自动修正应用版本，正在重试连接...',
+              'Application version auto-corrected, retrying connection...',
+            );
+            _showBackendConfig = false;
+          });
+        }
+        unawaited(
+          Future<void>.delayed(Duration.zero, () => _bootstrap(auto: true)),
+        );
+        return;
+      }
+
       final retryable = _isRetryableBootstrapError(rawError);
       final autoRepairedApi = retryable && _tryRepairApiBaseForRetryableError();
 
@@ -559,6 +580,24 @@ class _WebHomePageState extends State<WebHomePage> {
       return false;
     }
     _apiBaseCtrl.text = repaired;
+    return true;
+  }
+
+  bool _tryRepairCurrentVersionForDowngradeError(String error) {
+    final match = RegExp(
+      r'database version\s+([0-9]+(?:\.[0-9]+)*)\s+is newer than current application version\s+([0-9]+(?:\.[0-9]+)*)',
+    ).firstMatch(error);
+    final databaseVersion = match?.group(1);
+    if (databaseVersion == null || databaseVersion.isEmpty) {
+      return false;
+    }
+
+    final current = _currentVersionCtrl.text.trim();
+    if (current == databaseVersion) {
+      return false;
+    }
+
+    _currentVersionCtrl.text = databaseVersion;
     return true;
   }
 
@@ -1034,7 +1073,11 @@ class _WebHomePageState extends State<WebHomePage> {
         }
       }
 
-      await _syncProtectedAssetsWithScanResult(result.assets);
+      try {
+        await _syncProtectedAssetsWithScanResult(result.assets);
+      } catch (e) {
+        appLogger.error('[WebMain] sync protected assets failed', e);
+      }
     } catch (e) {
       appLogger.error('[WebMain] scan failed', e);
       if (!mounted) return;
@@ -1167,6 +1210,7 @@ class _WebHomePageState extends State<WebHomePage> {
   }
 
   Future<void> _stopProtectionForAsset(Asset asset) async {
+    final loadingStartedAt = DateTime.now();
     final scanAssetID = asset.id.trim();
     if (_stoppingProtectionAssetIDs.contains(scanAssetID)) {
       return;
@@ -1175,6 +1219,7 @@ class _WebHomePageState extends State<WebHomePage> {
     setState(() {
       _stoppingProtectionAssetIDs.add(scanAssetID);
     });
+    await WidgetsBinding.instance.endOfFrame;
 
     String resolvedAssetID = scanAssetID;
     String resolvedAssetName = asset.name;
@@ -1255,6 +1300,11 @@ class _WebHomePageState extends State<WebHomePage> {
         );
       }
     } finally {
+      final elapsed = DateTime.now().difference(loadingStartedAt);
+      const minimumLoadingDuration = Duration(milliseconds: 350);
+      if (elapsed < minimumLoadingDuration) {
+        await Future<void>.delayed(minimumLoadingDuration - elapsed);
+      }
       if (mounted) {
         setState(() {
           _stoppingProtectionAssetIDs

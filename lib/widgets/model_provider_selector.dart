@@ -5,9 +5,9 @@ import '../l10n/app_localizations.dart';
 import '../services/provider_service.dart';
 import '../utils/app_fonts.dart';
 
-/// 供应商选择器：摘要按钮 + 搜索 + 分组列表（底部弹层）。
+/// Provider selector: anchored searchable dropdown with grouped options.
 class ModelProviderSelector extends StatefulWidget {
-  /// 创建供应商选择器。
+  /// Creates a provider selector.
   const ModelProviderSelector({
     super.key,
     required this.providers,
@@ -18,22 +18,22 @@ class ModelProviderSelector extends StatefulWidget {
     this.accentColor = const Color(0xFF10B981),
   });
 
-  /// 可选供应商列表。
+  /// Available providers.
   final List<ProviderInfo> providers;
 
-  /// 当前选中的 provider id。
+  /// Current selected provider id.
   final String selectedName;
 
-  /// 选中回调。
+  /// Selection callback.
   final ValueChanged<ProviderInfo> onProviderSelected;
 
-  /// 将 Go 下发的 icon 字符串映射为 IconData。
+  /// Maps Go-provided icon names to Flutter icons.
   final IconData Function(String iconName) iconForName;
 
-  /// 是否禁用交互（只读表单）。
+  /// Whether interactions are disabled.
   final bool readOnly;
 
-  /// 选中态强调色（Bot 与安全模型可区分）。
+  /// Selected state accent color.
   final Color accentColor;
 
   @override
@@ -41,14 +41,44 @@ class ModelProviderSelector extends StatefulWidget {
 }
 
 class _ModelProviderSelectorState extends State<ModelProviderSelector> {
-  /// 与 Go `ProviderInfo.group` 一致：recommended / china / global / local。
   static const List<String> _groupOrder = [
     'recommended',
     'china',
     'global',
     'local',
+    'compatible',
     '',
   ];
+
+  final LayerLink _layerLink = LayerLink();
+  final GlobalKey _fieldKey = GlobalKey();
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  OverlayEntry? _overlayEntry;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() => _overlayEntry?.markNeedsBuild());
+  }
+
+  @override
+  void didUpdateWidget(covariant ModelProviderSelector oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.readOnly || widget.providers.isEmpty) {
+      _closeDropdown();
+      return;
+    }
+    _overlayEntry?.markNeedsBuild();
+  }
+
+  @override
+  void dispose() {
+    _closeDropdown(rebuild: false);
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
 
   String _groupTitle(AppLocalizations l10n, String group) {
     switch (group) {
@@ -72,9 +102,13 @@ class _ModelProviderSelectorState extends State<ModelProviderSelector> {
     return idx < 0 ? _groupOrder.length : idx;
   }
 
-  Map<String, List<ProviderInfo>> _groupProviders() {
+  Map<String, List<ProviderInfo>> _groupProviders({String query = ''}) {
+    final q = query.trim().toLowerCase();
     final map = <String, List<ProviderInfo>>{};
     for (final p in widget.providers) {
+      if (q.isNotEmpty && !_matchesProvider(p, q)) {
+        continue;
+      }
       final g = p.group.isEmpty ? '' : p.group;
       map.putIfAbsent(g, () => []).add(p);
     }
@@ -82,6 +116,15 @@ class _ModelProviderSelectorState extends State<ModelProviderSelector> {
       e.sort((a, b) => a.displayName.compareTo(b.displayName));
     }
     return map;
+  }
+
+  bool _matchesProvider(ProviderInfo p, String query) {
+    final name = p.name.toLowerCase();
+    final display = p.displayName.toLowerCase();
+    final group = p.group.toLowerCase();
+    return name.contains(query) ||
+        display.contains(query) ||
+        group.contains(query);
   }
 
   ProviderInfo? _selectedInfo() {
@@ -93,38 +136,241 @@ class _ModelProviderSelectorState extends State<ModelProviderSelector> {
     return null;
   }
 
-  Future<void> _openSheet() async {
-    if (widget.readOnly || widget.providers.isEmpty) {
+  double _fieldWidth() {
+    final context = _fieldKey.currentContext;
+    final box = context?.findRenderObject() as RenderBox?;
+    return box?.size.width ?? 360;
+  }
+
+  void _toggleDropdown() {
+    if (_overlayEntry == null) {
+      _openDropdown();
       return;
     }
+    _closeDropdown();
+  }
+
+  void _openDropdown() {
+    if (widget.readOnly || widget.providers.isEmpty || _overlayEntry != null) {
+      return;
+    }
+    _searchController.clear();
+    _overlayEntry = OverlayEntry(builder: _buildDropdownOverlay);
+    Overlay.of(context).insert(_overlayEntry!);
+    setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _overlayEntry != null) {
+        _searchFocusNode.requestFocus();
+      }
+    });
+  }
+
+  void _closeDropdown({bool rebuild = true}) {
+    final entry = _overlayEntry;
+    if (entry == null) {
+      return;
+    }
+    _overlayEntry = null;
+    entry.remove();
+    if (mounted && rebuild) {
+      setState(() {});
+    }
+  }
+
+  void _selectProvider(ProviderInfo provider) {
+    _closeDropdown();
+    widget.onProviderSelected(provider);
+  }
+
+  Widget _buildDropdownOverlay(BuildContext overlayContext) {
     final l10n = AppLocalizations.of(context)!;
-    final grouped = _groupProviders();
+    final width = _fieldWidth();
+    final grouped = _groupProviders(query: _searchController.text);
     final keys = grouped.keys.toList()
       ..sort((a, b) => _groupRank(a).compareTo(_groupRank(b)));
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF11111A),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: _closeDropdown,
+          ),
+        ),
+        CompositedTransformFollower(
+          link: _layerLink,
+          showWhenUnlinked: false,
+          targetAnchor: Alignment.bottomLeft,
+          followerAnchor: Alignment.topLeft,
+          offset: const Offset(0, 8),
+          child: Material(
+            color: Colors.transparent,
+            child: ConstrainedBox(
+              constraints: BoxConstraints.tightFor(
+                width: width,
+              ).copyWith(maxHeight: 360),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF11111A),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.1),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      blurRadius: 24,
+                      offset: const Offset(0, 14),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: TextField(
+                        controller: _searchController,
+                        focusNode: _searchFocusNode,
+                        style: AppFonts.inter(
+                          fontSize: 14,
+                          color: Colors.white,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: l10n.modelConfigSearchProvider,
+                          hintStyle: AppFonts.inter(
+                            fontSize: 14,
+                            color: Colors.white30,
+                          ),
+                          prefixIcon: const Icon(
+                            LucideIcons.search,
+                            color: Colors.white54,
+                            size: 18,
+                          ),
+                          filled: true,
+                          fillColor: const Color(0xFF1E1E2E),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Flexible(
+                      child: keys.isEmpty
+                          ? _buildEmptyResult(l10n)
+                          : ListView.builder(
+                              padding: const EdgeInsets.only(
+                                left: 8,
+                                right: 8,
+                                bottom: 8,
+                              ),
+                              shrinkWrap: true,
+                              itemCount: keys.length,
+                              itemBuilder: (context, index) {
+                                final key = keys[index];
+                                final list = grouped[key] ?? const [];
+                                return _buildProviderGroup(l10n, key, list);
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmptyResult(AppLocalizations l10n) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+      child: Text(
+        '未找到匹配的供应商',
+        style: AppFonts.inter(fontSize: 13, color: Colors.white38),
       ),
-      builder: (ctx) {
-        return _ProviderPickerSheet(
-          groupedKeys: keys,
-          grouped: grouped,
-          groupTitle: (g) => _groupTitle(l10n, g),
-          searchHint: l10n.modelConfigSearchProvider,
-          sheetTitle: l10n.modelConfigSelectProviderTitle,
-          iconForName: widget.iconForName,
-          accentColor: widget.accentColor,
-          initialSelected: widget.selectedName,
-          onPick: (p) {
-            Navigator.of(ctx).pop();
-            widget.onProviderSelected(p);
-          },
-        );
-      },
+    );
+  }
+
+  Widget _buildProviderGroup(
+    AppLocalizations l10n,
+    String group,
+    List<ProviderInfo> providers,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+          child: Text(
+            _groupTitle(l10n, group),
+            style: AppFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.white54,
+            ),
+          ),
+        ),
+        ...providers.map(_buildProviderOption),
+      ],
+    );
+  }
+
+  Widget _buildProviderOption(ProviderInfo provider) {
+    final selected = provider.name == widget.selectedName;
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => _selectProvider(provider),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: selected
+              ? widget.accentColor.withValues(alpha: 0.12)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              widget.iconForName(provider.icon),
+              color: selected ? widget.accentColor : Colors.white70,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    provider.displayName,
+                    style: AppFonts.inter(fontSize: 14, color: Colors.white),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    provider.name,
+                    style: AppFonts.firaCode(
+                      fontSize: 11,
+                      color: Colors.white38,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            if (selected)
+              Icon(Icons.check, color: widget.accentColor, size: 18),
+          ],
+        ),
+      ),
     );
   }
 
@@ -133,6 +379,7 @@ class _ModelProviderSelectorState extends State<ModelProviderSelector> {
     final l10n = AppLocalizations.of(context)!;
     final selected = _selectedInfo();
     final label = selected?.displayName ?? widget.selectedName;
+    final isOpen = _overlayEntry != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -146,224 +393,65 @@ class _ModelProviderSelectorState extends State<ModelProviderSelector> {
           ),
         ),
         const SizedBox(height: 8),
-        Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: widget.readOnly ? null : _openSheet,
-            borderRadius: BorderRadius.circular(8),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E1E2E),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    selected != null
-                        ? widget.iconForName(selected.icon)
-                        : LucideIcons.sparkles,
-                    size: 18,
-                    color: Colors.white70,
+        CompositedTransformTarget(
+          link: _layerLink,
+          child: Material(
+            key: _fieldKey,
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: widget.readOnly ? null : _toggleDropdown,
+              borderRadius: BorderRadius.circular(8),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E2E),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isOpen
+                        ? widget.accentColor
+                        : Colors.white.withValues(alpha: 0.1),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      label,
-                      style: AppFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (!widget.readOnly)
+                ),
+                child: Row(
+                  children: [
                     Icon(
-                      LucideIcons.chevronsUpDown,
+                      selected != null
+                          ? widget.iconForName(selected.icon)
+                          : LucideIcons.sparkles,
                       size: 18,
-                      color: Colors.white54,
+                      color: Colors.white70,
                     ),
-                ],
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: AppFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (!widget.readOnly)
+                      Icon(
+                        isOpen
+                            ? LucideIcons.chevronUp
+                            : LucideIcons.chevronDown,
+                        size: 18,
+                        color: Colors.white54,
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ],
-    );
-  }
-}
-
-class _ProviderPickerSheet extends StatefulWidget {
-  const _ProviderPickerSheet({
-    required this.groupedKeys,
-    required this.grouped,
-    required this.groupTitle,
-    required this.searchHint,
-    required this.sheetTitle,
-    required this.iconForName,
-    required this.accentColor,
-    required this.initialSelected,
-    required this.onPick,
-  });
-
-  final List<String> groupedKeys;
-  final Map<String, List<ProviderInfo>> grouped;
-  final String Function(String group) groupTitle;
-  final String searchHint;
-  final String sheetTitle;
-  final IconData Function(String iconName) iconForName;
-  final Color accentColor;
-  final String initialSelected;
-  final ValueChanged<ProviderInfo> onPick;
-
-  @override
-  State<_ProviderPickerSheet> createState() => _ProviderPickerSheetState();
-}
-
-class _ProviderPickerSheetState extends State<_ProviderPickerSheet> {
-  final TextEditingController _search = TextEditingController();
-
-  @override
-  void dispose() {
-    _search.dispose();
-    super.dispose();
-  }
-
-  bool _match(ProviderInfo p, String q) {
-    if (q.isEmpty) {
-      return true;
-    }
-    final n = p.name.toLowerCase();
-    final d = p.displayName.toLowerCase();
-    return n.contains(q) || d.contains(q);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final q = _search.text.trim().toLowerCase();
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 12,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-      ),
-      child: DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.75,
-        minChildSize: 0.45,
-        maxChildSize: 0.95,
-        builder: (context, scrollController) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white24,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                widget.sheetTitle,
-                style: AppFonts.inter(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _search,
-                onChanged: (_) => setState(() {}),
-                style: AppFonts.inter(fontSize: 14, color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: widget.searchHint,
-                  hintStyle: AppFonts.inter(fontSize: 14, color: Colors.white30),
-                  prefixIcon: const Icon(LucideIcons.search, color: Colors.white54),
-                  filled: true,
-                  fillColor: const Color(0xFF1E1E2E),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: ListView.builder(
-                  controller: scrollController,
-                  itemCount: widget.groupedKeys.length,
-                  itemBuilder: (context, index) {
-                    final key = widget.groupedKeys[index];
-                    final list = widget.grouped[key] ?? const [];
-                    final visible = list.where((p) => _match(p, q)).toList();
-                    if (visible.isEmpty) {
-                      return const SizedBox.shrink();
-                    }
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: Text(
-                            widget.groupTitle(key),
-                            style: AppFonts.inter(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white54,
-                            ),
-                          ),
-                        ),
-                        ...visible.map((p) {
-                          final selected = p.name == widget.initialSelected;
-                          return ListTile(
-                            dense: true,
-                            leading: Icon(
-                              widget.iconForName(p.icon),
-                              color: selected ? widget.accentColor : Colors.white70,
-                              size: 20,
-                            ),
-                            title: Text(
-                              p.displayName,
-                              style: AppFonts.inter(
-                                fontSize: 14,
-                                color: Colors.white,
-                              ),
-                            ),
-                            subtitle: Text(
-                              p.name,
-                              style: AppFonts.firaCode(
-                                fontSize: 11,
-                                color: Colors.white38,
-                              ),
-                            ),
-                            trailing: selected
-                                ? Icon(Icons.check, color: widget.accentColor)
-                                : null,
-                            onTap: () => widget.onPick(p),
-                          );
-                        }),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ],
-          );
-        },
-      ),
     );
   }
 }

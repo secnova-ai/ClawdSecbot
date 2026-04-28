@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:lucide_icons/lucide_icons.dart';
 
@@ -7,6 +6,7 @@ import '../config/build_config.dart';
 import '../l10n/app_localizations.dart';
 import '../models/asset_model.dart';
 import '../models/risk_model.dart';
+import '../utils/runtime_platform.dart';
 import 'plugin_service.dart';
 import 'scan_database_service.dart';
 
@@ -249,9 +249,9 @@ class BotScanner {
       return;
     }
 
-    if (Platform.isLinux || Platform.isMacOS) {
+    if (isRuntimeLinux || isRuntimeMacOS) {
       try {
-        final env = Platform.environment;
+        final env = runtimeEnvironment;
         final uidStr = env['UID'] ?? env['EUID'];
         if (uidStr != null) {
           final uid = int.tryParse(uidStr);
@@ -322,6 +322,12 @@ class BotScanner {
             : (normalizedIssueCount > 0
                   ? 'Skill "$skillName" has $normalizedIssueCount security issue(s): ${issues.join("; ")}'
                   : 'Skill "$skillName" was flagged as potentially risky.');
+        final skillPath = (skill['skill_path'] as String? ?? '').trim();
+        final descriptionWithPath = skillPath.isEmpty
+            ? description
+            : _l10n != null && _l10n!.localeName.startsWith('zh')
+            ? '$description\n路径: $skillPath'
+            : '$description\nPath: $skillPath';
 
         risks.add(
           RiskInfo(
@@ -337,7 +343,7 @@ class BotScanner {
                 'skillPath': skill['skill_path'] as String,
             },
             title: title,
-            description: description,
+            description: descriptionWithPath,
             level: _parseSkillRiskLevel(skill['risk_level'] as String?),
             icon: LucideIcons.alertTriangle,
             sourcePlugin: skill['source_plugin'] as String? ?? '',

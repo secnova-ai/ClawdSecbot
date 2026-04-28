@@ -102,12 +102,13 @@ class PluginService {
     if (normalized.isEmpty) {
       return const [];
     }
-    final response = _callOneArg('ScanAssetsByPluginFFI', normalized);
+    final response = await _callNoArgAsync('ScanAssetsFFI');
     if (response['success'] != true || response['data'] is! List) {
       return const [];
     }
     return (response['data'] as List<dynamic>)
         .map((item) => Asset.fromJson(item as Map<String, dynamic>))
+        .where((asset) => _matchesAssetPlugin(asset, normalized))
         .toList(growable: false);
   }
 
@@ -119,9 +120,8 @@ class PluginService {
     if (normalized.isEmpty) {
       return const [];
     }
-    final response = _callTwoArgs(
-      'AssessRisksByPluginFFI',
-      normalized,
+    final response = await _callOneArgAsync(
+      'AssessRisksFFI',
       jsonEncode(scannedHashes),
     );
     if (response['success'] != true || response['data'] is! List) {
@@ -129,6 +129,7 @@ class PluginService {
     }
     return (response['data'] as List<dynamic>)
         .map((item) => _parseRisk(item as Map<String, dynamic>))
+        .where((risk) => _matchesRiskPlugin(risk, normalized))
         .toList(growable: false);
   }
 
@@ -173,31 +174,31 @@ class PluginService {
   Future<Map<String, dynamic>> saveSecurityModelConfig(
     Map<String, dynamic> config,
   ) async {
-    return _callOneArg('SaveSecurityModelConfigFFI', jsonEncode(config));
+    return _callOneArgAsync('SaveSecurityModelConfigFFI', jsonEncode(config));
   }
 
   Future<Map<String, dynamic>> getSecurityModelConfig() async {
-    return _callNoArg('GetSecurityModelConfigFFI');
+    return _callNoArgAsync('GetSecurityModelConfigFFI');
   }
 
   Future<Map<String, dynamic>> saveBotModelConfig(
     Map<String, dynamic> config,
   ) async {
-    return _callOneArg('SaveBotModelConfigFFI', jsonEncode(config));
+    return _callOneArgAsync('SaveBotModelConfigFFI', jsonEncode(config));
   }
 
   Future<Map<String, dynamic>> getBotModelConfig(
     String assetName, [
     String assetID = '',
   ]) async {
-    return _callOneArg('GetBotModelConfigFFI', assetID);
+    return _callOneArgAsync('GetBotModelConfigFFI', assetID);
   }
 
   Future<Map<String, dynamic>> deleteBotModelConfig(
     String assetName, [
     String assetID = '',
   ]) async {
-    return _callOneArg('DeleteBotModelConfigFFI', assetID);
+    return _callOneArgAsync('DeleteBotModelConfigFFI', assetID);
   }
 
   Future<ScanResult> scan() async {
@@ -335,6 +336,24 @@ class PluginService {
     return normalized;
   }
 
+  bool _matchesAssetPlugin(Asset asset, String pluginName) {
+    final normalized = pluginName.toLowerCase();
+    return asset.name.toLowerCase() == normalized ||
+        asset.sourcePlugin.toLowerCase() == normalized;
+  }
+
+  bool _matchesRiskPlugin(RiskInfo risk, String pluginName) {
+    final normalized = pluginName.toLowerCase();
+    final source = risk.sourcePlugin?.toLowerCase();
+    if (source == normalized) {
+      return true;
+    }
+    final args = risk.args;
+    final argSource = args?['source_plugin']?.toString().toLowerCase();
+    final argAsset = args?['asset_name']?.toString().toLowerCase();
+    return argSource == normalized || argAsset == normalized;
+  }
+
   RiskLevel _parseRiskLevel(String? level) {
     switch (level?.toLowerCase()) {
       case 'critical':
@@ -376,6 +395,19 @@ class PluginService {
     }
   }
 
+  Future<Map<String, dynamic>> _callNoArgAsync(String method) async {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
+      return {'success': false, 'error': 'Transport not initialized'};
+    }
+    try {
+      return await transport.callNoArgAsync(method);
+    } catch (e) {
+      appLogger.error('[PluginWeb] $method failed', e);
+      return {'success': false, 'error': '$method failed: $e'};
+    }
+  }
+
   Map<String, dynamic> _callOneArg(String method, String arg) {
     final transport = TransportRegistry.transport;
     if (!transport.isReady) {
@@ -383,6 +415,22 @@ class PluginService {
     }
     try {
       return transport.callOneArg(method, arg);
+    } catch (e) {
+      appLogger.error('[PluginWeb] $method failed', e);
+      return {'success': false, 'error': '$method failed: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> _callOneArgAsync(
+    String method,
+    String arg,
+  ) async {
+    final transport = TransportRegistry.transport;
+    if (!transport.isReady) {
+      return {'success': false, 'error': 'Transport not initialized'};
+    }
+    try {
+      return await transport.callOneArgAsync(method, arg);
     } catch (e) {
       appLogger.error('[PluginWeb] $method failed', e);
       return {'success': false, 'error': '$method failed: $e'};

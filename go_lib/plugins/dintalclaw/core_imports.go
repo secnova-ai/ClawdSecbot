@@ -6,11 +6,11 @@ package dintalclaw
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"os"
 	"go_lib/core/modelfactory"
 	"go_lib/core/proxy"
 	"go_lib/core/shepherd"
 	"go_lib/core/skillscan"
+	"os"
 )
 
 // ==================== Type aliases from core/proxy ====================
@@ -56,6 +56,8 @@ var EnsureScanSkillsReleased = skillscan.EnsureScanSkillsReleased
 var ScanSkillForPromptInjection = skillscan.ScanSkillForPromptInjection
 var detectPromptInjectionPatterns = skillscan.DetectPromptInjectionPatterns
 var listSkillsInDir = skillscan.ListSkillsInDir
+var SerializeSkillIssue = skillscan.SerializeSkillIssue
+var ValidateStoredIssueStrings = skillscan.ValidateStoredIssueStrings
 
 // calculateSkillHash 兼容目录型和文件型技能路径
 func calculateSkillHash(skillPath string) (string, error) {

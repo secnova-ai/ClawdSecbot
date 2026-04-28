@@ -341,7 +341,7 @@ func DeleteSkillInternal(skillPath string) string {
 func convertSkillIssuesToStrings(issues []SkillSecurityIssue) []string {
 	result := make([]string, len(issues))
 	for i, issue := range issues {
-		result[i] = fmt.Sprintf("[%s] %s in %s: %s", issue.Severity, issue.Type, issue.File, issue.Description)
+		result[i] = SerializeSkillIssue(issue)
 	}
 	return result
 }
@@ -426,6 +426,18 @@ func removeBatchSession(batchID string) {
 	activeBatchSessionsMu.Lock()
 	defer activeBatchSessionsMu.Unlock()
 	delete(activeBatchSessions, batchID)
+}
+
+func storedSkillScanReusable(scanRepo *repository.SkillSecurityScanRepository, skill SkillInfo) bool {
+	record, err := scanRepo.GetSkillScanByHash(skill.Hash)
+	if err != nil || record == nil {
+		return false
+	}
+	if record.Safe || len(record.Issues) == 0 {
+		return true
+	}
+	filteredIssues, _ := ValidateStoredIssueStrings(skill.Path, record.Issues)
+	return len(filteredIssues) > 0
 }
 
 func (bs *BatchScanSession) collectLogs() {
@@ -578,7 +590,7 @@ func StartBatchSkillScanInternal() string {
 		if skill.Hash == "" {
 			continue
 		}
-		if hashSet[skill.Hash] {
+		if hashSet[skill.Hash] && storedSkillScanReusable(scanRepo, skill) {
 			continue
 		}
 		skillPaths[skill.Name] = skill.Path
