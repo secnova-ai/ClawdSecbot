@@ -289,8 +289,7 @@ func TestModelConnectionInternal(configJSON string) string {
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := context.Background()
 
 	chatModel, err := CreateChatModelFromConfig(ctx, &config)
 	if err != nil {

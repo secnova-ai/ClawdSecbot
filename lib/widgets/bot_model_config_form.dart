@@ -233,6 +233,19 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
     }
 
     try {
+      final testResult = await _runWithConnectionVerifyNotice(
+        () => _service.testConnection(config),
+      );
+      if (testResult['success'] != true) {
+        setState(() {
+          _error = l10n.modelConfigTestFailed(
+            testResult['error']?.toString() ?? l10n.modelConfigUnknownError,
+          );
+          _saving = false;
+        });
+        return false;
+      }
+
       final success = await _service.saveConfig(config);
       if (success) {
         _savedConfigSignature = _buildConfigSignature(config);
@@ -374,6 +387,60 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
     return false;
   }
 
+  /// 保存前执行连通性验证，并显示处理中提示。
+  /// 若 30 秒后仍未返回，则将提示文案切换为慢响应提醒。
+  Future<Map<String, dynamic>> _runWithConnectionVerifyNotice(
+    Future<Map<String, dynamic>> Function() action,
+  ) async {
+    if (!mounted) {
+      return action();
+    }
+    final l10n = AppLocalizations.of(context)!;
+    final messageNotifier = ValueNotifier<String>(
+      l10n.modelConfigVerifyingConnectionMessage,
+    );
+    bool verifyCompleted = false;
+    Timer? slowResponseTimer;
+    slowResponseTimer = Timer(const Duration(seconds: 30), () {
+      if (verifyCompleted) {
+        return;
+      }
+      messageNotifier.value = l10n.modelConfigSlowResponseHint;
+    });
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+          child: ValueListenableBuilder<String>(
+            valueListenable: messageNotifier,
+            builder: (context, message, child) => ProcessingNoticeCard(
+              title: AppLocalizations.of(
+                dialogContext,
+              )!.modelConfigVerifyingConnectionTitle,
+              message: message,
+            ),
+          ),
+        ),
+      ),
+    );
+    await Future.delayed(const Duration(milliseconds: 50));
+    try {
+      return await action();
+    } finally {
+      verifyCompleted = true;
+      slowResponseTimer.cancel();
+      if (mounted) {
+        final navigator = Navigator.of(context, rootNavigator: true);
+        await navigator.maybePop();
+      }
+      messageNotifier.dispose();
+    }
+  }
+
   /// 执行 Bot 重启动作并显示用户友好的页面提示。
   Future<Map<String, dynamic>> _runWithBotRestartNotice(
     Future<Map<String, dynamic>> Function() action,
@@ -390,9 +457,12 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
           elevation: 0,
           insetPadding: const EdgeInsets.symmetric(horizontal: 28),
           child: ProcessingNoticeCard(
-            title: AppLocalizations.of(dialogContext)!.modelConfigUpdatingBotTitle,
-            message:
-                AppLocalizations.of(dialogContext)!.modelConfigUpdatingBotMessage,
+            title: AppLocalizations.of(
+              dialogContext,
+            )!.modelConfigUpdatingBotTitle,
+            message: AppLocalizations.of(
+              dialogContext,
+            )!.modelConfigUpdatingBotMessage,
           ),
         ),
       ),
@@ -647,8 +717,12 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
             suffixIcon: hasVisibilityToggle
                 ? IconButton(
                     tooltip: obscureText
-                        ? AppLocalizations.of(context)!.modelConfigToggleShowSecret
-                        : AppLocalizations.of(context)!.modelConfigToggleHideSecret,
+                        ? AppLocalizations.of(
+                            context,
+                          )!.modelConfigToggleShowSecret
+                        : AppLocalizations.of(
+                            context,
+                          )!.modelConfigToggleHideSecret,
                     icon: Icon(
                       obscureText ? LucideIcons.eye : LucideIcons.eyeOff,
                       color: Colors.white54,

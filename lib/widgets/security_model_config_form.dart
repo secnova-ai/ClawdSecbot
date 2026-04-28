@@ -12,6 +12,7 @@ import '../services/provider_service.dart';
 import '../utils/app_logger.dart';
 import 'model_id_picker.dart';
 import 'model_provider_selector.dart';
+import 'processing_notice_card.dart';
 
 /// 安全模型配置表单（纯表单组件）
 /// 用于 ShepherdGate 风险检测的 LLM 配置
@@ -183,6 +184,19 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
     }
 
     try {
+      final testResult = await _runWithConnectionVerifyNotice(
+        () => _service.testConnection(config),
+      );
+      if (testResult['success'] != true) {
+        setState(() {
+          _error = l10n.modelConfigTestFailed(
+            testResult['error']?.toString() ?? l10n.modelConfigUnknownError,
+          );
+          _saving = false;
+        });
+        return false;
+      }
+
       final success = await _service.saveConfig(config);
       if (success) {
         _captureCurrentProviderDraft();
@@ -220,6 +234,60 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
         _saving = false;
       });
       return false;
+    }
+  }
+
+  /// 保存前执行连通性验证，并显示处理中提示。
+  /// 若 30 秒后仍未返回，则将提示文案切换为慢响应提醒。
+  Future<Map<String, dynamic>> _runWithConnectionVerifyNotice(
+    Future<Map<String, dynamic>> Function() action,
+  ) async {
+    if (!mounted) {
+      return action();
+    }
+    final l10n = AppLocalizations.of(context)!;
+    final messageNotifier = ValueNotifier<String>(
+      l10n.modelConfigVerifyingConnectionMessage,
+    );
+    bool verifyCompleted = false;
+    Timer? slowResponseTimer;
+    slowResponseTimer = Timer(const Duration(seconds: 30), () {
+      if (verifyCompleted) {
+        return;
+      }
+      messageNotifier.value = l10n.modelConfigSlowResponseHint;
+    });
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+          child: ValueListenableBuilder<String>(
+            valueListenable: messageNotifier,
+            builder: (context, message, child) => ProcessingNoticeCard(
+              title: AppLocalizations.of(
+                dialogContext,
+              )!.modelConfigVerifyingConnectionTitle,
+              message: message,
+            ),
+          ),
+        ),
+      ),
+    );
+    await Future.delayed(const Duration(milliseconds: 50));
+    try {
+      return await action();
+    } finally {
+      verifyCompleted = true;
+      slowResponseTimer.cancel();
+      if (mounted) {
+        final navigator = Navigator.of(context, rootNavigator: true);
+        await navigator.maybePop();
+      }
+      messageNotifier.dispose();
     }
   }
 

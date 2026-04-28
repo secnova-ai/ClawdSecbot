@@ -1194,6 +1194,24 @@ abstract class AppLocalizations {
   /// **'保存中...'**
   String get modelConfigSaving;
 
+  /// No description provided for @modelConfigVerifyingConnectionTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在验证连通性'**
+  String get modelConfigVerifyingConnectionTitle;
+
+  /// No description provided for @modelConfigVerifyingConnectionMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在验证模型连通性，请稍候...'**
+  String get modelConfigVerifyingConnectionMessage;
+
+  /// No description provided for @modelConfigSlowResponseHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前响应较慢，可能影响使用哦'**
+  String get modelConfigSlowResponseHint;
+
   /// No description provided for @modelConfigTestFailed.
   ///
   /// In zh, this message translates to:

@@ -633,6 +633,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get modelConfigSaving => 'Saving...';
 
   @override
+  String get modelConfigVerifyingConnectionTitle => 'Validating connectivity';
+
+  @override
+  String get modelConfigVerifyingConnectionMessage =>
+      'Validating model connectivity, please wait...';
+
+  @override
+  String get modelConfigSlowResponseHint =>
+      'Current response is slow and may impact usage.';
+
+  @override
   String modelConfigTestFailed(String error) {
     return 'Connection test failed: $error';
   }

@@ -335,6 +335,9 @@
   "modelConfigValidateConnection": "验证连通性",
   "modelConfigTestSuccess": "连通性验证通过",
   "modelConfigSaving": "保存中...",
+  "modelConfigVerifyingConnectionTitle": "正在验证连通性",
+  "modelConfigVerifyingConnectionMessage": "正在验证模型连通性，请稍候...",
+  "modelConfigSlowResponseHint": "当前响应较慢，可能影响使用哦",
   "modelConfigTestFailed": "连接测试失败: {error}",
   "@modelConfigTestFailed": {
     "placeholders": {
