@@ -15,16 +15,71 @@ class HttpTransportWeb extends BotsecTransport {
     : _apiBaseUrl = _normalizeBaseUrl(apiBaseUrl),
       _isBootstrapped = isBootstrapped;
 
+  static const authTokenStorageKey = 'botsec_web_auth_token';
+
   String _apiBaseUrl;
   bool _isBootstrapped;
+  String _authToken = '';
 
   String get apiBaseUrl => _apiBaseUrl;
+  String get authToken => _authToken;
 
   @override
   bool get isReady => _apiBaseUrl.isNotEmpty && _isBootstrapped;
 
   void updateApiBaseUrl(String apiBaseUrl) {
     _apiBaseUrl = _normalizeBaseUrl(apiBaseUrl);
+  }
+
+  void setAuthToken(String token) {
+    _authToken = token.trim();
+    try {
+      if (_authToken.isEmpty) {
+        html.window.sessionStorage.remove(authTokenStorageKey);
+      } else {
+        html.window.sessionStorage[authTokenStorageKey] = _authToken;
+      }
+    } catch (_) {}
+  }
+
+  Map<String, dynamic> login({
+    required String username,
+    required String password,
+  }) {
+    final raw = _postRaw(
+      '/api/v1/auth/login',
+      jsonEncode({'username': username, 'password': password}),
+    );
+    final decoded = _decodeEnvelope(raw, 'auth/login');
+    final token = decoded['token']?.toString() ?? '';
+    if (decoded['success'] == true && token.isNotEmpty) {
+      setAuthToken(token);
+    }
+    return decoded;
+  }
+
+  Map<String, dynamic> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) {
+    final raw = _postRaw(
+      '/api/v1/auth/change-password',
+      jsonEncode({
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      }),
+    );
+    final decoded = _decodeEnvelope(raw, 'auth/change-password');
+    if (decoded['success'] == true) {
+      setAuthToken('');
+    }
+    return decoded;
+  }
+
+  Map<String, dynamic> logout() {
+    final raw = _postRaw('/api/v1/auth/logout', '{}');
+    setAuthToken('');
+    return _decodeEnvelope(raw, 'auth/logout');
   }
 
   Map<String, dynamic> bootstrapInit({
@@ -157,6 +212,7 @@ class HttpTransportWeb extends BotsecTransport {
       final req = html.HttpRequest();
       req.open('GET', '$_apiBaseUrl$path', async: false);
       req.withCredentials = false;
+      _applyAuthHeader(req);
       req.send();
       final status = req.status ?? 0;
       final body = req.responseText ?? '';
@@ -218,7 +274,7 @@ class HttpTransportWeb extends BotsecTransport {
       final req = html.HttpRequest();
       req.open('POST', '$baseUrl$path', async: false);
       req.withCredentials = false;
-      // Keep request "simple" to avoid browser preflight edge-cases.
+      _applyAuthHeader(req);
       req.send(body);
       final status = req.status ?? 0;
       final respBody = req.responseText ?? '';
@@ -241,6 +297,7 @@ class HttpTransportWeb extends BotsecTransport {
       req.open('POST', '$baseUrl$path', async: true);
       req.withCredentials = false;
       req.timeout = 60000;
+      _applyAuthHeader(req);
       void complete(String raw) {
         if (!completer.isCompleted) {
           completer.complete(raw);
@@ -329,6 +386,13 @@ class HttpTransportWeb extends BotsecTransport {
     } catch (_) {
       return false;
     }
+  }
+
+  void _applyAuthHeader(html.HttpRequest req) {
+    if (_authToken.isEmpty) {
+      return;
+    }
+    req.setRequestHeader('Authorization', 'Bearer $_authToken');
   }
 
   Map<String, dynamic> _decodeEnvelope(String json, String method) {

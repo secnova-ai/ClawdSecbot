@@ -35,6 +35,8 @@ import '../widgets/scan_result_view.dart';
 import '../widgets/settings_dialog.dart';
 import '../widgets/skill_scan_dialog.dart';
 import '../widgets/skill_scan_results_dialog.dart';
+import 'web_auth_widgets.dart';
+import 'web_connection_widgets.dart';
 
 const _configuredApiBaseUrl = String.fromEnvironment(
   'BOTSEC_WEB_API_BASE_URL',
@@ -97,6 +99,9 @@ class _WebHomePageState extends State<WebHomePage> {
   bool _bootstrapped = false;
   bool _bootstrapping = false;
   bool _showBackendConfig = false;
+  bool _authRequired = false;
+  String _authUsername = 'sysadmin';
+  String _authToken = '';
   String? _bootstrapError;
   bool _uiSessionOwned = false;
   String? _uiSessionError;
@@ -147,6 +152,7 @@ class _WebHomePageState extends State<WebHomePage> {
     _beforeUnloadSubscription = html.window.onBeforeUnload.listen((_) {
       _releaseUiSessionLock();
     });
+    _authToken = _readStoredAuthToken();
 
     _scanLogSubscription = _scanner.logStream.listen((log) {
       if (!mounted) return;
@@ -157,6 +163,16 @@ class _WebHomePageState extends State<WebHomePage> {
 
     _setupTransport(resetBootstrapped: true);
     unawaited(_bootstrap(auto: true));
+  }
+
+  String _readStoredAuthToken() {
+    try {
+      return html.window.sessionStorage[HttpTransportWeb.authTokenStorageKey]
+              ?.trim() ??
+          '';
+    } catch (_) {
+      return '';
+    }
   }
 
   @override
@@ -215,6 +231,7 @@ class _WebHomePageState extends State<WebHomePage> {
       apiBaseUrl: apiBase,
       isBootstrapped: resetBootstrapped ? false : _bootstrapped,
     );
+    _transport!.setAuthToken(_authToken);
     TransportRegistry.setTransport(_transport!);
     if (resetBootstrapped) {
       _bootstrapped = false;
@@ -324,6 +341,40 @@ class _WebHomePageState extends State<WebHomePage> {
       }
       return;
     }
+
+    final authInfo = result['auth'];
+    if (authInfo is Map<String, dynamic>) {
+      _authUsername = authInfo['username']?.toString().trim().isNotEmpty == true
+          ? authInfo['username'].toString().trim()
+          : 'sysadmin';
+      final token = authInfo['token']?.toString() ?? '';
+      if (token.isNotEmpty) {
+        _authToken = token;
+        _transport!.setAuthToken(token);
+      }
+
+      final authRequired = authInfo['auth_required'] == true;
+      if (authRequired) {
+        _authToken = '';
+        _transport!.setAuthToken('');
+        if (mounted) {
+          setState(() {
+            _bootstrapping = false;
+            _bootstrapped = true;
+            _authRequired = true;
+            _bootstrapError = null;
+          });
+        }
+        return;
+      }
+
+      final initialPassword = authInfo['initial_password']?.toString() ?? '';
+      if (authInfo['generated_initial_password'] == true &&
+          initialPassword.isNotEmpty) {
+        _showInitialPasswordOnce(_authUsername, initialPassword);
+      }
+    }
+    _authRequired = false;
 
     _bootstrapRetryTimer?.cancel();
     _bootstrapRetryAttempts = 0;
@@ -780,6 +831,78 @@ class _WebHomePageState extends State<WebHomePage> {
           },
         );
       },
+    );
+  }
+
+  void _showInitialPasswordOnce(String username, String password) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _showLocalizedDialog<void>(
+        barrierDismissible: false,
+        builder: (_) => InitialPasswordDialog(
+          isZh: _isZh,
+          username: username,
+          password: password,
+        ),
+      );
+    });
+  }
+
+  Future<String?> _loginWebUI(String username, String password) async {
+    if (_transport == null) {
+      return _txt('后端连接尚未初始化', 'Backend connection is not initialized');
+    }
+    final result = _transport!.login(username: username, password: password);
+    if (result['success'] != true) {
+      return result['error']?.toString() ?? _txt('登录失败', 'Failed to sign in');
+    }
+    _authToken = _transport!.authToken;
+    _authRequired = false;
+    await _bootstrap(auto: true);
+    return null;
+  }
+
+  Future<String?> _changeWebPassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
+    if (_transport == null) {
+      return _txt('后端连接尚未初始化', 'Backend connection is not initialized');
+    }
+    _releaseUiSessionLock();
+    final result = _transport!.changePassword(
+      currentPassword: currentPassword,
+      newPassword: newPassword,
+    );
+    if (result['success'] != true) {
+      return result['error']?.toString() ??
+          _txt('密码修改失败', 'Failed to change password');
+    }
+    _authToken = '';
+    if (mounted) {
+      setState(() {
+        _authRequired = true;
+        _uiSessionOwned = false;
+        _postBootstrapInitialized = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _txt('密码已修改，请重新登录', 'Password changed. Sign in again.'),
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+    return null;
+  }
+
+  Future<void> _showChangeWebPasswordDialog() async {
+    await _showLocalizedDialog<bool>(
+      builder: (_) => ChangeWebPasswordDialog(
+        isZh: _isZh,
+        onChangePassword: _changeWebPassword,
+      ),
     );
   }
 
@@ -1656,15 +1779,22 @@ class _WebHomePageState extends State<WebHomePage> {
   Widget _buildTitleBar(AppLocalizations l10n) {
     final isOccupied = _bootstrapped && !_uiSessionOwned;
     final canScan =
-        _bootstrapped && _uiSessionOwned && _scanState != ScanState.scanning;
-    final statusText = isOccupied
+        _bootstrapped &&
+        !_authRequired &&
+        _uiSessionOwned &&
+        _scanState != ScanState.scanning;
+    final statusText = _authRequired
+        ? _txt('待登录', 'Sign in')
+        : isOccupied
         ? _txt('已被占用', 'Occupied')
         : _bootstrapped
         ? _txt('运行中', 'Running')
         : _bootstrapping
         ? _txt('连接中', 'Connecting')
         : _txt('重连中', 'Reconnecting');
-    final statusColor = isOccupied
+    final statusColor = _authRequired
+        ? const Color(0xFFF59E0B)
+        : isOccupied
         ? const Color(0xFFF59E0B)
         : _bootstrapped
         ? const Color(0xFF22C55E)
@@ -1719,12 +1849,27 @@ class _WebHomePageState extends State<WebHomePage> {
               color: Colors.white70,
             ),
             tooltip: l10n.auditLog,
-            onPressed: isOccupied ? null : _showAuditLogDialog,
+            onPressed: (isOccupied || _authRequired)
+                ? null
+                : _showAuditLogDialog,
           ),
           IconButton(
             icon: const Icon(LucideIcons.cpu, size: 16, color: Colors.white70),
             tooltip: l10n.settings,
-            onPressed: isOccupied ? null : _handleSettingsTap,
+            onPressed: (isOccupied || _authRequired)
+                ? null
+                : _handleSettingsTap,
+          ),
+          IconButton(
+            icon: const Icon(
+              LucideIcons.keyRound,
+              size: 16,
+              color: Colors.white70,
+            ),
+            tooltip: _txt('修改密码', 'Change Password'),
+            onPressed: (_authRequired || !_bootstrapped)
+                ? null
+                : _showChangeWebPasswordDialog,
           ),
           TextButton.icon(
             onPressed: () {
@@ -1789,174 +1934,40 @@ class _WebHomePageState extends State<WebHomePage> {
   }
 
   Widget _buildBackendConfigPanel(AppLocalizations l10n) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.18),
-        border: Border(
-          bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-        ),
-      ),
-      child: Column(
-        children: [
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _buildConfigField(
-                _txt('API 地址', 'API Endpoint'),
-                _apiBaseCtrl,
-                width: 320,
-              ),
-              _buildConfigField(
-                _txt('工作目录前缀', 'Workspace Prefix'),
-                _workspacePrefixCtrl,
-                width: 320,
-              ),
-              _buildConfigField(
-                _txt('Home 目录', 'Home Directory'),
-                _homeDirCtrl,
-                width: 220,
-              ),
-              _buildConfigField(
-                _txt('当前版本', 'Current Version'),
-                _currentVersionCtrl,
-                width: 140,
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              FilledButton.icon(
-                onPressed: _bootstrapping ? null : _retryBootstrapNow,
-                icon: _bootstrapping
-                    ? const SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(LucideIcons.refreshCw, size: 14),
-                label: Text(_txt('重新连接后端', 'Reconnect Backend')),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                onPressed: _bootstrapping
-                    ? null
-                    : () {
-                        setState(() {
-                          _showBackendConfig = true;
-                        });
-                        _retryBootstrapNow();
-                      },
-                child: Text(_txt('应用配置并重连', 'Apply Config and Reconnect')),
-              ),
-            ],
-          ),
-        ],
-      ),
+    return WebBackendConfigPanel(
+      isZh: _isZh,
+      bootstrapping: _bootstrapping,
+      apiBaseController: _apiBaseCtrl,
+      workspacePrefixController: _workspacePrefixCtrl,
+      homeDirController: _homeDirCtrl,
+      currentVersionController: _currentVersionCtrl,
+      onReconnect: _retryBootstrapNow,
+      onApplyAndReconnect: () {
+        setState(() {
+          _showBackendConfig = true;
+        });
+        _retryBootstrapNow();
+      },
     );
   }
 
   Widget _buildBootstrapStatusBanner() {
-    final message = _bootstrapError?.trim().isNotEmpty == true
-        ? _bootstrapError!.trim()
-        : _txt('正在自动连接后端服务…', 'Connecting to backend automatically...');
-    final isError = _bootstrapError?.trim().isNotEmpty == true;
-
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: isError
-            ? const Color(0xFF7F1D1D).withValues(alpha: 0.35)
-            : const Color(0xFF0B3A6E).withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isError
-              ? const Color(0xFFEF4444).withValues(alpha: 0.5)
-              : const Color(0xFF60A5FA).withValues(alpha: 0.5),
-        ),
-      ),
-      child: Row(
-        children: [
-          if (_bootstrapping)
-            const SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Color(0xFF93C5FD),
-              ),
-            )
-          else
-            Icon(
-              isError ? LucideIcons.alertCircle : LucideIcons.server,
-              size: 14,
-              color: isError
-                  ? const Color(0xFFFCA5A5)
-                  : const Color(0xFF93C5FD),
-            ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: AppFonts.inter(
-                color: isError
-                    ? const Color(0xFFFEE2E2)
-                    : const Color(0xFFDBEAFE),
-                fontSize: 12,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          TextButton(
-            onPressed: _bootstrapping ? null : _retryBootstrapNow,
-            child: Text(_txt('立即重试', 'Retry Now')),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildConfigField(
-    String label,
-    TextEditingController controller, {
-    required double width,
-  }) {
-    return SizedBox(
-      width: width,
-      child: TextField(
-        controller: controller,
-        style: AppFonts.inter(color: Colors.white, fontSize: 13),
-        decoration: InputDecoration(
-          isDense: true,
-          labelText: label,
-          labelStyle: AppFonts.inter(color: Colors.white70, fontSize: 12),
-          filled: true,
-          fillColor: const Color(0xFF142039),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFF33476B)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFF33476B)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFF4F7FD9), width: 1.5),
-          ),
-        ),
-      ),
+    return WebBootstrapStatusBanner(
+      isZh: _isZh,
+      bootstrapping: _bootstrapping,
+      error: _bootstrapError,
+      onRetry: _retryBootstrapNow,
     );
   }
 
   Widget _buildContent(AppLocalizations l10n) {
+    if (_authRequired) {
+      return WebLoginPanel(
+        isZh: _isZh,
+        username: _authUsername,
+        onLogin: _loginWebUI,
+      );
+    }
     if (_bootstrapped && !_uiSessionOwned) {
       return _buildSessionOccupiedState(l10n);
     }

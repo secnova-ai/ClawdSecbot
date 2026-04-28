@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
 
+import '../core_transport/http_transport_web.dart';
 import '../models/version_info.dart';
 import '../utils/app_logger.dart';
 
@@ -113,7 +114,7 @@ class MessageBridgeService {
 
     try {
       final baseUrl = _resolveApiBaseUrl();
-      _eventSource = html.EventSource('$baseUrl/api/v1/events');
+      _eventSource = html.EventSource(_eventsUrl(baseUrl));
 
       _eventSource!.onOpen.listen((_) {
         appLogger.info('[MessageBridgeWeb] SSE connected');
@@ -194,5 +195,25 @@ class MessageBridgeService {
     final scheme = Uri.base.scheme == 'https' ? 'https' : 'http';
     final host = Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1';
     return '$scheme://$host:$apiPort';
+  }
+
+  String _eventsUrl(String baseUrl) {
+    var url = '$baseUrl/api/v1/events';
+    try {
+      final token =
+          html.window.sessionStorage[HttpTransportWeb.authTokenStorageKey]
+              ?.trim() ??
+          '';
+      if (token.isEmpty) {
+        return url;
+      }
+      final uri = Uri.parse(url);
+      url = uri
+          .replace(
+            queryParameters: {...uri.queryParameters, 'access_token': token},
+          )
+          .toString();
+    } catch (_) {}
+    return url;
   }
 }

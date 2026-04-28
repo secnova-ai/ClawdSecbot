@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +25,8 @@ import (
 const rpcPrefix = "/api/v1/rpc/"
 
 type Server struct {
-	hub *EventHub
+	hub  *EventHub
+	auth *WebAuthManager
 
 	mu                 sync.Mutex
 	bridge             *callback_bridge.Bridge
@@ -52,9 +51,20 @@ type uiSessionRequest struct {
 	ClientLabel string `json:"client_label"`
 }
 
+type loginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
 func NewServer(staticWebRoot string) *Server {
 	return &Server{
 		hub:           NewEventHub(),
+		auth:          NewWebAuthManager(),
 		staticWebRoot: strings.TrimSpace(staticWebRoot),
 		uiSessionLock: NewUISessionLock(20 * time.Second),
 	}
@@ -64,6 +74,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/api/v1/bootstrap/init", s.handleBootstrapInit)
+	mux.HandleFunc("/api/v1/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("/api/v1/auth/change-password", s.handleAuthChangePassword)
+	mux.HandleFunc("/api/v1/auth/logout", s.handleAuthLogout)
 	mux.HandleFunc("/api/v1/session/claim", s.handleSessionClaim)
 	mux.HandleFunc("/api/v1/session/heartbeat", s.handleSessionHeartbeat)
 	mux.HandleFunc("/api/v1/session/release", s.handleSessionRelease)
@@ -114,9 +127,77 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 }
 
+func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
+		return
+	}
+
+	var req loginRequest
+	if err := decodeJSONRequest(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+	token, err := s.auth.Login(req.Username, req.Password)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":  true,
+		"username": strings.TrimSpace(req.Username),
+		"token":    token,
+	})
+}
+
+func (s *Server) handleAuthChangePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireAuth(w, r) {
+		return
+	}
+
+	var req changePasswordRequest
+	if err := decodeJSONRequest(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+	if err := s.auth.ChangePassword(req.CurrentPassword, req.NewPassword); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
+func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
+		return
+	}
+	s.auth.Logout(r)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
+func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) bool {
+	if s.auth.AuthenticateRequest(r) {
+		return true
+	}
+	writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
+		"success":    false,
+		"error_code": "auth_required",
+		"error":      "authentication required",
+	})
+	return false
+}
+
 func (s *Server) handleSessionClaim(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireAuth(w, r) {
 		return
 	}
 
@@ -145,6 +226,9 @@ func (s *Server) handleSessionHeartbeat(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
 		return
 	}
+	if !s.requireAuth(w, r) {
+		return
+	}
 
 	req, err := decodeUISessionRequest(r)
 	if err != nil {
@@ -171,6 +255,9 @@ func (s *Server) handleSessionRelease(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
 		return
 	}
+	if !s.requireAuth(w, r) {
+		return
+	}
 
 	req, err := decodeUISessionRequest(r)
 	if err != nil {
@@ -187,16 +274,8 @@ func (s *Server) handleSessionRelease(w http.ResponseWriter, r *http.Request) {
 
 func decodeUISessionRequest(r *http.Request) (uiSessionRequest, error) {
 	var req uiSessionRequest
-	if r.Body == nil {
-		return req, errors.New("request body is required")
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return req, errors.New("failed to read request body")
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return req, fmt.Errorf("invalid JSON: %v", err)
+	if err := decodeJSONRequest(r, &req); err != nil {
+		return req, err
 	}
 
 	req.ClientID = strings.TrimSpace(req.ClientID)
@@ -205,6 +284,21 @@ func decodeUISessionRequest(r *http.Request) (uiSessionRequest, error) {
 		return req, errors.New("client_id is required")
 	}
 	return req, nil
+}
+
+func decodeJSONRequest(r *http.Request, target interface{}) error {
+	if r.Body == nil {
+		return errors.New("request body is required")
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return errors.New("failed to read request body")
+	}
+	if err := json.Unmarshal(body, target); err != nil {
+		return fmt.Errorf("invalid JSON: %v", err)
+	}
+	return nil
 }
 
 func uiSessionStatePayload(state UISessionState) map[string]interface{} {
@@ -222,6 +316,9 @@ func uiSessionStatePayload(state UISessionState) map[string]interface{} {
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
 	if err := s.ensureBridge(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"success": false,
@@ -302,9 +399,28 @@ func (s *Server) handleBootstrapInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authBootstrap, err := s.auth.EnsureInitialized()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+	authRequired := !authBootstrap.GeneratedInitialPassword && !s.auth.AuthenticateRequest(r)
+
 	if err := s.ensureBridge(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
 		return
+	}
+
+	authPayload := map[string]interface{}{
+		"username":                   authBootstrap.Username,
+		"auth_required":              authRequired,
+		"generated_initial_password": authBootstrap.GeneratedInitialPassword,
+	}
+	if authBootstrap.Token != "" {
+		authPayload["token"] = authBootstrap.Token
+	}
+	if authBootstrap.InitialPassword != "" {
+		authPayload["initial_password"] = authBootstrap.InitialPassword
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -312,12 +428,16 @@ func (s *Server) handleBootstrapInit(w http.ResponseWriter, r *http.Request) {
 		"init_paths":   initPathsResult,
 		"init_logging": initLogResult,
 		"init_db":      initDBResult,
+		"auth":         authPayload,
 	})
 }
 
 func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireAuth(w, r) {
 		return
 	}
 
@@ -1234,18 +1354,9 @@ func generateSandboxPolicy(configJSON string) string {
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := strings.TrimSpace(r.Header.Get("Origin"))
-		allowOrigin := isAllowedBrowserOrigin(origin)
 
-		if origin != "" && !allowOrigin {
-			writeJSON(w, http.StatusForbidden, map[string]interface{}{
-				"success": false,
-				"error":   "cross-origin request is not allowed",
-			})
-			return
-		}
-		if origin != "" && allowOrigin {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Private-Network", "true")
 		}
 		w.Header().Set("Vary", "Origin")
@@ -1259,30 +1370,6 @@ func withCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func isAllowedBrowserOrigin(origin string) bool {
-	origin = strings.TrimSpace(origin)
-	if origin == "" {
-		return true
-	}
-	parsed, err := url.Parse(origin)
-	if err != nil || parsed == nil {
-		return false
-	}
-	scheme := strings.ToLower(parsed.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return false
-	}
-	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
-	if host == "" {
-		return false
-	}
-	if host == "localhost" || host == "::1" || host == "127.0.0.1" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
