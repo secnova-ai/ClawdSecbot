@@ -135,6 +135,12 @@ func TestBuildGuardSystemPromptNoSkillCatalogInjection(t *testing.T) {
 	if !strings.Contains(promptWithRules, "Sending email requires confirmation") {
 		t.Fatalf("expected prompt to contain user-defined semantic rule")
 	}
+	if !strings.Contains(promptWithRules, "natural-language risk criteria") || !strings.Contains(promptWithRules, "not keyword lists") {
+		t.Fatalf("expected prompt to describe semantic rules as non-keyword natural-language criteria")
+	}
+	if !strings.Contains(promptWithRules, "semantically violates the rule description") {
+		t.Fatalf("expected prompt to require semantic judgment for user-defined rules")
+	}
 }
 
 func TestBuildGuardSystemPromptInjectionDefense(t *testing.T) {

@@ -13,13 +13,17 @@ type BotModelConfig struct {
 
 // ProtectionRuntimeConfig is the proxy runtime configuration.
 type ProtectionRuntimeConfig struct {
-	ProxyPort                int    `json:"proxy_port,omitempty"`
-	AuditOnly                bool   `json:"audit_only,omitempty"`
-	SingleSessionTokenLimit  int    `json:"single_session_token_limit,omitempty"`
-	DailyTokenLimit          int    `json:"daily_token_limit,omitempty"`
-	InitialDailyTokenUsage   int    `json:"initial_daily_token_usage,omitempty"`
-	CustomSecurityPrompt     string `json:"custom_security_prompt,omitempty"`
-	ReActEnableBuiltinSkills *bool  `json:"react_enable_builtin_skills,omitempty"`
+	ProxyPort                     int    `json:"proxy_port,omitempty"`
+	AuditOnly                     bool   `json:"audit_only,omitempty"`
+	SingleSessionTokenLimit       int    `json:"single_session_token_limit,omitempty"`
+	DailyTokenLimit               int    `json:"daily_token_limit,omitempty"`
+	InitialDailyTokenUsage        int    `json:"initial_daily_token_usage,omitempty"`
+	CustomSecurityPrompt          string `json:"custom_security_prompt,omitempty"`
+	ReActEnableBuiltinSkills      *bool  `json:"react_enable_builtin_skills,omitempty"`
+	DetectionBackend              string `json:"detection_backend,omitempty"`
+	RemoteDetectionEndpoint       string `json:"remote_detection_endpoint,omitempty"`
+	RemoteDetectionAPIKey         string `json:"remote_detection_api_key,omitempty"`
+	RemoteDetectionTimeoutSeconds int    `json:"remote_detection_timeout_seconds,omitempty"`
 }
 
 // ProtectionConfig is the complete configuration for starting proxy protection.

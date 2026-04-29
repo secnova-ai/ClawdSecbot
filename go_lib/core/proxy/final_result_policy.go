@@ -26,7 +26,12 @@ type finalResultPolicyHook interface {
 	Evaluate(ctx context.Context, pp *ProxyProtection, policyCtx finalResultPolicyContext) finalResultPolicyResult
 }
 
+type detectorFinalResultPolicyHook struct{}
 type ruleFinalResultPolicyHook struct{}
+
+func (detectorFinalResultPolicyHook) Name() string {
+	return "detector_final_result"
+}
 
 func (ruleFinalResultPolicyHook) Name() string {
 	return "rule_final_result"
@@ -46,6 +51,57 @@ var (
 	finalResultDangerousAdvicePattern = regexp.MustCompile(`(?i)(rm\s+-[^\s]*r[^\s]*f\s+/|curl\s+[^|]{0,120}\|\s*(sh|bash)|wget\s+[^|]{0,120}\|\s*(sh|bash)|chmod\s+777\s+/|/etc/shadow|launchctl\s+load|crontab\s+.*\*)`)
 	finalResultTrustExploitPattern    = regexp.MustCompile(`(?i)(click|press|choose|approve|confirm).{0,80}(without reviewing|safe to ignore|security warning|permission warning|直接确认|不用看|忽略.*警告|批准.*权限)`)
 )
+
+func (detectorFinalResultPolicyHook) Evaluate(ctx context.Context, pp *ProxyProtection, policyCtx finalResultPolicyContext) finalResultPolicyResult {
+	content := strings.TrimSpace(policyCtx.Content)
+	if content == "" || pp == nil {
+		return finalResultPolicyResult{}
+	}
+	detector := pp.currentSecurityDetector()
+	if detector == nil {
+		return finalResultPolicyResult{}
+	}
+	response, err := detector.Detect(ctx, securityDetectionRequest{
+		Stage:        hookStageFinalResult,
+		RequestID:    policyCtx.RequestID,
+		FinalContent: content,
+		Stream:       policyCtx.Stream,
+	})
+	pp.recordDetectionUsage(securityFlowStageFinalResult, response)
+	if err != nil {
+		logSecurityFlowWarning(securityFlowStageFinalResult, "analysis_failed: backend=%s err=%v action=fail_open", detector.Name(), err)
+		return finalResultPolicyResult{}
+	}
+	if response == nil {
+		return finalResultPolicyResult{}
+	}
+	if detectionResponseAllowed(response) {
+		if !policyCtx.Stream {
+			pp.sendSecurityFlowLog(securityFlowStageFinalResult, "decision: backend=%s action=ALLOW", detector.Name())
+		}
+		return finalResultPolicyResult{Handled: true, Pass: true}
+	}
+
+	decision := securityPolicyDecisionFromDetectionResponse(response, hookStageFinalResult)
+	if decision.Action == decisionActionRedact || decision.Action == decisionActionRewrite {
+		nextContent := response.Content
+		if strings.TrimSpace(nextContent) == "" {
+			nextContent = content
+		}
+		decision.WasRewritten = true
+		pp.sendSecurityFlowLog(securityFlowStageFinalResult, "decision: backend=%s action=%s risk_type=%s reason=%s", detector.Name(), decision.normalizedAction(), decision.RiskType, decision.Reason)
+		return finalResultPolicyResult{
+			Content:  nextContent,
+			Decision: &decision,
+			Handled:  true,
+			Pass:     true,
+			Mutated:  nextContent != content,
+		}
+	}
+
+	pp.sendSecurityFlowLog(securityFlowStageFinalResult, "decision: backend=%s action=%s risk_type=%s reason=%s", detector.Name(), decision.normalizedAction(), decision.RiskType, decision.Reason)
+	return finalResultPolicyResult{Decision: &decision, Handled: true, Pass: false}
+}
 
 func (ruleFinalResultPolicyHook) Evaluate(ctx context.Context, pp *ProxyProtection, policyCtx finalResultPolicyContext) finalResultPolicyResult {
 	_ = ctx
@@ -223,6 +279,7 @@ func (pp *ProxyProtection) recordFinalResultPolicyEvent(requestID string, decisi
 
 func (pp *ProxyProtection) runFinalResultPolicyHooks(ctx context.Context, policyCtx finalResultPolicyContext) finalResultPolicyResult {
 	hooks := []finalResultPolicyHook{
+		detectorFinalResultPolicyHook{},
 		ruleFinalResultPolicyHook{},
 	}
 	for _, hook := range hooks {

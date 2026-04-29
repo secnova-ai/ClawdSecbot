@@ -7,6 +7,7 @@ import '../config/build_config.dart';
 import '../l10n/app_localizations.dart';
 import '../models/protection_config_model.dart';
 import '../models/llm_config_model.dart';
+import '../models/shepherd_rule_model.dart';
 import '../services/model_config_database_service.dart';
 import '../services/model_config_service.dart';
 import '../services/protection_service.dart';
@@ -16,6 +17,7 @@ import '../utils/runtime_platform.dart';
 import 'bot_model_config_form.dart';
 import 'processing_notice_card.dart';
 import 'security_model_config_form.dart';
+import 'shepherd_rules_editor.dart';
 import '../services/plugin_service.dart';
 
 part 'protection_config_dialog_network.dart';
@@ -78,39 +80,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
   static const String _defaultSavingMessage = '正在保存配置，请稍候...';
   static const String _botModelUpdatingMessage =
       '正在更新Openclaw配置，$_dashboardReconnectHint';
-
-  static const Map<String, String> _zhSemanticRuleLabels = {
-    'delete': '删除',
-    'remove': '移除',
-    'drop': '删除（数据库）',
-    'truncate': '清空（数据库）',
-    'update': '更新',
-    'write': '写入',
-    'edit': '编辑',
-    'modify': '修改',
-    'execute': '执行',
-    'exec': '执行',
-    'run': '运行',
-    'install': '安装',
-    'uninstall': '卸载',
-    'chmod': '修改权限',
-    'chown': '修改属主',
-    'sudo': '提权执行',
-    'kill': '终止进程',
-    'shutdown': '关机',
-    'reboot': '重启',
-    'format': '格式化',
-    'rm': '删除文件',
-    'mv': '移动文件',
-    'cp': '复制文件',
-    'curl': '网络请求',
-    'wget': '网络下载',
-    'ssh': '远程连接',
-    'scp': '远程传输',
-    'powershell': 'PowerShell 执行',
-    'bash': 'Bash 执行',
-    'cmd': '命令行执行',
-  };
 
   static const Map<String, String> _zhBundledSkillNameLabels = {
     'data_exfiltration_guard': '数据外泄防护',
@@ -205,12 +174,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
   bool _isValidatingBotModel = false;
   String _savingProgressMessage = _defaultSavingMessage;
 
-  // Shepherd User Rules
-  final List<String> _semanticRules = [];
-  final TextEditingController _semanticRulesInputController =
-      TextEditingController();
-  // 临时关闭用户自定义规则配置区，保留实现便于后续恢复。
-  static const bool _showUserCustomRulesSection = false;
+  final List<ShepherdSemanticRule> _semanticRules = [];
 
   // 内置安全技能列表
   List<Map<String, dynamic>> _bundledSkills = [];
@@ -304,7 +268,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     _pathInputController.dispose();
     _networkOutboundInputController.dispose();
     _shellInputController.dispose();
-    _semanticRulesInputController.dispose();
     super.dispose();
   }
 
@@ -378,20 +341,12 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
       // 仅审计模式
       _auditOnly = _config.auditOnly;
 
-      // Load Shepherd Rules
-      final rules = fallbackToDefaultPolicy
-          ? <String, List<String>>{
-              'semanticRules': await protectionDatabaseService.getShepherdRules(
-                widget.assetName,
-                '',
-              ),
-            }
-          : await pluginService.loadAndSyncShepherdRules(
-              widget.assetName,
-              widget.assetID,
-            );
+      final ruleSet = await protectionDatabaseService.getShepherdRuleSet(
+        widget.assetName,
+        fallbackToDefaultPolicy ? '' : widget.assetID,
+      );
       _semanticRules.clear();
-      _semanticRules.addAll(rules['semanticRules'] ?? const []);
+      _semanticRules.addAll(ruleSet.semanticRules);
 
       // Load bundled ReAct skills
       _bundledSkills = pluginService.listBundledReActSkills();
@@ -694,14 +649,13 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
         '[ProtectionConfig] Save config: asset=${widget.assetName}, editMode=${widget.isEditMode}, enabled=$shouldEnable, wasEnabled=$wasEnabled',
       );
 
-      // Shepherd rules are persisted by Go JSON file directly.
       final ruleAssetID = _config.assetID.isNotEmpty
           ? _config.assetID
           : widget.assetID;
-      await PluginService().updateShepherdRules(
+      await ProtectionDatabaseService().saveShepherdRuleSet(
         widget.assetName,
         ruleAssetID,
-        _semanticRules,
+        ShepherdRuleSet(semanticRules: List.of(_semanticRules)),
       );
 
       final newConfig = _config.copyWith(
@@ -1081,199 +1035,17 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           _buildAuditOnlySwitch(l10n),
           const SizedBox(height: 16),
 
-          // Shepherd User Rules（标题 + 语义规则，整体框起来）
-          if (_showUserCustomRulesSection)
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.03),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        LucideIcons.shieldAlert,
-                        color: Color(0xFF6366F1),
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              l10n.shepherdRulesTitle,
-                              style: AppFonts.inter(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              l10n.shepherdRulesDesc,
-                              style: AppFonts.inter(
-                                fontSize: 12,
-                                color: Colors.white54,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Input
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Container(
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.05),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.1),
-                            ),
-                          ),
-                          child: TextField(
-                            controller: _semanticRulesInputController,
-                            style: AppFonts.firaCode(
-                              fontSize: 12,
-                              color: Colors.white,
-                            ),
-                            decoration: InputDecoration(
-                              hintText: l10n.shepherdSensitivePlaceholder,
-                              hintStyle: AppFonts.inter(
-                                fontSize: 11,
-                                color: Colors.white38,
-                              ),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 10,
-                              ),
-                            ),
-                            onSubmitted: (_) {
-                              final val = _semanticRulesInputController.text
-                                  .trim();
-                              if (val.isNotEmpty &&
-                                  !_semanticRules.contains(val)) {
-                                setState(() => _semanticRules.add(val));
-                                _semanticRulesInputController.clear();
-                                _saveConfig(closeOnSave: false);
-                              }
-                            },
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: GestureDetector(
-                          onTap: () {
-                            final val = _semanticRulesInputController.text
-                                .trim();
-                            if (val.isNotEmpty &&
-                                !_semanticRules.contains(val)) {
-                              setState(() => _semanticRules.add(val));
-                              _semanticRulesInputController.clear();
-                              _saveConfig(closeOnSave: false);
-                            }
-                          },
-                          child: Container(
-                            height: 36,
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF6366F1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Icon(
-                              LucideIcons.plus,
-                              size: 16,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  // Items
-                  if (_semanticRules.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _semanticRules.asMap().entries.map((entry) {
-                        final localized = _localizeSemanticRuleForDisplay(
-                          entry.value,
-                          l10n,
-                        );
-                        final displayText = localized == entry.value
-                            ? entry.value
-                            : localized;
-                        return Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(
-                              0xFFEF4444,
-                            ).withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(
-                              color: const Color(
-                                0xFFEF4444,
-                              ).withValues(alpha: 0.3),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  displayText,
-                                  style: AppFonts.firaCode(
-                                    fontSize: 11,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(
-                                      () => _semanticRules.removeAt(entry.key),
-                                    );
-                                    _saveConfig(closeOnSave: false);
-                                  },
-                                  child: const Icon(
-                                    LucideIcons.x,
-                                    size: 12,
-                                    color: Colors.white54,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-
-          if (_showUserCustomRulesSection) const SizedBox(height: 16),
+          ShepherdRulesEditor(
+            rules: _semanticRules,
+            onChanged: (rules) {
+              setState(() {
+                _semanticRules
+                  ..clear()
+                  ..addAll(rules);
+              });
+            },
+          ),
+          const SizedBox(height: 16),
 
           // 安全技能展示区域
           _buildSecuritySkillsSection(l10n),
@@ -1418,54 +1190,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
         ],
       ),
     );
-  }
-
-  String _localizeSemanticRuleForDisplay(
-    String rawRule,
-    AppLocalizations l10n,
-  ) {
-    if (!l10n.localeName.startsWith('zh')) {
-      return rawRule;
-    }
-    final normalized = rawRule.trim().toLowerCase();
-    if (normalized.isEmpty) {
-      return rawRule;
-    }
-
-    // Match bundled default user rules by sentence template.
-    if (normalized.startsWith(
-      'writing to or modifying critical system files or files outside the project workspace',
-    )) {
-      return '写入或修改关键系统文件，或修改项目工作区之外的文件需要确认（说明：在项目内创建/编辑文件不需要确认）';
-    }
-    if (normalized.startsWith(
-      'sending emails, messages, or notifications to external recipients',
-    )) {
-      return '向外部接收方发送邮件、消息或通知需要确认';
-    }
-    if (normalized.startsWith('executing dangerous shell commands')) {
-      return '执行潜在危险的 Shell 命令需要确认（如 rm -rf /、chmod、systemctl）';
-    }
-    if (normalized.startsWith(
-      'changing global system settings or configuration',
-    )) {
-      return '修改全局系统设置或配置需要确认';
-    }
-    if (normalized.startsWith(
-      'reading/writing memory.md, memory/yyyy-mm-dd.md, agents.md, tools.md is considered safe',
-    )) {
-      return '读取/写入 MEMORY.md、memory/YYYY-MM-DD.md、AGENTS.md、TOOLS.md 视为安全操作，无需二次确认';
-    }
-    if (normalized.startsWith(
-          'any payment or money transfer operations need to be confirmed',
-        ) ||
-        normalized.startsWith(
-          'any payment or money transfer operations must be confirmed',
-        )) {
-      return '任何支付或转账操作都需要用户确认';
-    }
-
-    return _zhSemanticRuleLabels[normalized] ?? rawRule;
   }
 
   String _localizeBundledSkillNameForDisplay(

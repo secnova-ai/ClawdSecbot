@@ -1,6 +1,7 @@
 import 'dart:convert';
 import '../models/protection_analysis_model.dart';
 import '../models/protection_config_model.dart';
+import '../models/shepherd_rule_model.dart';
 import '../core_transport/transport_registry.dart';
 import '../utils/app_logger.dart';
 
@@ -263,19 +264,26 @@ class ProtectionDatabaseService {
     String assetName,
     String assetID,
   ) async {
-    final result = _callFFIOneArg('GetShepherdRulesFFI', assetID);
-    if (result['success'] != true) return [];
-
-    final data = result['data'];
-    if (data is! Map) return [];
-    final rawRules = data['semantic_rules'];
-    if (rawRules is! List) return [];
-
-    return rawRules
-        .whereType<Map>()
-        .map((rule) => (rule['description'] ?? rule['id'] ?? '').toString())
+    final ruleSet = await getShepherdRuleSet(assetName, assetID);
+    return ruleSet.semanticRules
+        .map(
+          (rule) =>
+              rule.description.trim().isNotEmpty ? rule.description : rule.id,
+        )
         .where((value) => value.trim().isNotEmpty)
         .toList(growable: false);
+  }
+
+  Future<ShepherdRuleSet> getShepherdRuleSet(
+    String assetName,
+    String assetID,
+  ) async {
+    final result = _callFFIOneArg('GetShepherdRulesFFI', assetID);
+    if (result['success'] != true) return const ShepherdRuleSet();
+
+    final data = result['data'];
+    if (data is! Map) return const ShepherdRuleSet();
+    return ShepherdRuleSet.fromJson(Map<String, dynamic>.from(data));
   }
 
   Future<void> saveShepherdRules(
@@ -283,22 +291,32 @@ class ProtectionDatabaseService {
     String assetID,
     List<String> ruleDescriptions,
   ) async {
+    final rules = [
+      for (final entry in ruleDescriptions.asMap().entries)
+        ShepherdSemanticRule(
+          id: 'user_rule_${entry.key + 1}',
+          scope: 'custom',
+          description: entry.value,
+        ),
+    ];
+    await saveShepherdRuleSet(
+      assetName,
+      assetID,
+      ShepherdRuleSet(semanticRules: rules),
+    );
+  }
+
+  Future<void> saveShepherdRuleSet(
+    String assetName,
+    String assetID,
+    ShepherdRuleSet ruleSet,
+  ) async {
     final result = _callFFI(
       'SaveShepherdRulesFFI',
       jsonEncode({
         'asset_name': assetName,
         'asset_id': assetID,
-        'semantic_rules': [
-          for (final entry in ruleDescriptions.asMap().entries)
-            {
-              'id': 'user_rule_${entry.key + 1}',
-              'enabled': true,
-              'description': entry.value,
-              'applies_to': ['tool_call', 'tool_call_result', 'final_result'],
-              'action': 'needs_confirmation',
-              'risk_type': 'HIGH_RISK_OPERATION',
-            },
-        ],
+        ...ruleSet.toJson(),
       }),
     );
 

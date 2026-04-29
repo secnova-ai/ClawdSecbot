@@ -62,39 +62,40 @@ func (shepherdToolCallPolicyHook) Evaluate(ctx context.Context, pp *ProxyProtect
 		pp.sendSecurityFlowLog(securityFlowStageChain, "chain_degraded_context: request_id=%s instruction_chain_id=%s reason=%s", policyCtx.RequestID, chainMeta.ChainID, chainMeta.DegradeReason)
 	}
 
+	detector := pp.currentSecurityDetector()
+	if detector == nil {
+		logSecurityFlowError(securityFlowStageToolCall, "analysis_failed: detector_missing action=fail_open")
+		return toolCallPolicyResult{}
+	}
+
 	checkCtx := pp.ctx
 	if checkCtx == nil {
 		checkCtx = context.Background()
 	}
 	checkCtx = shepherd.WithBotID(checkCtx, pp.assetID)
-	decision, err := pp.shepherdGate.CheckToolCall(checkCtx, toolCallInfos, nil, policyCtx.RequestID)
+	response, err := detector.Detect(checkCtx, securityDetectionRequest{
+		Stage:     hookStageToolCall,
+		RequestID: policyCtx.RequestID,
+		ToolCalls: toolCallInfos,
+	})
 
 	pp.statsMu.Lock()
 	pp.analysisCount++
 	pp.statsMu.Unlock()
 	pp.sendMetricsToCallback()
 
-	if decision != nil && decision.Usage != nil {
-		pp.metricsMu.Lock()
-		pp.auditTokens += decision.Usage.TotalTokens
-		pp.auditPromptTokens += decision.Usage.PromptTokens
-		pp.auditCompletionTokens += decision.Usage.CompletionTokens
-		pp.metricsMu.Unlock()
-		pp.sendMetricsToCallback()
-		pp.sendSecurityFlowLog(securityFlowStageToolCall, "analysis_token_usage: total=%d prompt=%d completion=%d",
-			decision.Usage.TotalTokens, decision.Usage.PromptTokens, decision.Usage.CompletionTokens)
-	}
+	pp.recordDetectionUsage(securityFlowStageToolCall, response)
 
 	if err != nil {
-		logSecurityFlowError(securityFlowStageToolCall, "analysis_failed: err=%v action=fail_open", err)
+		logSecurityFlowError(securityFlowStageToolCall, "analysis_failed: backend=%s err=%v action=fail_open", detector.Name(), err)
 		return toolCallPolicyResult{}
 	}
-	if decision == nil || decision.Allowed == nil || *decision.Allowed || decision.Status == "ALLOWED" {
-		pp.sendSecurityFlowLog(securityFlowStageToolCall, "decision: action=ALLOW")
+	if response == nil || response.Allowed == nil || detectionResponseAllowed(response) {
+		pp.sendSecurityFlowLog(securityFlowStageToolCall, "decision: backend=%s action=ALLOW", detector.Name())
 		return toolCallPolicyResult{}
 	}
 
-	policyDecision := securityPolicyDecisionFromToolCallLLM(decision, toolCallInfos)
+	policyDecision := securityPolicyDecisionFromToolCallDetection(response, toolCallInfos)
 	if pp.consumeConfirmedToolCallGrantForRequest(policyCtx.RequestID, policyDecision) {
 		pp.sendSecurityFlowLog(securityFlowStageToolCall, "decision: action=ALLOW reason=confirmed_matching_tool_call risk_type=%s", policyDecision.RiskType)
 		return toolCallPolicyResult{}
@@ -105,6 +106,25 @@ func (shepherdToolCallPolicyHook) Evaluate(ctx context.Context, pp *ProxyProtect
 		Handled:  true,
 		Pass:     false,
 	}
+}
+
+func securityPolicyDecisionFromToolCallDetection(response *securityDetectionResponse, toolCalls []ToolCallInfo) securityPolicyDecision {
+	decision := shepherdDecisionFromDetectionResponse(response)
+	if decision != nil && strings.TrimSpace(response.Action) == "" {
+		return securityPolicyDecisionFromToolCallLLM(decision, toolCalls)
+	}
+	result := securityPolicyDecisionFromDetectionResponse(response, hookStageToolCall)
+	if result.ToolCallID == "" && len(toolCalls) > 0 {
+		result.ToolCallID = toolCalls[0].ToolCallID
+	}
+	if result.EvidenceSummary == "" {
+		evidenceParts := make([]string, 0, len(toolCalls))
+		for _, tc := range toolCalls {
+			evidenceParts = append(evidenceParts, strings.TrimSpace(tc.Name+" "+tc.RawArgs))
+		}
+		result.EvidenceSummary = truncateString(redactSecurityEvidence(strings.Join(evidenceParts, "\n")), 240)
+	}
+	return result
 }
 
 func securityPolicyDecisionFromToolCallLLM(decision *shepherd.ShepherdDecision, toolCalls []ToolCallInfo) securityPolicyDecision {

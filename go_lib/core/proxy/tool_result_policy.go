@@ -215,8 +215,16 @@ func (shepherdToolResultPolicyHook) Evaluate(ctx context.Context, pp *ProxyProte
 		pp.sendSecurityFlowLog(securityFlowStageChain, "chain_degraded_context: request_id=%s instruction_chain_id=%s reason=%s", policyCtx.RequestID, chainMeta.ChainID, chainMeta.DegradeReason)
 	}
 
-	securityModel := pp.shepherdGate.GetModelName()
-	logSecurityFlowInfo(securityFlowStageToolCallResult, "deep_analysis_triggered: tool_calls=%d tool_results=%d security_model=%s", len(toolCallInfos), len(toolResultInfos), securityModel)
+	detector := pp.currentSecurityDetector()
+	if detector == nil {
+		logSecurityFlowError(securityFlowStageToolCallResult, "analysis_failed: detector_missing action=fail_open")
+		return toolResultPolicyResult{}
+	}
+	securityModel := ""
+	if pp.shepherdGate != nil {
+		securityModel = pp.shepherdGate.GetModelName()
+	}
+	logSecurityFlowInfo(securityFlowStageToolCallResult, "deep_analysis_triggered: backend=%s tool_calls=%d tool_results=%d security_model=%s", detector.Name(), len(toolCallInfos), len(toolResultInfos), securityModel)
 
 	// Use the proxy lifecycle context instead of the request context so a
 	// client-side disconnect does not cancel security analysis mid-flight.
@@ -225,29 +233,30 @@ func (shepherdToolResultPolicyHook) Evaluate(ctx context.Context, pp *ProxyProte
 		checkCtx = context.Background()
 	}
 	checkCtx = shepherd.WithBotID(checkCtx, pp.assetID)
-	decision, err := pp.shepherdGate.CheckToolCall(checkCtx, toolCallInfos, toolResultInfos, policyCtx.RequestID)
+	response, err := detector.Detect(checkCtx, securityDetectionRequest{
+		Stage:       hookStageToolCallResult,
+		RequestID:   policyCtx.RequestID,
+		ToolCalls:   toolCallInfos,
+		ToolResults: toolResultInfos,
+	})
 
 	pp.statsMu.Lock()
 	pp.analysisCount++
 	pp.statsMu.Unlock()
 	pp.sendMetricsToCallback()
 
-	if decision != nil && decision.Usage != nil {
-		pp.metricsMu.Lock()
-		pp.auditTokens += decision.Usage.TotalTokens
-		pp.auditPromptTokens += decision.Usage.PromptTokens
-		pp.auditCompletionTokens += decision.Usage.CompletionTokens
-		pp.metricsMu.Unlock()
-		pp.sendMetricsToCallback()
-		pp.sendSecurityFlowLog(securityFlowStageToolCallResult, "analysis_token_usage: total=%d prompt=%d completion=%d",
-			decision.Usage.TotalTokens, decision.Usage.PromptTokens, decision.Usage.CompletionTokens)
-	}
+	pp.recordDetectionUsage(securityFlowStageToolCallResult, response)
 
 	if err != nil {
-		logSecurityFlowError(securityFlowStageToolCallResult, "analysis_failed: err=%v action=fail_open", err)
+		logSecurityFlowError(securityFlowStageToolCallResult, "analysis_failed: backend=%s err=%v action=fail_open", detector.Name(), err)
 		return toolResultPolicyResult{}
 	}
-	if decision.Status == "ALLOWED" {
+	if response == nil || detectionResponseAllowed(response) {
+		decision := shepherdDecisionFromDetectionResponse(response)
+		if decision == nil {
+			allowed := true
+			decision = &shepherd.ShepherdDecision{Status: "ALLOWED", Allowed: &allowed}
+		}
 		logSecurityFlowInfo(securityFlowStageToolCallResult, "decision: status=ALLOWED tools=%s", strings.Join(toolNames, ", "))
 		pp.sendSecurityFlowLog(securityFlowStageToolCallResult, "decision: status=ALLOWED tools=%s", strings.Join(toolNames, ", "))
 		pp.sendLog("proxy_tool_result_decision", map[string]interface{}{
@@ -269,6 +278,16 @@ func (shepherdToolResultPolicyHook) Evaluate(ctx context.Context, pp *ProxyProte
 			tracker.SetRequestDecision(policyCtx.RequestID, "ALLOW", "", decision.Reason, 0)
 		})
 		return toolResultPolicyResult{}
+	}
+	decision := shepherdDecisionFromDetectionResponse(response)
+	if decision == nil {
+		decision = &shepherd.ShepherdDecision{
+			Status:     normalizeDetectionAction(response.Action, response.Status),
+			Allowed:    response.Allowed,
+			Reason:     response.Reason,
+			ActionDesc: response.ActionDesc,
+			RiskType:   response.RiskType,
+		}
 	}
 
 	logSecurityFlowInfo(securityFlowStageToolCallResult, "decision: status=%s reason=%s", decision.Status, decision.Reason)

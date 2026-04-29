@@ -45,16 +45,20 @@ func (shepherdUserInputPolicyHook) Evaluate(ctx context.Context, pp *ProxyProtec
 	}
 	pp.sendSecurityFlowLog(securityFlowStageUserInput, "analysis_start: user_message_count=%d combined_chars=%d", countUserMessages(policyCtx.Messages), len(userText))
 
-	if llmResult, ok := pp.evaluateUserInputWithSecurityModel(ctx, policyCtx.RequestID, userText); ok {
-		return llmResult
+	if detectorResult, ok := pp.evaluateUserInputWithDetector(ctx, policyCtx.RequestID, userText); ok {
+		return detectorResult
 	}
 
 	pp.sendSecurityFlowLog(securityFlowStageUserInput, "decision: action=ALLOW")
 	return userInputPolicyResult{}
 }
 
-func (pp *ProxyProtection) evaluateUserInputWithSecurityModel(ctx context.Context, requestID, userText string) (userInputPolicyResult, bool) {
-	if pp == nil || pp.shepherdGate == nil {
+func (pp *ProxyProtection) evaluateUserInputWithDetector(ctx context.Context, requestID, userText string) (userInputPolicyResult, bool) {
+	if pp == nil {
+		return userInputPolicyResult{}, false
+	}
+	detector := pp.currentSecurityDetector()
+	if detector == nil {
 		return userInputPolicyResult{}, false
 	}
 
@@ -63,34 +67,54 @@ func (pp *ProxyProtection) evaluateUserInputWithSecurityModel(ctx context.Contex
 		checkCtx = context.Background()
 	}
 	checkCtx = shepherd.WithBotID(checkCtx, pp.assetID)
-	decision, err := pp.shepherdGate.CheckUserInput(checkCtx, userText)
-	if decision != nil && decision.Usage != nil {
-		pp.metricsMu.Lock()
-		pp.auditTokens += decision.Usage.TotalTokens
-		pp.auditPromptTokens += decision.Usage.PromptTokens
-		pp.auditCompletionTokens += decision.Usage.CompletionTokens
-		pp.metricsMu.Unlock()
-		pp.sendMetricsToCallback()
-		pp.sendSecurityFlowLog(securityFlowStageUserInput, "analysis_token_usage: total=%d prompt=%d completion=%d",
-			decision.Usage.TotalTokens, decision.Usage.PromptTokens, decision.Usage.CompletionTokens)
-	}
+	response, err := detector.Detect(checkCtx, securityDetectionRequest{
+		Stage:     hookStageUserInput,
+		RequestID: requestID,
+		UserInput: userText,
+	})
+	pp.recordDetectionUsage(securityFlowStageUserInput, response)
 	if err != nil {
-		logSecurityFlowWarning(securityFlowStageUserInput, "semantic_analysis_failed: err=%v action=fail_open", err)
+		logSecurityFlowWarning(securityFlowStageUserInput, "semantic_analysis_failed: backend=%s err=%v action=fail_open", detector.Name(), err)
 		return userInputPolicyResult{}, false
 	}
-	if decision == nil || decision.Allowed == nil {
+	if response == nil || response.Allowed == nil {
 		logSecurityFlowWarning(securityFlowStageUserInput, "semantic_analysis_empty action=fail_open")
 		return userInputPolicyResult{}, false
 	}
-	if *decision.Allowed {
-		pp.sendSecurityFlowLog(securityFlowStageUserInput, "semantic_decision: action=ALLOW reason=%s", decision.Reason)
+	if *response.Allowed {
+		pp.sendSecurityFlowLog(securityFlowStageUserInput, "semantic_decision: backend=%s action=ALLOW reason=%s", detector.Name(), response.Reason)
 		return userInputPolicyResult{}, false
 	}
 
-	policyDecision := securityPolicyDecisionFromUserInputLLM(decision)
-	pp.sendSecurityFlowLog(securityFlowStageUserInput, "semantic_decision: action=%s risk_type=%s reason=%s", policyDecision.Action, policyDecision.RiskType, policyDecision.Reason)
+	policyDecision := securityPolicyDecisionFromUserInputDetection(response)
+	pp.sendSecurityFlowLog(securityFlowStageUserInput, "semantic_decision: backend=%s action=%s risk_type=%s reason=%s", detector.Name(), policyDecision.Action, policyDecision.RiskType, policyDecision.Reason)
 	result, pass := pp.applyRequestSecurityPolicyDecision(ctx, requestID, policyDecision)
 	return userInputPolicyResult{Result: result, Pass: pass, Handled: true}, true
+}
+
+func (pp *ProxyProtection) recordDetectionUsage(stage string, response *securityDetectionResponse) {
+	if pp == nil || response == nil || response.Usage == nil {
+		return
+	}
+	pp.metricsMu.Lock()
+	pp.auditTokens += response.Usage.TotalTokens
+	pp.auditPromptTokens += response.Usage.PromptTokens
+	pp.auditCompletionTokens += response.Usage.CompletionTokens
+	pp.metricsMu.Unlock()
+	pp.sendMetricsToCallback()
+	pp.sendSecurityFlowLog(stage, "analysis_token_usage: total=%d prompt=%d completion=%d",
+		response.Usage.TotalTokens, response.Usage.PromptTokens, response.Usage.CompletionTokens)
+}
+
+func securityPolicyDecisionFromUserInputDetection(response *securityDetectionResponse) securityPolicyDecision {
+	if strings.TrimSpace(response.Action) != "" {
+		return securityPolicyDecisionFromDetectionResponse(response, hookStageUserInput)
+	}
+	decision := shepherdDecisionFromDetectionResponse(response)
+	if decision == nil {
+		return securityPolicyDecisionFromDetectionResponse(response, hookStageUserInput)
+	}
+	return securityPolicyDecisionFromUserInputLLM(decision)
 }
 
 func securityPolicyDecisionFromUserInputLLM(decision *shepherd.ShepherdDecision) securityPolicyDecision {

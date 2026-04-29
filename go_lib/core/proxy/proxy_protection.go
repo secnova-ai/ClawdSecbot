@@ -48,6 +48,7 @@ type ProxyProtection struct {
 	// targetProviderName is the provider used to update openclaw.json after listen.
 	targetProviderName string
 	shepherdGate       *shepherd.ShepherdGate // ShepherdGate security module
+	securityDetector   securityDetector       // Pluggable stage detector.
 	toolValidator      *ToolValidator         // Tool validation for pre-check
 
 	// Config fields protected by configMu
@@ -438,13 +439,23 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 
 	// ==================== Security Model Config (for ShepherdGate) ====================
 	// ShepherdGate uses the security model's config to create its own ChatModel for risk analysis.
-	if securityModel == nil {
+	detectionBackend := normalizedDetectionBackend(runtimeValue(runtime, "DetectionBackend", os.Getenv("BOTSEC_DETECTION_BACKEND")))
+	if securityModel == nil && detectionBackend == detectionBackendLLMAgent {
 		return nil, fmt.Errorf("security model config is required: ShepherdGate needs security model for risk analysis")
 	}
 	reactSkillCfg := buildReActSkillRuntimeConfig(runtime)
-	shepherdGate, err := shepherd.NewShepherdGateWithRuntime(securityModel, reactSkillCfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create shepherd gate: %w", err)
+	var shepherdGate *shepherd.ShepherdGate
+	var gateErr error
+	if detectionBackend == detectionBackendLLMAgent {
+		shepherdGate, gateErr = shepherd.NewShepherdGateWithRuntime(securityModel, reactSkillCfg)
+		if gateErr != nil {
+			return nil, fmt.Errorf("failed to create shepherd gate: %w", gateErr)
+		}
+	} else {
+		shepherdGate, gateErr = shepherd.NewShepherdGateWithoutModel()
+		if gateErr != nil {
+			return nil, fmt.Errorf("failed to create model-free shepherd gate: %w", gateErr)
+		}
 	}
 	shepherdGate.SetAssetContext(protectionConfig.AssetName, protectionConfig.AssetID)
 	if persistedRulesJSON, found, repoErr := repository.NewProtectionRepository(nil).GetShepherdRulesRaw(protectionConfig.AssetID); repoErr != nil {
@@ -456,7 +467,16 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 			shepherdGate.UpdateUserRulesConfig(persistedRules)
 		}
 	}
-	logging.Info("[ProxyProtection] Security model: Provider=%s, Model=%s", securityModel.Provider, securityModel.Model)
+	if securityModel != nil {
+		logging.Info("[ProxyProtection] Security detector: backend=%s, security_model_provider=%s, security_model=%s", detectionBackend, securityModel.Provider, securityModel.Model)
+	} else {
+		logging.Info("[ProxyProtection] Security detector: backend=%s, security_model=none", detectionBackend)
+	}
+
+	securityDetector, err := newSecurityDetector(runtime, shepherdGate, assetName, assetID)
+	if err != nil {
+		return nil, err
+	}
 
 	// ==================== Runtime Config ====================
 	auditOnly := false
@@ -479,6 +499,7 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 		assetID:                 strings.TrimSpace(protectionConfig.AssetID),
 		targetProviderName:      string(botProviderName),
 		shepherdGate:            shepherdGate,
+		securityDetector:        securityDetector,
 		toolValidator:           NewToolValidator(logChan),
 		auditOnly:               auditOnly,
 		singleSessionTokenLimit: singleSessionTokenLimit,
@@ -548,6 +569,15 @@ func (pp *ProxyProtection) UpdateProtectionConfig(runtime *ProtectionRuntimeConf
 		} else {
 			logging.Info("[ProxyProtection] ReAct skill runtime config applied: enableBuiltin=%v",
 				reactCfg.EnableBuiltinSkills)
+		}
+	}
+	if shouldUpdateSecurityDetector(runtime) {
+		if detector, err := newSecurityDetector(runtime, pp.shepherdGate, pp.assetName, pp.assetID); err != nil {
+			logging.Warning("[ProxyProtection] Failed to update security detector: %v", err)
+		} else {
+			pp.configMu.Lock()
+			pp.securityDetector = detector
+			pp.configMu.Unlock()
 		}
 	}
 
