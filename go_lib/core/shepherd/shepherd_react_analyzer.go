@@ -479,10 +479,11 @@ func (a *ToolCallReActAnalyzer) Analyze(ctx context.Context, toolCalls []ToolCal
 	traceGuard(sessionID, "ADK", "agent completed, output_len=%d", len(lastContent))
 	logging.ShepherdGateInfo("%s[react][Analyze][%s] adk_agent_output_len=%d", shepherdFlowLogPrefix, sessionID, len(lastContent))
 
-	parsed, ok := parseReactRiskDecision(lastContent)
-	if !ok {
-		traceGuard(sessionID, "ADK", "output parse failed")
-		return nil, newUsageError(fmt.Errorf("ADK agent output not parseable"), analysisUsage)
+	parsed, parseErr := parseReactRiskDecisionDetailed(lastContent)
+	if parseErr != nil {
+		traceGuard(sessionID, "ADK", "output parse failed: err=%v output_len=%d output=%q",
+			parseErr, len(lastContent), shortenForLog(lastContent, 4000))
+		return nil, newUsageError(fmt.Errorf("ADK agent output not parseable: %w", parseErr), analysisUsage)
 	}
 	parsed = normalizeReactRiskDecisionConsistency(parsed)
 	parsed.Skill = "progressive_guard"
@@ -616,10 +617,11 @@ func (a *ToolCallReActAnalyzer) AnalyzeUserInput(ctx context.Context, userInput 
 	}
 
 	traceGuard(sessionID, "ADK", "user_input agent completed, output_len=%d", len(lastContent))
-	parsed, ok := parseReactRiskDecision(lastContent)
-	if !ok {
-		traceGuard(sessionID, "ADK", "user_input output parse failed: output=%s", shortenForLog(lastContent, 500))
-		return nil, newUsageError(fmt.Errorf("ADK user input agent output not parseable"), analysisUsage)
+	parsed, parseErr := parseReactRiskDecisionDetailed(lastContent)
+	if parseErr != nil {
+		traceGuard(sessionID, "ADK", "user_input output parse failed: err=%v output_len=%d output=%q",
+			parseErr, len(lastContent), shortenForLog(lastContent, 4000))
+		return nil, newUsageError(fmt.Errorf("ADK user input agent output not parseable: %w", parseErr), analysisUsage)
 	}
 	parsed = normalizeReactRiskDecisionConsistency(parsed)
 	parsed.Skill = "user_input_guard"
@@ -867,6 +869,11 @@ func formatToolLogExtra(toolName, argumentsInJSON string) string {
 // ==================== Output parsing ====================
 
 func parseReactRiskDecision(output string) (*ReactRiskDecision, bool) {
+	decision, err := parseReactRiskDecisionDetailed(output)
+	return decision, err == nil
+}
+
+func parseReactRiskDecisionDetailed(output string) (*ReactRiskDecision, error) {
 	type response struct {
 		Allowed    *bool  `json:"allowed"`
 		Reason     string `json:"reason"`
@@ -879,17 +886,18 @@ func parseReactRiskDecision(output string) (*ReactRiskDecision, bool) {
 	cleaned := extractJSON(output)
 	var r response
 	if err := json.Unmarshal([]byte(cleaned), &r); err != nil {
+		primaryErr := err
 		re := regexp.MustCompile(`\{[\s\S]*"allowed"[\s\S]*\}`)
 		match := re.FindString(output)
 		if match == "" {
-			return nil, false
+			return nil, fmt.Errorf("invalid decision JSON: %v; no fallback object containing allowed found; extracted=%q", primaryErr, shortenForLog(cleaned, 800))
 		}
 		if err := json.Unmarshal([]byte(extractJSON(match)), &r); err != nil {
-			return nil, false
+			return nil, fmt.Errorf("invalid decision JSON: %v; fallback object also invalid: %w; fallback=%q", primaryErr, err, shortenForLog(match, 800))
 		}
 	}
 	if r.Allowed == nil {
-		return nil, false
+		return nil, fmt.Errorf("invalid decision JSON: missing required boolean field allowed; extracted=%q", shortenForLog(cleaned, 800))
 	}
 
 	if r.Confidence < 0 {
@@ -915,7 +923,7 @@ func parseReactRiskDecision(output string) (*ReactRiskDecision, bool) {
 		Confidence: r.Confidence,
 		ActionDesc: strings.TrimSpace(r.ActionDesc),
 		RiskType:   strings.TrimSpace(r.RiskType),
-	}, true
+	}, nil
 }
 
 // normalizeReactRiskDecisionConsistency 统一修正模型输出中的低风险判定一致性。

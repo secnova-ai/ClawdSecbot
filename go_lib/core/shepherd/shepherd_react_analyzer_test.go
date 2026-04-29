@@ -52,6 +52,28 @@ func TestParseReactRiskDecision(t *testing.T) {
 	}
 }
 
+func TestParseReactRiskDecisionDetailedError(t *testing.T) {
+	t.Run("invalid JSON includes parse context", func(t *testing.T) {
+		_, err := parseReactRiskDecisionDetailed("model wrote prose instead of JSON")
+		if err == nil {
+			t.Fatalf("expected parse error")
+		}
+		if !strings.Contains(err.Error(), "invalid decision JSON") || !strings.Contains(err.Error(), "no fallback object containing allowed found") {
+			t.Fatalf("expected detailed parse error, got=%v", err)
+		}
+	})
+
+	t.Run("missing allowed includes required field", func(t *testing.T) {
+		_, err := parseReactRiskDecisionDetailed(`{"reason":"ok"}`)
+		if err == nil {
+			t.Fatalf("expected parse error")
+		}
+		if !strings.Contains(err.Error(), "missing required boolean field allowed") {
+			t.Fatalf("expected missing allowed error, got=%v", err)
+		}
+	})
+}
+
 // TestNormalizeReactRiskDecisionConsistency 验证低风险判定的一致性兜底逻辑。
 func TestNormalizeReactRiskDecisionConsistency(t *testing.T) {
 	t.Run("low risk blocked decision should be normalized to allow", func(t *testing.T) {
