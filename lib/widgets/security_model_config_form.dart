@@ -66,7 +66,7 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
   final TextEditingController _apiKeyController = TextEditingController();
   final TextEditingController _modelController = TextEditingController();
   final TextEditingController _secretKeyController = TextEditingController();
-  String _selectedType = 'ollama';
+  String _selectedType = 'openai_compatible';
   final Map<String, SecurityModelConfig> _providerDrafts = {};
 
   /// Dynamically loaded providers from Go layer.
@@ -111,7 +111,13 @@ class SecurityModelConfigFormState extends State<SecurityModelConfigForm> {
 
   /// Returns the default model type.
   String _getDefaultType() {
-    return _providers.isNotEmpty ? _providers.first.name : 'ollama';
+    final hasOpenAICompatible = _providers.any(
+      (p) => p.name == 'openai_compatible',
+    );
+    if (hasOpenAICompatible) {
+      return 'openai_compatible';
+    }
+    return _providers.isNotEmpty ? _providers.first.name : 'openai_compatible';
   }
 
   /// Normalizes loaded model type to an available option.

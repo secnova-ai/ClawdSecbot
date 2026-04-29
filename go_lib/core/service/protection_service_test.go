@@ -542,3 +542,143 @@ func TestSaveProtectionConfig_PreservesBotModelConfig(t *testing.T) {
 		t.Errorf("Expected model preserved, got: %v", preserved["model"])
 	}
 }
+
+func TestSaveProtectionConfig_PreservesInheritedDefaultPolicyWhenFieldOmitted(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	initial := `{
+		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
+		"inherits_default_policy": true,
+		"enabled": true,
+		"audit_only": false,
+		"sandbox_enabled": true
+	}`
+	result := SaveProtectionConfig(initial)
+	if result["success"] != true {
+		t.Fatalf("initial SaveProtectionConfig failed: %v", result)
+	}
+
+	// 模拟 UI 打开后未修改配置直接保存：旧 payload 不携带 inherits_default_policy。
+	updateWithoutInheritanceFlag := `{
+		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
+		"enabled": true,
+		"audit_only": false,
+		"sandbox_enabled": true
+	}`
+	result = SaveProtectionConfig(updateWithoutInheritanceFlag)
+	if result["success"] != true {
+		t.Fatalf("SaveProtectionConfig without inheritance flag failed: %v", result)
+	}
+
+	getResult := GetProtectionConfig("openclaw:test-1")
+	if getResult["success"] != true {
+		t.Fatalf("GetProtectionConfig failed: %v", getResult)
+	}
+	dataJSON, _ := json.Marshal(getResult["data"])
+	var config map[string]interface{}
+	if err := json.Unmarshal(dataJSON, &config); err != nil {
+		t.Fatalf("failed to unmarshal config: %v", err)
+	}
+	if config["inherits_default_policy"] != true {
+		t.Fatalf("expected inherits_default_policy to be preserved, got: %v", config["inherits_default_policy"])
+	}
+}
+
+func TestSaveProtectionConfig_ClearsInheritedDefaultPolicyWhenContentChanges(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	initial := `{
+		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
+		"inherits_default_policy": true,
+		"enabled": true,
+		"audit_only": false,
+		"sandbox_enabled": true,
+		"single_session_token_limit": 1000
+	}`
+	result := SaveProtectionConfig(initial)
+	if result["success"] != true {
+		t.Fatalf("initial SaveProtectionConfig failed: %v", result)
+	}
+
+	changedWithoutInheritanceFlag := `{
+		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-1",
+		"enabled": true,
+		"audit_only": true,
+		"sandbox_enabled": true,
+		"single_session_token_limit": 1000
+	}`
+	result = SaveProtectionConfig(changedWithoutInheritanceFlag)
+	if result["success"] != true {
+		t.Fatalf("SaveProtectionConfig changed payload failed: %v", result)
+	}
+
+	getResult := GetProtectionConfig("openclaw:test-1")
+	if getResult["success"] != true {
+		t.Fatalf("GetProtectionConfig failed: %v", getResult)
+	}
+	dataJSON, _ := json.Marshal(getResult["data"])
+	var config map[string]interface{}
+	if err := json.Unmarshal(dataJSON, &config); err != nil {
+		t.Fatalf("failed to unmarshal config: %v", err)
+	}
+	if config["inherits_default_policy"] != false {
+		t.Fatalf("expected inherits_default_policy to be cleared, got: %v", config["inherits_default_policy"])
+	}
+}
+
+// TestSaveProtectionConfig_PreservesInheritanceWhenPermissionsAreEmpty 验证：
+// 默认策略以空字符串保存“无规则”，UI 重新打开未改动会回填
+// {"mode":"blacklist","paths":[]} 这类等价空规则；保存时不应被误判为内容变更
+// 而清掉 inherits_default_policy。
+func TestSaveProtectionConfig_PreservesInheritanceWhenPermissionsAreEmpty(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	initial := `{
+		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-empty-perms",
+		"inherits_default_policy": true,
+		"enabled": true,
+		"audit_only": false,
+		"sandbox_enabled": false,
+		"path_permission": "",
+		"network_permission": "",
+		"shell_permission": ""
+	}`
+	if result := SaveProtectionConfig(initial); result["success"] != true {
+		t.Fatalf("initial SaveProtectionConfig failed: %v", result)
+	}
+
+	uiPayload := `{
+		"asset_name": "openclaw",
+		"asset_id": "openclaw:test-empty-perms",
+		"enabled": true,
+		"audit_only": false,
+		"sandbox_enabled": false,
+		"path_permission": "{\"mode\":\"blacklist\",\"paths\":[]}",
+		"network_permission": "{\"inbound\":{\"mode\":\"blacklist\",\"addresses\":[]},\"outbound\":{\"mode\":\"blacklist\",\"addresses\":[]}}",
+		"shell_permission": "{\"mode\":\"blacklist\",\"commands\":[]}"
+	}`
+	if result := SaveProtectionConfig(uiPayload); result["success"] != true {
+		t.Fatalf("SaveProtectionConfig UI payload failed: %v", result)
+	}
+
+	getResult := GetProtectionConfig("openclaw:test-empty-perms")
+	if getResult["success"] != true {
+		t.Fatalf("GetProtectionConfig failed: %v", getResult)
+	}
+	dataJSON, _ := json.Marshal(getResult["data"])
+	var config map[string]interface{}
+	if err := json.Unmarshal(dataJSON, &config); err != nil {
+		t.Fatalf("failed to unmarshal config: %v", err)
+	}
+	if config["inherits_default_policy"] != true {
+		t.Fatalf("expected inherits_default_policy to remain true when permissions are semantically empty, got: %v", config["inherits_default_policy"])
+	}
+}

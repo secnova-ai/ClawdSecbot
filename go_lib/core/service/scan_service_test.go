@@ -56,6 +56,161 @@ func TestSaveScanResult_EmptyAssets(t *testing.T) {
 	}
 }
 
+func TestSaveScanResult_InheritsDefaultBotModelConfig(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	protectionRepo := repository.NewProtectionRepository(nil)
+	if err := protectionRepo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName: repository.DefaultProtectionPolicyAssetName,
+		AssetID:   repository.DefaultProtectionPolicyAssetID,
+		BotModelConfig: &repository.BotModelConfigData{
+			Provider: "openai",
+			BaseURL:  "https://bot.example.com/v1",
+			APIKey:   "bot-key",
+			Model:    "gpt-4.1",
+		},
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig failed: %v", err)
+	}
+
+	result := SaveScanResult(`{
+		"config_found": true,
+		"assets": [{"id": "openclaw:test-1", "name": "openclaw", "type": "Service"}],
+		"risks": []
+	}`)
+	if result["success"] != true {
+		t.Fatalf("Expected success=true, got: %v", result)
+	}
+
+	config, err := protectionRepo.GetProtectionConfig("openclaw:test-1")
+	if err != nil {
+		t.Fatalf("GetProtectionConfig failed: %v", err)
+	}
+	if config == nil || !config.InheritsDefaultPolicy {
+		t.Fatalf("Expected inherited protection config, got %+v", config)
+	}
+	if config.BotModelConfig == nil || config.BotModelConfig.Model != "gpt-4.1" {
+		t.Fatalf("Expected inherited bot model config, got %+v", config.BotModelConfig)
+	}
+}
+
+func TestSyncDefaultProtectionPolicyForAssets_ReappliesBotModelToInheritedAsset(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	protectionRepo := repository.NewProtectionRepository(nil)
+	if err := protectionRepo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName: repository.DefaultProtectionPolicyAssetName,
+		AssetID:   repository.DefaultProtectionPolicyAssetID,
+		BotModelConfig: &repository.BotModelConfigData{
+			Provider: "openai",
+			BaseURL:  "https://new-bot.example.com/v1",
+			APIKey:   "new-bot-key",
+			Model:    "gpt-4.1",
+		},
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig default failed: %v", err)
+	}
+	if err := protectionRepo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName:             "openclaw",
+		AssetID:               "openclaw:test-1",
+		InheritsDefaultPolicy: true,
+		BotModelConfig:        nil,
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig asset failed: %v", err)
+	}
+
+	err := SyncDefaultProtectionPolicyForAssets([]core.Asset{
+		{ID: "openclaw:test-1", Name: "openclaw"},
+	})
+	if err != nil {
+		t.Fatalf("SyncDefaultProtectionPolicyForAssets failed: %v", err)
+	}
+
+	config, err := protectionRepo.GetProtectionConfig("openclaw:test-1")
+	if err != nil {
+		t.Fatalf("GetProtectionConfig failed: %v", err)
+	}
+	if config == nil || !config.InheritsDefaultPolicy {
+		t.Fatalf("Expected inherited protection config, got %+v", config)
+	}
+	if config.BotModelConfig == nil || config.BotModelConfig.Model != "gpt-4.1" {
+		t.Fatalf("Expected default bot model to be reapplied, got %+v", config.BotModelConfig)
+	}
+	if config.BotModelConfig.BaseURL != "https://new-bot.example.com/v1" {
+		t.Fatalf("Expected updated default bot model URL, got %+v", config.BotModelConfig)
+	}
+}
+
+func TestSaveScanResult_ReappliesDefaultEnabledToInheritedAsset(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	protectionRepo := repository.NewProtectionRepository(nil)
+	if err := protectionRepo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName:               repository.DefaultProtectionPolicyAssetName,
+		AssetID:                 repository.DefaultProtectionPolicyAssetID,
+		Enabled:                 true,
+		AuditOnly:               false,
+		SandboxEnabled:          true,
+		SingleSessionTokenLimit: 2000,
+		DailyTokenLimit:         3000,
+		BotModelConfig: &repository.BotModelConfigData{
+			Provider: "openai",
+			BaseURL:  "https://bot.example.com/v1",
+			APIKey:   "bot-key",
+			Model:    "gpt-4.1",
+		},
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig default failed: %v", err)
+	}
+	if err := repository.NewSecurityModelConfigRepository(nil).Save(&repository.SecurityModelConfig{
+		Provider: "openai",
+		Endpoint: "https://security.example.com/v1",
+		APIKey:   "security-key",
+		Model:    "gpt-4.1-mini",
+	}); err != nil {
+		t.Fatalf("Save security model failed: %v", err)
+	}
+	if err := protectionRepo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName:             "openclaw",
+		AssetID:               "openclaw:test-1",
+		InheritsDefaultPolicy: true,
+		Enabled:               false,
+		AuditOnly:             true,
+		SandboxEnabled:        false,
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig asset failed: %v", err)
+	}
+
+	result := SaveScanResult(`{
+		"config_found": true,
+		"assets": [{"id": "openclaw:test-1", "name": "openclaw", "type": "Service"}],
+		"risks": []
+	}`)
+	if result["success"] != true {
+		t.Fatalf("Expected success=true, got: %v", result)
+	}
+
+	config, err := protectionRepo.GetProtectionConfig("openclaw:test-1")
+	if err != nil {
+		t.Fatalf("GetProtectionConfig failed: %v", err)
+	}
+	if config == nil || !config.InheritsDefaultPolicy {
+		t.Fatalf("Expected inherited protection config, got %+v", config)
+	}
+	if !config.Enabled || config.AuditOnly || !config.SandboxEnabled {
+		t.Fatalf("Expected scan sync to reapply default enabled fields, got %+v", config)
+	}
+	if config.SingleSessionTokenLimit != 2000 || config.DailyTokenLimit != 3000 {
+		t.Fatalf("Expected scan sync to reapply token limits, got %+v", config)
+	}
+	if config.BotModelConfig == nil || config.BotModelConfig.Model != "gpt-4.1" {
+		t.Fatalf("Expected scan sync to reapply bot model config, got %+v", config.BotModelConfig)
+	}
+}
+
 // TestGetLatestScanResult 验证获取最新扫描结果
 func TestGetLatestScanResult(t *testing.T) {
 	cleanup := setupTestDB(t)

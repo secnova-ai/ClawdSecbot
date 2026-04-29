@@ -67,14 +67,29 @@ func SaveProtectionConfig(jsonStr string) map[string]interface{} {
 		logging.Error("Failed to parse protection config JSON: %v", err)
 		return errorMessageResult("invalid JSON: " + err.Error())
 	}
+	// 此处对原始 JSON 再做一次浅层 Unmarshal 以判断 inherits_default_policy
+	// 字段是否被显式携带：Go 的零值 false 无法区分“未传”和“显式传 false”，
+	// 必须借助 raw map 才能正确决定是否走“保留继承标记”分支。
+	var raw map[string]json.RawMessage
+	hasInheritsDefaultPolicy := false
+	if err := json.Unmarshal([]byte(jsonStr), &raw); err == nil {
+		_, hasInheritsDefaultPolicy = raw["inherits_default_policy"]
+	}
 
 	repo := repository.NewProtectionRepository(nil)
 
-	// 如果传入的配置没有 BotModelConfig，从数据库中读取已有的值并保留
-	if config.BotModelConfig == nil && strings.TrimSpace(config.AssetID) != "" {
+	// 如果传入的配置没有 BotModelConfig，从数据库中读取已有的值并保留。
+	// 如果没有显式传入 inherits_default_policy，仅在内容未变化时保留继承标记；
+	// 内容有变化则视为资产自定义策略。
+	if strings.TrimSpace(config.AssetID) != "" {
 		existing, err := repo.GetProtectionConfig(config.AssetID)
-		if err == nil && existing != nil && existing.BotModelConfig != nil {
-			config.BotModelConfig = existing.BotModelConfig
+		if err == nil && existing != nil {
+			if config.BotModelConfig == nil && existing.BotModelConfig != nil {
+				config.BotModelConfig = existing.BotModelConfig
+			}
+			if !hasInheritsDefaultPolicy {
+				config.InheritsDefaultPolicy = shouldPreserveInheritedDefaultPolicy(existing, &config)
+			}
 		}
 	}
 
@@ -84,6 +99,117 @@ func SaveProtectionConfig(jsonStr string) map[string]interface{} {
 	}
 
 	return successResult()
+}
+
+// shouldPreserveInheritedDefaultPolicy 判断在 UI 未携带 inherits_default_policy
+// 字段时是否保留继承标记。
+//
+// BotModelConfig 不参与对比：它由 SaveBotModelConfig 单独维护，
+// SaveProtectionConfig 上游已经按需从数据库回填了相同的 BotModelConfig，
+// 此处再比一次属于无意义比较。
+func shouldPreserveInheritedDefaultPolicy(existing, incoming *repository.ProtectionConfig) bool {
+	if existing == nil || incoming == nil || !existing.InheritsDefaultPolicy {
+		return false
+	}
+	return existing.AssetName == incoming.AssetName &&
+		existing.AssetID == incoming.AssetID &&
+		existing.Enabled == incoming.Enabled &&
+		existing.AuditOnly == incoming.AuditOnly &&
+		existing.SandboxEnabled == incoming.SandboxEnabled &&
+		existing.GatewayBinaryPath == incoming.GatewayBinaryPath &&
+		existing.GatewayConfigPath == incoming.GatewayConfigPath &&
+		existing.SingleSessionTokenLimit == incoming.SingleSessionTokenLimit &&
+		existing.DailyTokenLimit == incoming.DailyTokenLimit &&
+		equalJSONConfig(existing.PathPermission, incoming.PathPermission) &&
+		equalJSONConfig(existing.NetworkPermission, incoming.NetworkPermission) &&
+		equalJSONConfig(existing.ShellPermission, incoming.ShellPermission)
+}
+
+// equalJSONConfig 判断两个权限 JSON 是否等价。
+//
+// 业务约定：默认策略保存“无规则”时可能为空字符串，UI 端则会发送
+// {"mode":"blacklist","paths":[]} 这类显式空规则。两者语义等价，
+// 这里把空字符串与“列表字段全为空”的 JSON 视为相等，避免 UI 仅打开未改动
+// 就把 inherits_default_policy 误置为 0。
+func equalJSONConfig(left, right string) bool {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	if left == right {
+		return true
+	}
+	if left == "" || right == "" {
+		other := left
+		if other == "" {
+			other = right
+		}
+		return isEmptyPermissionJSON(other)
+	}
+
+	leftCanonical, ok := canonicalizeJSON(left)
+	if !ok {
+		return false
+	}
+	rightCanonical, ok := canonicalizeJSON(right)
+	if !ok {
+		return false
+	}
+	if leftCanonical == rightCanonical {
+		return true
+	}
+	return isEmptyPermissionJSON(left) && isEmptyPermissionJSON(right)
+}
+
+// canonicalizeJSON 将 JSON 文本反序列化后再序列化，得到稳定的 canonical 字符串。
+// Go 的 map[string]interface{} marshal 时按键排序，可消除字段顺序差异。
+func canonicalizeJSON(raw string) (string, bool) {
+	var value interface{}
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return "", false
+	}
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		return "", false
+	}
+	return string(bytes), true
+}
+
+// isEmptyPermissionJSON 判断 JSON 表示的权限规则是否等同于无规则。
+// 所有列表字段（paths/addresses/commands）为空即视为没有任何实际规则，
+// 与数据库里保存的空字符串语义等价。
+func isEmptyPermissionJSON(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return true
+	}
+	var value interface{}
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return false
+	}
+	return permissionListsAreEmpty(value)
+}
+
+func permissionListsAreEmpty(value interface{}) bool {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		for key, child := range v {
+			switch key {
+			case "paths", "addresses", "commands":
+				list, ok := child.([]interface{})
+				if !ok || len(list) > 0 {
+					return false
+				}
+			case "inbound", "outbound":
+				if !permissionListsAreEmpty(child) {
+					return false
+				}
+			}
+		}
+		return true
+	case []interface{}:
+		return len(v) == 0
+	default:
+		return true
+	}
 }
 
 // GetProtectionConfig returns the protection config for the specified asset instance.

@@ -25,8 +25,8 @@ class SecurityModelConfigService {
       appLogger.error('[SecurityModelConfig] Failed to load config', e);
     }
     return SecurityModelConfig(
-      provider: 'ollama',
-      endpoint: 'http://localhost:11434',
+      provider: 'openai_compatible',
+      endpoint: '',
       apiKey: '',
       model: '',
     );

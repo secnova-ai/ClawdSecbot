@@ -75,6 +75,26 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
     'xiaomi',
   };
 
+  static const Map<String, String> _providerAliases = {
+    'gemini': 'google',
+    'claude': 'anthropic',
+    'chatgpt': 'openai',
+    'gpt': 'openai',
+    'azure': 'openai',
+    'siliconflow': 'openai',
+    'zai': 'zhipu',
+    'zai_cn': 'zhipu',
+    'zhipu_cn': 'zhipu',
+    'z.ai-cn': 'zhipu',
+    'glm': 'zhipu',
+    'zai_en': 'zhipu_en',
+    'z.ai-en': 'zhipu_en',
+    'tongyi': 'qwen',
+    'kimi': 'moonshot',
+    'grok': 'xai',
+    'wenxin': 'ernie',
+  };
+
   /// Map provider icon names to IconData.
   static final _iconMap = <String, IconData>{
     'server': LucideIcons.server,
@@ -117,6 +137,9 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
 
   /// Returns the default model type.
   String _getDefaultType() {
+    if (_hasProvider('openai_compatible')) {
+      return 'openai_compatible';
+    }
     return _providers.isNotEmpty ? _providers.first.name : 'openai';
   }
 
@@ -124,6 +147,64 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
   String _normalizeSelectedType(String type) {
     final isVisible = _providers.any((p) => p.name == type);
     return isVisible ? type : _getDefaultType();
+  }
+
+  bool _hasProvider(String providerName) {
+    return _providers.any((p) => p.name == providerName);
+  }
+
+  /// Normalizes aliases persisted in protection_config to a visible provider tab.
+  String _normalizeLoadedProvider(BotModelConfig config) {
+    final provider = config.provider.trim();
+    final alias = provider.toLowerCase();
+    final baseUrl = config.baseUrl.trim().toLowerCase();
+
+    final providerByBaseUrl = _matchProviderByBaseUrl(baseUrl);
+    if (providerByBaseUrl != null) {
+      return providerByBaseUrl;
+    }
+
+    if (_hasProvider(provider)) {
+      return provider;
+    }
+
+    final aliasedProvider = _providerAliases[alias];
+    if (aliasedProvider != null && _hasProvider(aliasedProvider)) {
+      return aliasedProvider;
+    }
+
+    return _normalizeSelectedType(provider);
+  }
+
+  String? _matchProviderByBaseUrl(String baseUrl) {
+    if (baseUrl.isEmpty) {
+      return null;
+    }
+    final candidates = _providers.where((p) => p.defaultBaseURL.isNotEmpty);
+    for (final provider in candidates) {
+      final defaultBaseUrl = provider.defaultBaseURL.toLowerCase();
+      if (baseUrl == defaultBaseUrl ||
+          baseUrl.startsWith('$defaultBaseUrl/') ||
+          defaultBaseUrl.startsWith('$baseUrl/')) {
+        return provider.name;
+      }
+    }
+
+    // 仅保留后端 catalog 的 defaultBaseURL 不能直接命中的 host：
+    //   - Google 在 catalog 中 defaultBaseURL 为空；
+    //   - Ollama 的 defaultBaseURL 使用 localhost，用户填 127.0.0.1 时无法前缀匹配。
+    // 其他 host 都已经能通过上面的 defaultBaseURL 前缀匹配命中，无需重复维护，
+    // 避免与 go_lib/chatmodel-routing/adapter/providers.go 双向漂移。
+    const hostAliases = {
+      'generativelanguage.googleapis.com': 'google',
+      '127.0.0.1:11434': 'ollama',
+    };
+    for (final entry in hostAliases.entries) {
+      if (baseUrl.contains(entry.key) && _hasProvider(entry.value)) {
+        return entry.value;
+      }
+    }
+    return null;
   }
 
   /// Gets ProviderInfo for the selected type.
@@ -175,12 +256,13 @@ class BotModelConfigFormState extends State<BotModelConfigForm> {
       final config = await _service.loadConfig();
       if (!mounted) return;
       if (config != null) {
-        final selectedType = _normalizeSelectedType(config.provider);
-        _providerDrafts[selectedType] = config;
+        final selectedType = _normalizeLoadedProvider(config);
+        final normalizedConfig = config.copyWith(provider: selectedType);
+        _providerDrafts[selectedType] = normalizedConfig;
         setState(() {
           _selectedType = selectedType;
-          _applyConfigToControllers(config);
-          _savedConfigSignature = _buildConfigSignature(config);
+          _applyConfigToControllers(normalizedConfig);
+          _savedConfigSignature = _buildConfigSignature(normalizedConfig);
           _loading = false;
         });
         appLogger.info(

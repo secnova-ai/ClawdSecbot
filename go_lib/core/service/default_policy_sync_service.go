@@ -89,13 +89,6 @@ func SyncDefaultProtectionPolicyForAssets(assets []core.Asset) error {
 			config.AssetName = existingConfig.AssetName
 		}
 
-		// 新扫描到的资产（无历史配置）不携带 BotModelConfig：
-		// 用户尚未为该资产配置模型，继承默认策略的其他字段即可，模型留空待用户后续配置。
-		// 已标记 InheritsDefaultPolicy=true 的老资产，保留从默认克隆的全字段（含 BotModelConfig）。
-		if existingConfig == nil {
-			config.BotModelConfig = nil
-		}
-
 		// 资产继承默认策略时，保持默认策略的 Enabled/AuditOnly 语义。
 		// 这里不做“有模型即强制启用”的覆盖，避免默认策略为 disabled 时被误开启。
 
@@ -130,6 +123,19 @@ func SyncDefaultProtectionPolicyForAssets(assets []core.Asset) error {
 	appliedRuntimePlans := make([]*defaultPolicyRuntimePlan, 0, len(runtimePlans))
 	for _, runtimePlan := range runtimePlans {
 		if err := applyProtectionPolicyRuntimeForSync(runtimePlan.previousConfig, runtimePlan.currentConfig, runtimePlan.userRules); err != nil {
+			prevEnabled, prevAuditOnly, prevSandboxEnabled := protectionStateFields(runtimePlan.previousConfig)
+			logging.Warning(
+				"Default policy sync: runtime apply failed for asset %s/%s, rolling back config fields (previous enabled=%v audit_only=%v sandbox_enabled=%v, target enabled=%v audit_only=%v sandbox_enabled=%v): %v",
+				runtimePlan.currentConfig.AssetName,
+				runtimePlan.currentConfig.AssetID,
+				prevEnabled,
+				prevAuditOnly,
+				prevSandboxEnabled,
+				runtimePlan.currentConfig.Enabled,
+				runtimePlan.currentConfig.AuditOnly,
+				runtimePlan.currentConfig.SandboxEnabled,
+				err,
+			)
 			// 运行时失败时执行双回滚：
 			// 1) 回滚运行时已应用变更；
 			// 2) 回滚数据库已写入配置。
@@ -293,14 +299,17 @@ func applyProtectionPolicyRuntimeForSync(previousConfig, config *repository.Prot
 		}
 		protectionConfig, err := buildPolicyProxyConfigForSync(config)
 		if err != nil {
+			logDefaultPolicyRuntimeWarning("cannot start proxy", config, err.Error())
 			return err
 		}
 		configJSON, err := json.Marshal(protectionConfig)
 		if err != nil {
+			logDefaultPolicyRuntimeWarning("cannot marshal proxy config", config, err.Error())
 			return err
 		}
 		startResult := proxy.StartProtectionProxyInternal(string(configJSON))
 		if strings.Contains(startResult, `"success":false`) {
+			logDefaultPolicyRuntimeWarning("start proxy failed", config, startResult)
 			return fmt.Errorf("failed to start protection proxy for botId=%s: %s", config.AssetID, startResult)
 		}
 		return nil
@@ -370,10 +379,18 @@ func rollbackDefaultPolicySync(
 			if err := repo.DeleteProtectionConfig(assetID); err != nil {
 				return err
 			}
+			logging.Warning("Default policy sync: rolled back asset %s by deleting newly materialized config", assetID)
 		} else {
 			if err := repo.SaveProtectionConfig(snapshot.previousConfig); err != nil {
 				return err
 			}
+			logging.Warning(
+				"Default policy sync: rolled back asset %s config to previous fields enabled=%v audit_only=%v sandbox_enabled=%v",
+				assetID,
+				snapshot.previousConfig.Enabled,
+				snapshot.previousConfig.AuditOnly,
+				snapshot.previousConfig.SandboxEnabled,
+			)
 		}
 
 		if snapshot.foundPreviousRules {
@@ -433,6 +450,31 @@ func combineAtomicSyncErrors(runtimeErr, runtimeRollbackErr, dbRollbackErr error
 		return fmt.Errorf("runtime sync failed: %v; runtime rollback failed: %v", runtimeErr, runtimeRollbackErr)
 	}
 	return fmt.Errorf("runtime sync failed: %v; db rollback failed: %v", runtimeErr, dbRollbackErr)
+}
+
+// protectionStateFields 返回用于诊断日志的关键运行时字段。
+// 当 config 为 nil 时返回三组 false，以保持日志结构稳定。
+func protectionStateFields(config *repository.ProtectionConfig) (enabled, auditOnly, sandboxEnabled bool) {
+	if config == nil {
+		return false, false, false
+	}
+	return config.Enabled, config.AuditOnly, config.SandboxEnabled
+}
+
+// logDefaultPolicyRuntimeWarning 输出运行时阶段失败的标准化日志，
+// 避免每个调用点重复拼装 enabled/audit_only/sandbox_enabled 的字段串。
+func logDefaultPolicyRuntimeWarning(stage string, config *repository.ProtectionConfig, detail string) {
+	enabled, auditOnly, sandboxEnabled := protectionStateFields(config)
+	logging.Warning(
+		"Default policy sync: %s for asset %s/%s, target enabled=%v audit_only=%v sandbox_enabled=%v: %s",
+		stage,
+		config.AssetName,
+		config.AssetID,
+		enabled,
+		auditOnly,
+		sandboxEnabled,
+		detail,
+	)
 }
 
 func errWithMessage(message string) error {

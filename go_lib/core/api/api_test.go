@@ -1168,6 +1168,100 @@ func TestSetProtectionPolicy_WithoutBotIDCreatesDefaultPolicy(t *testing.T) {
 	}
 }
 
+func TestSetProtectionPolicy_WithoutBotIDFullySyncsInheritedAssets(t *testing.T) {
+	setupPolicyRuntimeTestDB(t)
+
+	repo := repository.NewProtectionRepository(nil)
+	if err := repo.SaveProtectionConfig(&repository.ProtectionConfig{
+		AssetName:               "openclaw",
+		AssetID:                 "policy-inherit-sync",
+		InheritsDefaultPolicy:   true,
+		Enabled:                 false,
+		AuditOnly:               true,
+		SandboxEnabled:          false,
+		SingleSessionTokenLimit: 10,
+		DailyTokenLimit:         100,
+		PathPermission:          `{"mode":"blacklist","paths":["/old"]}`,
+		NetworkPermission:       `{"inbound":{"mode":"blacklist","addresses":[]},"outbound":{"mode":"blacklist","addresses":["old.example.com"]}}`,
+		ShellPermission:         `{"mode":"blacklist","commands":["old-cmd"]}`,
+		BotModelConfig: &repository.BotModelConfigData{
+			Provider: "openai",
+			BaseURL:  "https://old-bot.example.com/v1",
+			APIKey:   "old-key",
+			Model:    "old-model",
+		},
+	}); err != nil {
+		t.Fatalf("SaveProtectionConfig asset failed: %v", err)
+	}
+	if err := repo.SaveShepherdSensitiveActions("openclaw", "policy-inherit-sync", []string{"old-rule"}); err != nil {
+		t.Fatalf("SaveShepherdSensitiveActions asset failed: %v", err)
+	}
+
+	_, ts, token := setupTestServer(t)
+	defer ts.Close()
+
+	body := bytes.NewBufferString(`{
+		"protection":"disabled",
+		"userRules":["new-rule"],
+		"tokenLimit":{"session":2000,"daily":3000},
+		"permission":{
+			"open":true,
+			"path":{"mode":"whitelist","paths":["/safe"]},
+			"network":{"outbound":{"mode":"whitelist","addresses":["api.example.com"]}},
+			"shell":{"mode":"whitelist","commands":["safe-cmd"]}
+		},
+		"botModel":{"provider":"anthropic","id":"claude-3.5","url":"https://new-bot.example.com/v1","key":"new-key"}
+	}`)
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1/protection/policy", body)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	assertStatusCode(t, resp.StatusCode, http.StatusOK)
+
+	config, err := repo.GetProtectionConfig("policy-inherit-sync")
+	if err != nil {
+		t.Fatalf("GetProtectionConfig failed: %v", err)
+	}
+	if config == nil || !config.InheritsDefaultPolicy {
+		t.Fatalf("expected inherited asset config, got %+v", config)
+	}
+	if config.Enabled || config.AuditOnly || !config.SandboxEnabled {
+		t.Fatalf("expected inherited protection fields to match default, got %+v", config)
+	}
+	if config.SingleSessionTokenLimit != 2000 || config.DailyTokenLimit != 3000 {
+		t.Fatalf("expected inherited token limits to match default, got %+v", config)
+	}
+	if config.BotModelConfig == nil ||
+		config.BotModelConfig.Provider != "anthropic" ||
+		config.BotModelConfig.Model != "claude-3.5" ||
+		config.BotModelConfig.BaseURL != "https://new-bot.example.com/v1" ||
+		config.BotModelConfig.APIKey != "new-key" {
+		t.Fatalf("expected inherited bot model config to match default, got %+v", config.BotModelConfig)
+	}
+	if !strings.Contains(config.PathPermission, `"/safe"`) ||
+		!strings.Contains(config.NetworkPermission, `"api.example.com"`) ||
+		!strings.Contains(config.ShellPermission, `"safe-cmd"`) {
+		t.Fatalf("expected inherited permissions to match default, got path=%s network=%s shell=%s", config.PathPermission, config.NetworkPermission, config.ShellPermission)
+	}
+
+	rules, found, err := repo.GetShepherdSensitiveActions("openclaw", "policy-inherit-sync")
+	if err != nil {
+		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+	}
+	if !found || len(rules) != 1 || rules[0] != "new-rule" {
+		t.Fatalf("expected inherited user rules to match default, got found=%v rules=%v", found, rules)
+	}
+}
+
 func TestHandleScan_AppliesDefaultPolicyToNewAssets(t *testing.T) {
 	setupPolicyRuntimeTestDB(t)
 
@@ -1224,9 +1318,8 @@ func TestHandleScan_AppliesDefaultPolicyToNewAssets(t *testing.T) {
 	if !config.Enabled || !config.AuditOnly || !config.SandboxEnabled {
 		t.Fatalf("expected config to inherit default policy, got %+v", config)
 	}
-	// 新扫描资产不继承默认策略的 BotModelConfig，待用户后续单独配置。
-	if config.BotModelConfig != nil {
-		t.Fatalf("expected new scanned asset to have no bot model config, got %+v", config.BotModelConfig)
+	if config.BotModelConfig == nil || config.BotModelConfig.Model != "gpt-4.1" {
+		t.Fatalf("expected new scanned asset to inherit default bot model config, got %+v", config.BotModelConfig)
 	}
 	if !config.InheritsDefaultPolicy {
 		t.Fatalf("expected new asset to be marked as inheriting default policy, got %+v", config)
@@ -1242,8 +1335,7 @@ func TestHandleScan_AppliesDefaultPolicyToNewAssets(t *testing.T) {
 }
 
 func TestHandleScan_AutoEnablesProtectionForNewAssetsWhenDefaultBotModelExists(t *testing.T) {
-	// 业务规则调整后：新扫描资产不继承默认策略的 BotModelConfig，
-	// 也不做"有模型即强制启用"的覆盖。默认策略为 disabled 时，新资产也继承 disabled。
+	// 新扫描资产完整继承默认策略，但默认策略为 disabled 时仍保持 disabled。
 	setupPolicyRuntimeTestDB(t)
 
 	repo := repository.NewProtectionRepository(nil)
@@ -1292,9 +1384,8 @@ func TestHandleScan_AutoEnablesProtectionForNewAssetsWhenDefaultBotModelExists(t
 	if config.Enabled {
 		t.Fatalf("expected new asset protection to inherit disabled default, got %+v", config)
 	}
-	// 新扫描资产不携带 BotModelConfig。
-	if config.BotModelConfig != nil {
-		t.Fatalf("expected new scanned asset to have no bot model config, got %+v", config.BotModelConfig)
+	if config.BotModelConfig == nil || config.BotModelConfig.Model != "gpt-4.1" {
+		t.Fatalf("expected new scanned asset to inherit default bot model config, got %+v", config.BotModelConfig)
 	}
 	if !config.InheritsDefaultPolicy {
 		t.Fatalf("expected new asset to be marked as inheriting default policy, got %+v", config)
