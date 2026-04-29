@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -180,16 +181,53 @@ func callPluginBeforeStopHook(meta assetRuntimeMeta, pp *ProxyProtection) {
 
 	ctx := &core.ProtectionContext{
 		AssetID:   meta.AssetID,
-		ProxyPort: pp.GetPort(),
+		ProxyPort: proxyPortForStopHook(pp),
 		BackupDir: meta.BackupDir,
 		Config: core.ProtectionConfig{
 			ProxyEnabled: false,
-			ProxyPort:    pp.GetPort(),
+			ProxyPort:    proxyPortForStopHook(pp),
 		},
 	}
 
 	logging.Info("[StopProtectionProxy] Calling plugin %s.OnBeforeProxyStop hook...", meta.AssetName)
 	hooks.OnBeforeProxyStop(ctx)
+}
+
+func proxyPortForStopHook(pp *ProxyProtection) int {
+	if pp == nil {
+		return 0
+	}
+	return pp.GetPort()
+}
+
+func resolveStopHookMeta(assetKey string, meta assetRuntimeMeta) assetRuntimeMeta {
+	if strings.TrimSpace(meta.AssetName) != "" {
+		return meta
+	}
+
+	assetID := strings.TrimSpace(assetKey)
+	if assetID == "" || assetID == defaultProxyAssetKey {
+		return meta
+	}
+
+	repo := repository.NewProtectionRepository(nil)
+	config, err := repo.GetProtectionConfig(assetID)
+	if err == nil && config != nil {
+		meta.AssetName = strings.TrimSpace(config.AssetName)
+		meta.AssetID = strings.TrimSpace(config.AssetID)
+		if meta.AssetID == "" {
+			meta.AssetID = assetID
+		}
+		meta.BackupDir = getBackupDir()
+		return meta
+	}
+
+	if idx := strings.Index(assetID, ":"); idx > 0 {
+		meta.AssetName = assetID[:idx]
+		meta.AssetID = assetID
+		meta.BackupDir = getBackupDir()
+	}
+	return meta
 }
 
 func selectActiveProxyLocked() *ProxyProtection {
@@ -222,8 +260,10 @@ func stopProxyByAssetKey(assetKey string) error {
 	pp := proxyByAssetKey[key]
 	meta := proxyAssetMeta[key]
 	proxyInstanceMu.Unlock()
+	meta = resolveStopHookMeta(key, meta)
 
 	if pp == nil {
+		callPluginBeforeStopHook(meta, nil)
 		return nil
 	}
 

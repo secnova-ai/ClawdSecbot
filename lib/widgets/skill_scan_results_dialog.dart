@@ -137,6 +137,7 @@ class _SkillScanResultsDialogState extends State<SkillScanResultsDialog> {
     final trusted = record['trusted'] as bool? ?? false;
     final deleted = record['deleted'] as bool? ?? false;
     final riskLevel = record['risk_level'] as String? ?? '';
+    final skillPath = record['skill_path'] as String? ?? '';
     final scannedAt = record['scanned_at'] as String? ?? '';
     final issues = record['issues'] as List<String>? ?? [];
     final issueDetails =
@@ -216,6 +217,25 @@ class _SkillScanResultsDialogState extends State<SkillScanResultsDialog> {
               style: AppFonts.inter(fontSize: 11, color: Colors.white38),
             ),
           ],
+          if (skillPath.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(LucideIcons.folder, size: 12, color: Colors.white38),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    skillPath,
+                    style: AppFonts.firaCode(
+                      fontSize: 10,
+                      color: Colors.white54,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (!safe && !trusted && issues.isNotEmpty) ...[
             const SizedBox(height: 8),
             InkWell(
@@ -281,6 +301,34 @@ class _SkillScanResultsDialogState extends State<SkillScanResultsDialog> {
                         ],
                       ),
                       if (entry.key < issueDetails.length &&
+                          (issueDetails[entry.key]['file'] ?? '').isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 12, top: 4),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                LucideIcons.file,
+                                size: 11,
+                                color: Colors.white38,
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  _resolveIssueDisplayPath(
+                                    skillPath,
+                                    issueDetails[entry.key]['file']!,
+                                  ),
+                                  style: AppFonts.firaCode(
+                                    fontSize: 10,
+                                    color: Colors.white38,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (entry.key < issueDetails.length &&
                           (issueDetails[entry.key]['evidence'] ?? '')
                               .isNotEmpty)
                         Padding(
@@ -323,6 +371,22 @@ class _SkillScanResultsDialogState extends State<SkillScanResultsDialog> {
   }
 
   String _pad(int n) => n.toString().padLeft(2, '0');
+
+  String _resolveIssueDisplayPath(String skillPath, String issueFile) {
+    final normalizedIssueFile = issueFile.trim();
+    if (normalizedIssueFile.isEmpty) {
+      return skillPath.trim();
+    }
+    if (normalizedIssueFile.startsWith('/')) {
+      return normalizedIssueFile;
+    }
+    final normalizedSkillPath = skillPath.trim();
+    if (normalizedSkillPath.isEmpty) {
+      return normalizedIssueFile;
+    }
+    final separator = normalizedSkillPath.endsWith('/') ? '' : '/';
+    return '$normalizedSkillPath$separator$normalizedIssueFile';
+  }
 
   Widget _buildActions(AppLocalizations l10n) {
     return Row(

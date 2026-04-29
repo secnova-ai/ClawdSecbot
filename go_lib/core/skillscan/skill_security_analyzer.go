@@ -270,6 +270,7 @@ func parseAgentOutput(output string, skillPath string) (*SkillAnalysisResult, er
 			var result SkillAnalysisResult
 			if err := json.Unmarshal([]byte(allMatches[i][1]), &result); err == nil {
 				result.RawOutput = output
+				validateAnalysisEvidence(skillPath, &result)
 				return &result, nil
 			}
 		}
@@ -284,6 +285,7 @@ func parseAgentOutput(output string, skillPath string) (*SkillAnalysisResult, er
 		var result SkillAnalysisResult
 		if err := json.Unmarshal([]byte(allObjMatches[i]), &result); err == nil {
 			result.RawOutput = output
+			validateAnalysisEvidence(skillPath, &result)
 			return &result, nil
 		}
 	}
@@ -294,13 +296,14 @@ func parseAgentOutput(output string, skillPath string) (*SkillAnalysisResult, er
 
 	// If output contains risk info but JSON failed, don't default to safe
 	if hasRiskIndicators || (riskLevel != "none" && riskLevel != "unknown") {
-		return &SkillAnalysisResult{
+		result := &SkillAnalysisResult{
 			Safe:      false,
 			RiskLevel: riskLevel,
 			Issues:    buildManualReviewIssues(skillPath),
 			Summary:   extractSummary(output),
 			RawOutput: output,
-		}, nil
+		}
+		return result, nil
 	}
 
 	// Fallback: analyze the text content for risk indicators
@@ -310,6 +313,201 @@ func parseAgentOutput(output string, skillPath string) (*SkillAnalysisResult, er
 		Summary:   extractSummary(output),
 		RawOutput: output,
 	}, nil
+}
+
+func validateAnalysisEvidence(skillPath string, result *SkillAnalysisResult) {
+	if result == nil || len(result.Issues) == 0 {
+		return
+	}
+
+	filtered := make([]SkillSecurityIssue, 0, len(result.Issues))
+	for _, issue := range result.Issues {
+		if isManualReviewIssue(issue) {
+			filtered = append(filtered, issue)
+			continue
+		}
+		if issueEvidenceExists(skillPath, issue) {
+			filtered = append(filtered, issue)
+			continue
+		}
+		logging.Warning(
+			"skill analysis issue dropped because evidence was not found in target files: skill_path=%s, file=%s, type=%s",
+			skillPath,
+			issue.File,
+			issue.Type,
+		)
+	}
+	result.Issues = filtered
+
+	if !result.Safe && len(result.Issues) == 0 {
+		result.Safe = true
+		result.RiskLevel = "none"
+		result.Summary = "No verifiable security issue evidence was found in the target skill files."
+	}
+}
+
+// ValidateStoredIssueStrings removes structured issues whose evidence cannot be
+// found in the current skill files. Legacy plain-text issue strings are kept
+// because they do not carry machine-checkable evidence.
+func ValidateStoredIssueStrings(skillPath string, issues []string) ([]string, int) {
+	if len(issues) == 0 {
+		return []string{}, 0
+	}
+
+	filtered := make([]string, 0, len(issues))
+	dropped := 0
+	for _, issueText := range issues {
+		trimmed := strings.TrimSpace(issueText)
+		if trimmed == "" {
+			continue
+		}
+		var issue SkillSecurityIssue
+		if err := json.Unmarshal([]byte(trimmed), &issue); err != nil {
+			filtered = append(filtered, issueText)
+			continue
+		}
+		if isManualReviewIssue(issue) {
+			filtered = append(filtered, issueText)
+			continue
+		}
+		if issueEvidenceExists(skillPath, issue) {
+			filtered = append(filtered, issueText)
+			continue
+		}
+		dropped++
+	}
+	if filtered == nil {
+		filtered = []string{}
+	}
+	return filtered, dropped
+}
+
+func isManualReviewIssue(issue SkillSecurityIssue) bool {
+	return strings.TrimSpace(issue.Type) == "manual_review_required"
+}
+
+func issueEvidenceExists(skillPath string, issue SkillSecurityIssue) bool {
+	evidence := strings.TrimSpace(issue.Evidence)
+	if evidence == "" {
+		return false
+	}
+
+	for _, path := range candidateEvidenceFiles(skillPath, issue.File) {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if contentContainsEvidence(string(content), evidence) {
+			return true
+		}
+	}
+	return false
+}
+
+func candidateEvidenceFiles(skillPath string, issueFile string) []string {
+	var candidates []string
+	addCandidate := func(path string) {
+		info, ok := regularFileInsideSkill(path, skillPath)
+		if !ok || info.Size() > preAnalysisMaxFileSize {
+			return
+		}
+		candidates = append(candidates, path)
+	}
+
+	cleanIssueFile := strings.TrimSpace(issueFile)
+	if cleanIssueFile != "" {
+		cleanIssueFile = filepath.Clean(cleanIssueFile)
+		if filepath.IsAbs(cleanIssueFile) {
+			addCandidate(cleanIssueFile)
+		} else if !strings.HasPrefix(cleanIssueFile, "..") {
+			addCandidate(filepath.Join(skillPath, cleanIssueFile))
+		}
+		if len(candidates) > 0 {
+			return candidates
+		}
+	}
+
+	_ = filepath.Walk(skillPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil {
+			return nil
+		}
+		if info.IsDir() {
+			if skipTransientDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if skipTransientFile(info.Name()) ||
+			info.Mode()&os.ModeSymlink != 0 ||
+			info.Size() > preAnalysisMaxFileSize {
+			return nil
+		}
+		candidates = append(candidates, path)
+		return nil
+	})
+	return candidates
+}
+
+func regularFileInsideSkill(path string, root string) (os.FileInfo, bool) {
+	if path == "" || !isPathInside(path, root) {
+		return nil, false
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, false
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil, false
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, false
+	}
+	if !isPathInside(realPath, realRoot) {
+		return nil, false
+	}
+	return info, true
+}
+
+func isPathInside(path string, root string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	if absPath == absRoot {
+		return true
+	}
+	return strings.HasPrefix(absPath, absRoot+string(filepath.Separator))
+}
+
+func contentContainsEvidence(content string, evidence string) bool {
+	normalizedContent := normalizeEvidenceText(content)
+	normalizedEvidence := normalizeEvidenceText(evidence)
+	if normalizedEvidence == "" {
+		return false
+	}
+	if strings.Contains(normalizedContent, normalizedEvidence) {
+		return true
+	}
+
+	contentFields := strings.Join(strings.Fields(normalizedContent), " ")
+	evidenceFields := strings.Join(strings.Fields(normalizedEvidence), " ")
+	if evidenceFields != "" && strings.Contains(contentFields, evidenceFields) {
+		return true
+	}
+
+	return false
+}
+
+func normalizeEvidenceText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	return strings.TrimSpace(text)
 }
 
 // buildManualReviewIssues 构建解析失败场景的人工复核问题列表

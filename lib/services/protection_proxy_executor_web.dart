@@ -8,7 +8,7 @@ class ProtectionProxyExecutor {
     if (!transport.isReady) {
       return {'success': false, 'error': 'Transport not initialized'};
     }
-    return transport.callOneArg('StartProtectionProxy', configJSON);
+    return transport.callOneArgAsync('StartProtectionProxy', configJSON);
   }
 
   static Future<Map<String, dynamic>> stop({required String assetID}) async {
@@ -19,9 +19,12 @@ class ProtectionProxyExecutor {
 
     final scopedAssetID = assetID.trim();
     if (scopedAssetID.isNotEmpty) {
-      return transport.callOneArg('StopProtectionProxyByAsset', scopedAssetID);
+      return transport.callOneArgAsync(
+        'StopProtectionProxyByAsset',
+        scopedAssetID,
+      );
     }
-    return transport.callNoArg('StopProtectionProxy');
+    return transport.callNoArgAsync('StopProtectionProxy');
   }
 
   static Future<Map<String, dynamic>> status({required String assetID}) async {
@@ -32,11 +35,11 @@ class ProtectionProxyExecutor {
 
     final scopedAssetID = assetID.trim();
     if (scopedAssetID.isNotEmpty) {
-      return transport.callOneArg(
+      return transport.callOneArgAsync(
         'GetProtectionProxyStatusByAsset',
         scopedAssetID,
       );
     }
-    return transport.callNoArg('GetProtectionProxyStatus');
+    return transport.callNoArgAsync('GetProtectionProxyStatus');
   }
 }

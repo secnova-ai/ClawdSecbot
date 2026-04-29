@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'l10n/app_localizations.dart';
+import 'utils/app_fonts.dart';
 import 'web/web_home_page.dart';
 
 void main() {
@@ -30,6 +31,9 @@ class BotSecWebApp extends StatelessWidget {
       supportedLocales: AppLocalizations.supportedLocales,
       theme: ThemeData(
         useMaterial3: true,
+        fontFamily: 'Inter',
+        fontFamilyFallback: const ['NotoSansSC'],
+        textTheme: AppFonts.interTextTheme(ThemeData.dark().textTheme),
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF2563EB),
           brightness: Brightness.dark,

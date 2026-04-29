@@ -352,7 +352,7 @@ func DeleteSkillInternal(skillPath string) string {
 func convertSkillIssuesToStrings(issues []SkillSecurityIssue) []string {
 	result := make([]string, len(issues))
 	for i, issue := range issues {
-		result[i] = fmt.Sprintf("[%s] %s in %s: %s", issue.Severity, issue.Type, issue.File, issue.Description)
+		result[i] = SerializeSkillIssue(issue)
 	}
 	return result
 }
@@ -442,6 +442,18 @@ func removeBatchSession(batchID string) {
 	activeBatchSessionsMu.Lock()
 	defer activeBatchSessionsMu.Unlock()
 	delete(activeBatchSessions, batchID)
+}
+
+func storedSkillScanReusable(scanRepo *repository.SkillSecurityScanRepository, skill SkillInfo) bool {
+	record, err := scanRepo.GetSkillScanByHash(skill.Hash)
+	if err != nil || record == nil {
+		return false
+	}
+	if record.Safe || len(record.Issues) == 0 {
+		return true
+	}
+	filteredIssues, _ := ValidateStoredIssueStrings(skill.Path, record.Issues)
+	return len(filteredIssues) > 0
 }
 
 // collectLogs 从 LogChan 收集日志到 Logs 切片
@@ -538,7 +550,7 @@ func (bs *BatchScanSession) run(config *repository.SecurityModelConfig) {
 		var riskLevel string
 		if result != nil {
 			for _, issue := range result.Issues {
-				issues = append(issues, fmt.Sprintf("%s: %s", issue.Type, issue.Description))
+				issues = append(issues, SerializeSkillIssue(issue))
 			}
 			riskLevel = result.RiskLevel
 		}
@@ -602,7 +614,7 @@ func StartBatchSkillScanInternal() string {
 			logging.Info("[BatchScan] Skipping %s: empty hash", skill.Name)
 			continue
 		}
-		if hashSet[skill.Hash] {
+		if hashSet[skill.Hash] && storedSkillScanReusable(scanRepo, skill) {
 			logging.Info("[BatchScan] Skipping %s: hash already scanned (%s...)", skill.Name, skill.Hash[:min(12, len(skill.Hash))])
 			continue
 		}

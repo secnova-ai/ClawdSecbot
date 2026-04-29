@@ -375,7 +375,7 @@ class ProtectionService {
 
   /// 实际执行代理停止的内部方法。
   Future<Map<String, dynamic>> _stopProxy() async {
-    if (!_isProxyRunning) {
+    if (!_isProxyRunning && !_hasAssetBinding) {
       appLogger.info('[Protection] stopProxy skipped: proxy not running');
       return {'success': true, 'message': 'Proxy not running'};
     }
