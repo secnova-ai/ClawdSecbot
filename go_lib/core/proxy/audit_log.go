@@ -797,6 +797,44 @@ func (t *AuditChainTracker) evictOldestLocked() {
 	}
 }
 
+// backfillStaleDurationsLocked 把同 asset 下仍未 finalize 的旧 log 的耗时补上。
+//
+// 触发场景：模型在多轮工具调用过程中尚未给出最终回复，用户已发起新一轮提问，
+// 此时旧 log 永远不会到达 FinalizeRequestOutput，Duration 会一直停在 0。
+// 这里仅根据 (now - StartedAt) 写入毫秒耗时，不修改 Action / RiskLevel / OutputContent，
+// 保持决策语义不变；写入后通过 touchStateLocked 让持久化层覆盖更新。
+func (t *AuditChainTracker) backfillStaleDurationsLocked(assetID string, now time.Time) {
+	if assetID == "" {
+		return
+	}
+	for _, state := range t.logs {
+		if state == nil {
+			continue
+		}
+		if strings.TrimSpace(state.Log.AssetID) != assetID {
+			continue
+		}
+		if state.Log.Duration > 0 {
+			continue
+		}
+		if state.StartedAt.IsZero() {
+			continue
+		}
+		duration := now.Sub(state.StartedAt).Milliseconds()
+		if duration <= 0 {
+			continue
+		}
+		state.Log.Duration = duration
+		logging.Info(
+			"[AuditChain] backfill stale duration on new request: log_id=%s asset_id=%s duration_ms=%d",
+			state.Log.ID,
+			assetID,
+			duration,
+		)
+		t.touchStateLocked(state, now)
+	}
+}
+
 // StartFromRequest creates a new audit log when request messages end with role=user.
 func (t *AuditChainTracker) StartFromRequest(
 	requestID,
@@ -828,6 +866,11 @@ func (t *AuditChainTracker) StartFromRequest(
 	defer t.mu.Unlock()
 
 	t.cleanupExpiredLocked(now)
+
+	// 新一轮 user 请求到达前，把同资产下仍未 finalize 的旧 log 的耗时兜底写上：
+	// 模型可能在多轮工具调用中被新提问打断，导致 FinalizeRequestOutput 永远不会触发，
+	// 旧 log 的 Duration 会一直停在 0ms。此处只补时间字段，不动决策/输出语义。
+	t.backfillStaleDurationsLocked(strings.TrimSpace(assetID), now)
 
 	logID := generateAuditLogID()
 	state := &auditLogState{

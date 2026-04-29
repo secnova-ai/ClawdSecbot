@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"testing"
+	"time"
 
 	"github.com/openai/openai-go"
 )
@@ -347,5 +348,51 @@ func TestAuditChainTracker_FinalizeReleasesRuntimeBindings(t *testing.T) {
 	}
 	if state.ToolSeq != nil {
 		t.Fatalf("expected ToolSeq memory to be released after finalize")
+	}
+}
+
+// TestAuditChainTracker_BackfillDurationWhenInterruptedByNewRequest 验证：
+// 当模型还在多轮工具调用中、用户已发起新一轮提问时，旧 log 不会再触发 FinalizeRequestOutput，
+// 但 StartFromRequest 进入下一轮前应基于 (now - StartedAt) 把旧 log 的 Duration 兜底写上，
+// 避免 UI 出现 0ms 的误导。
+func TestAuditChainTracker_BackfillDurationWhenInterruptedByNewRequest(t *testing.T) {
+	tracker := NewAuditChainTracker()
+
+	firstTurn := buildMessagesFromRaw(t, `{
+	  "model":"gpt-test",
+	  "messages":[
+	    {"role":"user","content":"查一下小米股价"}
+	  ]
+	}`)
+	tracker.StartFromRequest("req_first", "openclaw", "openclaw:a1", "gpt-test", firstTurn)
+
+	// 模拟一段真实流转耗时（>1ms 才能避开 Milliseconds() 的整数截断）。
+	time.Sleep(5 * time.Millisecond)
+
+	secondTurn := buildMessagesFromRaw(t, `{
+	  "model":"gpt-test",
+	  "messages":[
+	    {"role":"user","content":"换个查询方式"}
+	  ]
+	}`)
+	tracker.StartFromRequest("req_second", "openclaw", "openclaw:a1", "gpt-test", secondTurn)
+
+	logs := tracker.GetAuditLogs(10, 0, false)
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 logs, got %d", len(logs))
+	}
+
+	var firstLog *AuditLog
+	for index := range logs {
+		if logs[index].RequestContent == "查一下小米股价" {
+			firstLog = &logs[index]
+			break
+		}
+	}
+	if firstLog == nil {
+		t.Fatalf("expected first turn log to exist, got logs=%+v", logs)
+	}
+	if firstLog.Duration <= 0 {
+		t.Fatalf("expected interrupted log duration > 0ms, got %dms", firstLog.Duration)
 	}
 }
