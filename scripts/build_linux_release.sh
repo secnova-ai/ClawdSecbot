@@ -848,6 +848,15 @@ fi
 exit 0
 EOF
 
+    cat > "$deb_work/DEBIAN/prerm" << 'EOF'
+#!/bin/bash
+set -e
+if [ "$1" = "remove" ] && [ -x /usr/lib/clawdsecbot/uninstall.sh ]; then
+    /usr/lib/clawdsecbot/uninstall.sh --platform linux --all-users --skip-config-paths --force || true
+fi
+exit 0
+EOF
+
     cat > "$deb_work/DEBIAN/postrm" << 'EOF'
 #!/bin/bash
 set -e
@@ -868,7 +877,7 @@ fi
 exit 0
 EOF
 
-    chmod +x "$deb_work/DEBIAN/postinst" "$deb_work/DEBIAN/postrm"
+    chmod +x "$deb_work/DEBIAN/postinst" "$deb_work/DEBIAN/prerm" "$deb_work/DEBIAN/postrm"
 
     rm -f "$deb_file"
     dpkg-deb --build --root-owner-group "$deb_work" "$deb_file"
@@ -935,6 +944,13 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || true
+fi
+
+%preun
+if [ "\$1" = "0" ]; then
+    if [ -x /usr/lib/clawdsecbot/uninstall.sh ]; then
+        /usr/lib/clawdsecbot/uninstall.sh --platform linux --all-users --skip-config-paths --force || true
+    fi
 fi
 
 %postun

@@ -21,6 +21,8 @@ DRY_RUN=false
 FORCE=false
 REMOVE_SYSTEM_FILES=false
 TARGET_PLATFORM="auto"
+ALL_USERS=false
+LOAD_CONFIG_PATHS=true
 CUSTOM_INSTALL_PATHS=()
 
 # 已收集待删除路径，使用换行分隔避免空格路径问题。
@@ -37,6 +39,8 @@ Options:
   --platform <auto|macos|linux>   Target platform (default: auto)
   --install-path <path>            Add custom install path (repeatable)
   --remove-system-files            Remove system package files (Linux/macOS)
+  --all-users                      Clean Linux data for /root and /home/* users
+  --skip-config-paths              Do not load custom paths from app_config.json
   --dry-run                        Show files to delete only
   --force                          Skip interactive confirmation
   -h, --help                       Show help
@@ -51,15 +55,15 @@ Cleanup scope:
     - Known runtime directories (no full recursive scan)
     - Any path passed by --install-path
   [macOS]
-    - /Applications/ClawdSecbot.app, ~/Applications/ClawdSecbot.app
+    - ~/Applications/ClawdSecbot.app
     - ~/Library/Application Support/{ClawdSecbot,com.clawdsecbot.guard,com.bot.secnova.clawdsecbot}
     - ~/Library/Preferences/com.bot.secnova.clawdsecbot.plist
     - ~/Library/Caches/com.bot.secnova.clawdsecbot
     - ~/Library/Saved Application State/com.bot.secnova.clawdsecbot.savedState
   [Linux]
-    - ~/.local/share/{clawdsecbot,com.clawdsecbot.guard,com.bot.secnova.clawdsecbot}
-    - ~/.config/{clawdsecbot,com.clawdsecbot.guard,com.bot.secnova.clawdsecbot}
-    - ~/.cache/clawdsecbot
+    - ~/.local/share/{clawdsecbot,bot_sec_manager,secnova.ai/bot_sec_manager,ClawdSecbot,com.clawdsecbot.guard,com.bot.secnova.clawdsecbot}
+    - ~/.config/{clawdsecbot,bot_sec_manager,secnova.ai/bot_sec_manager,ClawdSecbot,com.clawdsecbot.guard,com.bot.secnova.clawdsecbot}
+    - ~/.cache/{clawdsecbot,bot_sec_manager,secnova.ai/bot_sec_manager,ClawdSecbot,com.clawdsecbot.guard,com.bot.secnova.clawdsecbot}
     - ~/.local/share/applications/com.clawdsecbot.guard.desktop
   [System level, with --remove-system-files]
     - macOS: /Applications/ClawdSecbot.app
@@ -87,6 +91,14 @@ parse_args() {
                 ;;
             --remove-system-files)
                 REMOVE_SYSTEM_FILES=true
+                shift
+                ;;
+            --all-users)
+                ALL_USERS=true
+                shift
+                ;;
+            --skip-config-paths)
+                LOAD_CONFIG_PATHS=false
                 shift
                 ;;
             --dry-run)
@@ -174,6 +186,10 @@ collect_common_targets() {
     add_target "${TMPDIR:-/tmp}/botsec"
     add_target "${TMPDIR:-/tmp}/clawdsecbot.lock"
     add_target "${TMPDIR:-/tmp}/clawdsecbot.sock"
+    if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
+        add_target "$XDG_RUNTIME_DIR/clawdsecbot.lock"
+        add_target "$XDG_RUNTIME_DIR/clawdsecbot.sock"
+    fi
 
     for custom_path in "${CUSTOM_INSTALL_PATHS[@]}"; do
         add_target "$custom_path"
@@ -182,10 +198,15 @@ collect_common_targets() {
 
 # 从 app_config.json 中收集自定义清理路径。
 collect_config_targets() {
+    if [[ "$LOAD_CONFIG_PATHS" != "true" ]]; then
+        return 0
+    fi
+
     local config_candidates=()
     if [[ "$TARGET_PLATFORM" == "macos" ]]; then
         config_candidates+=(
             "$HOME/Library/Application Support/secnova.ai/bot_sec_manager/app_config.json"
+            "$HOME/Library/Application Support/bot_sec_manager/app_config.json"
             "$HOME/Library/Application Support/com.bot.secnova.clawdsecbot/app_config.json"
             "$HOME/Library/Application Support/com.clawdsecbot.guard/app_config.json"
             "$HOME/Library/Application Support/ClawdSecbot/app_config.json"
@@ -193,10 +214,12 @@ collect_config_targets() {
     else
         config_candidates+=(
             "$HOME/.local/share/secnova.ai/bot_sec_manager/app_config.json"
+            "$HOME/.local/share/bot_sec_manager/app_config.json"
             "$HOME/.local/share/com.bot.secnova.clawdsecbot/app_config.json"
             "$HOME/.local/share/com.clawdsecbot.guard/app_config.json"
             "$HOME/.local/share/ClawdSecbot/app_config.json"
             "$HOME/.config/secnova.ai/bot_sec_manager/app_config.json"
+            "$HOME/.config/bot_sec_manager/app_config.json"
             "$HOME/.config/com.bot.secnova.clawdsecbot/app_config.json"
             "$HOME/.config/com.clawdsecbot.guard/app_config.json"
             "$HOME/.config/ClawdSecbot/app_config.json"
@@ -247,11 +270,16 @@ PY
 
 # 收集 macOS 平台目标。
 collect_macos_targets() {
-    add_target "/Applications/ClawdSecbot.app"
     add_target "$HOME/Applications/ClawdSecbot.app"
+    add_target "$HOME/Library/Application Support/secnova.ai/bot_sec_manager"
+    add_target "$HOME/Library/Application Support/bot_sec_manager"
     add_target "$HOME/Library/Application Support/ClawdSecbot"
     add_target "$HOME/Library/Application Support/com.clawdsecbot.guard"
     add_target "$HOME/Library/Application Support/com.bot.secnova.clawdsecbot"
+    add_target "$HOME/Library/Caches/secnova.ai/bot_sec_manager"
+    add_target "$HOME/Library/Caches/bot_sec_manager"
+    add_target "$HOME/Library/Caches/ClawdSecbot"
+    add_target "$HOME/Library/Caches/com.clawdsecbot.guard"
     add_target "$HOME/Library/Preferences/com.bot.secnova.clawdsecbot.plist"
     add_target "$HOME/Library/Caches/com.bot.secnova.clawdsecbot"
     add_target "$HOME/Library/Saved Application State/com.bot.secnova.clawdsecbot.savedState"
@@ -261,16 +289,69 @@ collect_macos_targets() {
 # 收集 Linux 平台目标。
 collect_linux_targets() {
     add_target "$HOME/.local/share/clawdsecbot"
+    add_target "$HOME/.local/share/bot_sec_manager"
+    add_target "$HOME/.local/share/secnova.ai/bot_sec_manager"
+    add_target "$HOME/.local/share/ClawdSecbot"
     add_target "$HOME/.local/share/com.clawdsecbot.guard"
     add_target "$HOME/.local/share/com.bot.secnova.clawdsecbot"
     add_target "$HOME/.config/clawdsecbot"
+    add_target "$HOME/.config/bot_sec_manager"
+    add_target "$HOME/.config/secnova.ai/bot_sec_manager"
+    add_target "$HOME/.config/ClawdSecbot"
     add_target "$HOME/.config/com.clawdsecbot.guard"
     add_target "$HOME/.config/com.bot.secnova.clawdsecbot"
     add_target "$HOME/.cache/clawdsecbot"
+    add_target "$HOME/.cache/bot_sec_manager"
+    add_target "$HOME/.cache/secnova.ai/bot_sec_manager"
+    add_target "$HOME/.cache/ClawdSecbot"
+    add_target "$HOME/.cache/com.clawdsecbot.guard"
+    add_target "$HOME/.cache/com.bot.secnova.clawdsecbot"
 
     add_target "$HOME/.local/share/applications/com.clawdsecbot.guard.desktop"
-    add_target "$HOME/.local/share/icons/hicolor"
+    collect_linux_hicolor_icon_targets "$HOME/.local/share/icons/hicolor"
+}
 
+# 收集 Linux hicolor 图标主题中的应用图标文件。
+collect_linux_hicolor_icon_targets() {
+    local icon_root="$1"
+    local size
+    for size in 16 22 24 32 48 64 128 256 512; do
+        add_target "$icon_root/${size}x${size}/apps/clawdsecbot.png"
+    done
+}
+
+# 收集 Linux 用户运行时目录中的单实例文件。
+collect_linux_all_runtime_targets() {
+    local runtime_dir
+    for runtime_dir in /run/user/*; do
+        [[ -d "$runtime_dir" ]] || continue
+        add_target "$runtime_dir/clawdsecbot.lock"
+        add_target "$runtime_dir/clawdsecbot.sock"
+    done
+}
+
+# 收集当前 HOME 对应平台的用户级目标。
+collect_current_home_targets() {
+    collect_common_targets
+    collect_config_targets
+    if [[ "$TARGET_PLATFORM" == "macos" ]]; then
+        collect_macos_targets
+    else
+        collect_linux_targets
+    fi
+}
+
+# 包管理器以 root 执行时使用，遍历 Linux 常见用户主目录。
+collect_all_linux_user_targets() {
+    local original_home="${HOME:-}"
+    local user_home
+    for user_home in /root /home/*; do
+        [[ -d "$user_home" ]] || continue
+        HOME="$user_home"
+        collect_current_home_targets
+    done
+    collect_linux_all_runtime_targets
+    HOME="$original_home"
 }
 
 # 收集系统级安装路径（需要 root 权限）。
@@ -284,7 +365,7 @@ collect_system_targets() {
     add_target "/usr/lib/clawdsecbot"
     add_target "/usr/share/applications/clawdsecbot.desktop"
     add_target "/usr/share/pixmaps/clawdsecbot.png"
-    add_target "/usr/share/icons/hicolor"
+    collect_linux_hicolor_icon_targets "/usr/share/icons/hicolor"
 }
 
 # 停止可能正在运行的 ClawdSecbot 进程。
@@ -360,12 +441,14 @@ main() {
     resolve_platform
     validate_permissions
 
-    collect_common_targets
-    collect_config_targets
-    if [[ "$TARGET_PLATFORM" == "macos" ]]; then
-        collect_macos_targets
+    if [[ "$ALL_USERS" == "true" ]]; then
+        if [[ "$TARGET_PLATFORM" != "linux" ]]; then
+            log_error "--all-users is only supported on Linux"
+            exit 1
+        fi
+        collect_all_linux_user_targets
     else
-        collect_linux_targets
+        collect_current_home_targets
     fi
     if [[ "$REMOVE_SYSTEM_FILES" == "true" ]]; then
         collect_system_targets
