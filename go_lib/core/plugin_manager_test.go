@@ -13,6 +13,7 @@ type testPlugin struct {
 	manifest  plugin_sdk.PluginManifest
 	schema    *plugin_sdk.AssetUISchema
 	assets    []Asset
+	mainPID   int
 }
 
 func (p *testPlugin) GetAssetName() string {
@@ -37,6 +38,13 @@ func (p *testPlugin) RequiresBotModelConfig() bool {
 
 func (p *testPlugin) ScanAssets() ([]Asset, error) {
 	return p.assets, nil
+}
+
+func (p *testPlugin) GetMainProcessPID(asset Asset) (int, bool) {
+	if p.mainPID <= 0 {
+		return 0, false
+	}
+	return p.mainPID, true
 }
 
 func (p *testPlugin) AssessRisks(scannedHashes map[string]bool, assets []Asset) ([]Risk, error) {
@@ -180,6 +188,52 @@ func TestPluginManager_ScanAssets_BindsInstanceByAssetID(t *testing.T) {
 	}
 	if got := pm.GetPluginByAssetID("openclaw:abc123"); got == nil {
 		t.Fatal("expected plugin instance by assetID")
+	}
+}
+
+func TestPluginManager_ScanAssets_AttachesMainProcessPID(t *testing.T) {
+	pm := &PluginManager{
+		registeredPlugins: make(map[string]BotPlugin),
+		instances:         make(map[string]*AssetPluginInstance),
+	}
+
+	p := newTestPlugin("Openclaw")
+	p.mainPID = 67106
+	p.assets = []Asset{
+		{
+			ID:           "openclaw:abc123",
+			Name:         "Openclaw",
+			SourcePlugin: "Openclaw",
+			Metadata:     map[string]string{"pid": "111"},
+			DisplaySections: []DisplaySection{
+				{
+					Title: "Runtime",
+					Icon:  "monitor",
+					Items: []DisplayItem{{Label: "PID", Value: "111", Status: "neutral"}},
+				},
+			},
+		},
+	}
+
+	pm.Register(p)
+	assets, err := pm.ScanAllAssets()
+	if err != nil {
+		t.Fatalf("ScanAllAssets failed: %v", err)
+	}
+	if len(assets) != 1 {
+		t.Fatalf("expected 1 asset, got %d", len(assets))
+	}
+	if got := assets[0].Metadata["main_pid"]; got != "67106" {
+		t.Fatalf("expected main_pid 67106, got %q", got)
+	}
+	if got := assets[0].Metadata["pid"]; got != "67106" {
+		t.Fatalf("expected pid 67106, got %q", got)
+	}
+	if got := assets[0].DisplaySections[0].Items[0].Label; got != "Main PID" {
+		t.Fatalf("expected displayed label Main PID, got %q", got)
+	}
+	if got := assets[0].DisplaySections[0].Items[0].Value; got != "67106" {
+		t.Fatalf("expected displayed main PID 67106, got %q", got)
 	}
 }
 

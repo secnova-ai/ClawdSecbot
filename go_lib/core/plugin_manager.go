@@ -197,6 +197,7 @@ func (pm *PluginManager) ScanAllAssets() ([]Asset, error) {
 			if strings.TrimSpace(assets[i].SourcePlugin) == "" {
 				assets[i].SourcePlugin = assetName
 			}
+			pm.attachMainProcessPID(plugin, &assets[i])
 			assetID := strings.TrimSpace(assets[i].ID)
 			if assetID != "" {
 				scannedAssetIDs[assetID] = struct{}{}
@@ -233,6 +234,7 @@ func (pm *PluginManager) ScanAssetsByPlugin(assetName string) ([]Asset, error) {
 		if strings.TrimSpace(assets[i].SourcePlugin) == "" {
 			assets[i].SourcePlugin = pluginAssetName
 		}
+		pm.attachMainProcessPID(plugin, &assets[i])
 		assetID := strings.TrimSpace(assets[i].ID)
 		if assetID != "" {
 			scannedAssetIDs[assetID] = struct{}{}
@@ -243,6 +245,18 @@ func (pm *PluginManager) ScanAssetsByPlugin(assetName string) ([]Asset, error) {
 
 	logging.Info("Single plugin %s found %d assets", pluginAssetName, len(assets))
 	return assets, nil
+}
+
+func (pm *PluginManager) attachMainProcessPID(plugin BotPlugin, asset *Asset) {
+	if plugin == nil || asset == nil {
+		return
+	}
+
+	pid, ok := plugin.GetMainProcessPID(*asset)
+	if !ok || pid <= 0 {
+		return
+	}
+	AttachAssetMainProcessPID(asset, pid)
 }
 
 // AssessAllRisks evaluates risks via all registered plugins.

@@ -89,6 +89,10 @@ func (p *Plugin) ScanAssets() ([]core.Asset, error) {
 	return newAssetScanner(filepath.Dir(configPath)).scan()
 }
 
+func (p *Plugin) GetMainProcessPID(asset core.Asset) (int, bool) {
+	return 0, false
+}
+
 func (p *Plugin) AssessRisks(scannedHashes map[string]bool, assets []core.Asset) ([]core.Risk, error) {
 	restoreOverrides, err := withOpenclawOverrides()
 	if err != nil {

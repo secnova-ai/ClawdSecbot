@@ -102,6 +102,10 @@ func (p *DintalclawPlugin) ScanAssets() ([]core.Asset, error) {
 	return assetScanner.ScanAssets()
 }
 
+func (p *DintalclawPlugin) GetMainProcessPID(asset core.Asset) (int, bool) {
+	return 0, false
+}
+
 // AssessRisks 对已发现的资产进行风险评估
 func (p *DintalclawPlugin) AssessRisks(scannedHashes map[string]bool, assets []core.Asset) ([]core.Risk, error) {
 	logging.Info("DintalclawPlugin: Assessing risks")

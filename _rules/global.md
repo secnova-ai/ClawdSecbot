@@ -62,7 +62,7 @@
 
 - 插件必须实现 `BotPlugin` 并在 `init()` 注册到 `PluginManager`。
 - `BotPlugin` 关键方法组：
-  `GetID/GetAssetName/GetManifest/GetAssetUISchema/ScanAssets/AssessRisks/MitigateRisk/StartProtection/StopProtection/GetProtectionStatus`。
+  `GetID/GetAssetName/GetManifest/GetAssetUISchema/ScanAssets/GetMainProcessPID/AssessRisks/MitigateRisk/StartProtection/StopProtection/GetProtectionStatus`。
 - 每个资产实例必须生成稳定 `asset_id`，仅由名称与配置路径参与指纹计算。
 - 运行时绑定关系：`1 asset_id : 1 plugin instance`。
 - 防护、事件、指标、状态查询必须按 `asset_id` 路由，避免跨实例串数据。
