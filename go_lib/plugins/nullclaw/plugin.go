@@ -110,6 +110,10 @@ func (p *NullclawPlugin) ScanAssets() ([]core.Asset, error) {
 	return assetScanner.ScanAssets()
 }
 
+func (p *NullclawPlugin) GetMainProcessPID(asset core.Asset) (int, bool) {
+	return 0, false
+}
+
 // AssessRisks 对已发现的资产进行风险评估
 func (p *NullclawPlugin) AssessRisks(scannedHashes map[string]bool, assets []core.Asset) ([]core.Risk, error) {
 	logging.Info("NullclawPlugin: Assessing risks")

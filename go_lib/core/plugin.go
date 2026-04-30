@@ -35,6 +35,10 @@ type BotPlugin interface {
 	// Each returned Asset must have a unique ID computed via ComputeAssetID().
 	ScanAssets() ([]Asset, error)
 
+	// GetMainProcessPID returns the current main process PID for the asset.
+	// ok=false means the bot is not running or the plugin cannot identify it.
+	GetMainProcessPID(asset Asset) (pid int, ok bool)
+
 	// ========== Risk Assessment ==========
 
 	// AssessRisks evaluates risks for discovered assets.

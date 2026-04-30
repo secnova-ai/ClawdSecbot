@@ -60,6 +60,10 @@ func (p *apiTestPlugin) ScanAssets() ([]core.Asset, error) {
 	return p.assets, nil
 }
 
+func (p *apiTestPlugin) GetMainProcessPID(asset core.Asset) (int, bool) {
+	return 0, false
+}
+
 func (p *apiTestPlugin) AssessRisks(scannedHashes map[string]bool, assets []core.Asset) ([]core.Risk, error) {
 	return nil, nil
 }

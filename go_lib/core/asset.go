@@ -3,6 +3,7 @@ package core
 import (
 	"crypto/sha256"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -73,6 +74,53 @@ func ComputeAssetID(name string, configPath string) string {
 	shortHash := fmt.Sprintf("%x", hash[:6]) // 12 hex chars
 
 	return nameLower + ":" + shortHash
+}
+
+// AttachAssetMainProcessPID records a plugin-resolved main process PID on the
+// asset and keeps the structured display section in sync for generic UI cards.
+func AttachAssetMainProcessPID(asset *Asset, pid int) {
+	if asset == nil || pid <= 0 {
+		return
+	}
+	if asset.Metadata == nil {
+		asset.Metadata = make(map[string]string)
+	}
+
+	value := strconv.Itoa(pid)
+	asset.Metadata["main_pid"] = value
+	asset.Metadata["pid"] = value
+	upsertPIDDisplayItem(asset, value)
+}
+
+func upsertPIDDisplayItem(asset *Asset, value string) {
+	runtimeIndex := -1
+	for i := range asset.DisplaySections {
+		if strings.EqualFold(strings.TrimSpace(asset.DisplaySections[i].Title), "Runtime") {
+			runtimeIndex = i
+		}
+		for j := range asset.DisplaySections[i].Items {
+			label := strings.TrimSpace(asset.DisplaySections[i].Items[j].Label)
+			if strings.EqualFold(label, "PID") || strings.EqualFold(label, "Main PID") {
+				asset.DisplaySections[i].Items[j].Label = "Main PID"
+				asset.DisplaySections[i].Items[j].Value = value
+				asset.DisplaySections[i].Items[j].Status = "neutral"
+				return
+			}
+		}
+	}
+
+	pidItem := DisplayItem{Label: "Main PID", Value: value, Status: "neutral"}
+	if runtimeIndex >= 0 {
+		items := asset.DisplaySections[runtimeIndex].Items
+		asset.DisplaySections[runtimeIndex].Items = append([]DisplayItem{pidItem}, items...)
+		return
+	}
+
+	asset.DisplaySections = append(asset.DisplaySections, DisplaySection{
+		Title: "Runtime",
+		Icon:  "monitor",
+		Items: []DisplayItem{pidItem},
+	})
 }
 
 // AssetMatchCriteria 定义简单的 "json_match" 匹配规则结构

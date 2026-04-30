@@ -108,6 +108,10 @@ func (p *OpenclawPlugin) ScanAssets() ([]core.Asset, error) {
 	return assetScanner.ScanAssets()
 }
 
+func (p *OpenclawPlugin) GetMainProcessPID(asset core.Asset) (int, bool) {
+	return resolveOpenclawMainProcessPID(asset)
+}
+
 // AssessRisks 对已发现的资产进行风险评估
 func (p *OpenclawPlugin) AssessRisks(scannedHashes map[string]bool, assets []core.Asset) ([]core.Risk, error) {
 	logging.Info("OpenclawPlugin: Assessing risks")

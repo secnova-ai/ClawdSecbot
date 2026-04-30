@@ -653,6 +653,8 @@ class _AssetCardState extends State<_AssetCard> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final asset = widget.asset;
+    final isZh = l10n.localeName.startsWith('zh');
+    final mainProcessPID = _mainProcessPIDValue(asset);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -780,6 +782,12 @@ class _AssetCardState extends State<_AssetCard> {
                         _buildConfigRow(
                           l10n.processPaths,
                           asset.processPaths.join(', '),
+                          Colors.white70,
+                        ),
+                      if (mainProcessPID != null && !_hasMainPIDSection(asset))
+                        _buildConfigRow(
+                          isZh ? '主进程 ID' : 'Main PID',
+                          mainProcessPID,
                           Colors.white70,
                         ),
                       // Display structured config sections from the plugin
@@ -925,6 +933,31 @@ class _AssetCardState extends State<_AssetCard> {
     return false;
   }
 
+  String? _mainProcessPIDValue(Asset asset) {
+    final mainPID = asset.metadata['main_pid']?.trim();
+    if (mainPID != null && mainPID.isNotEmpty) {
+      return mainPID;
+    }
+    final pid = asset.metadata['pid']?.trim();
+    if (pid != null && pid.isNotEmpty) {
+      return pid;
+    }
+    return null;
+  }
+
+  bool _hasMainPIDSection(Asset asset) {
+    for (final section in asset.displaySections) {
+      for (final item in section.items) {
+        final label = item.label.trim();
+        if ((label == 'PID' || label == 'Main PID') &&
+            item.value.trim().isNotEmpty) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   Widget _buildProtectionBadge(AppLocalizations l10n) {
     final isProtected = widget.isProtected;
     return Container(
@@ -991,6 +1024,8 @@ class _AssetCardState extends State<_AssetCard> {
         return '主程序';
       case 'Main':
         return '主进程';
+      case 'Main PID':
+        return '主进程 ID';
     }
     const zhMap = {
       // Section titles
@@ -1019,6 +1054,7 @@ class _AssetCardState extends State<_AssetCard> {
       'Config File': '配置文件',
       'Log Path': '日志路径',
       'Process Name': '进程名称',
+      'Main PID': '主进程 ID',
       'Audit': '审计',
       'Host': '主机',
       'Pairing Required': '配对认证',
@@ -1107,6 +1143,7 @@ class _AssetCardState extends State<_AssetCard> {
       'Config File': '配置文件',
       'Log Path': '日志路径',
       'Process Name': '进程名称',
+      'Main PID': '主进程 ID',
       'PID': '进程 ID',
       'Image Path': '可执行路径',
       'Audit': '审计',

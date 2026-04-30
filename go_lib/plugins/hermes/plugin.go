@@ -96,6 +96,10 @@ func (p *HermesPlugin) ScanAssets() ([]core.Asset, error) {
 	return NewHermesAssetScanner(GetConfigPath()).ScanAssets()
 }
 
+func (p *HermesPlugin) GetMainProcessPID(asset core.Asset) (int, bool) {
+	return 0, false
+}
+
 func (p *HermesPlugin) AssessRisks(scannedHashes map[string]bool, assets []core.Asset) ([]core.Risk, error) {
 	_ = scannedHashes
 	_ = assets

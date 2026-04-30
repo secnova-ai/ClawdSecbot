@@ -238,3 +238,63 @@ func TestBuildRuntimeSection_ShowsPIDAndImagePath(t *testing.T) {
 		t.Fatalf("Unexpected image item: %+v", section.Items[1])
 	}
 }
+
+func TestParseOpenclawLaunchctlPIDs(t *testing.T) {
+	output := `PID	Status	Label
+67106	0	ai.openclaw.gateway
+-	0	com.apple.other
+`
+
+	pids := parseOpenclawLaunchctlPIDs(output)
+	if len(pids) != 1 {
+		t.Fatalf("expected 1 launchctl PID, got %d", len(pids))
+	}
+	if pids[0] != 67106 {
+		t.Fatalf("expected PID 67106, got %d", pids[0])
+	}
+}
+
+func TestParseOpenclawPSMainPID(t *testing.T) {
+	output := `  PID  PPID COMM             ARGS
+67106     1 /Users/kidbei/.n /Users/kidbei/.nvm/versions/node/v24.13.0/bin/node /Users/kidbei/.nvm/versions/node/v24.13.0/lib/node_modules/openclaw/dist/index.js gateway --port 28789
+99020 74631 /bin/zsh         /bin/zsh -c ps -eo pid,ppid,comm,args | rg -i "openclaw|moltbot|clawdbot"
+99024 99020 rg               rg -i openclaw|moltbot|clawdbot
+`
+
+	pid, ok := parseOpenclawPSMainPID(output, openclawProcessMatchConstraints{
+		gatewayPort: "28789",
+	})
+	if !ok {
+		t.Fatal("expected ps PID to be parsed")
+	}
+	if pid != 67106 {
+		t.Fatalf("expected PID 67106, got %d", pid)
+	}
+}
+
+func TestParseOpenclawPSMainPID_IsolatesByGatewayPort(t *testing.T) {
+	output := `  PID  PPID COMM             ARGS
+10001     1 node             /opt/node /opt/openclaw/dist/index.js gateway --port 18789
+10002     1 node             /opt/node /opt/openclaw/dist/index.js gateway --port 28789
+`
+
+	pid, ok := parseOpenclawPSMainPID(output, openclawProcessMatchConstraints{
+		gatewayPort: "28789",
+	})
+	if !ok {
+		t.Fatal("expected ps PID to be parsed")
+	}
+	if pid != 10002 {
+		t.Fatalf("expected PID 10002, got %d", pid)
+	}
+}
+
+func TestParseOpenclawPSMainPID_NoRunningGateway(t *testing.T) {
+	output := `  PID  PPID COMM             ARGS
+99020 74631 /bin/zsh         /bin/zsh -c ps -eo pid,ppid,comm,args | rg -i "openclaw|moltbot|clawdbot"
+`
+
+	if pid, ok := parseOpenclawPSMainPID(output, openclawProcessMatchConstraints{}); ok || pid != 0 {
+		t.Fatalf("expected no PID, got pid=%d ok=%v", pid, ok)
+	}
+}
