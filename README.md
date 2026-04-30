@@ -26,6 +26,10 @@ ClawSecbot monitors and secures local AI Bot agents (such as Openclaw) running o
 - **Plugin Architecture** — Extensible plugin system for supporting different Bot types
 - **WebUI Mode** — Runs in browser via Go web bridge (`botsec_webd`) and serves API + static web assets on the same origin
 
+## Protection Logic
+
+ClawSecbot sits between the Bot and LLM provider. It checks user input, ToolCall, ToolCallResult, and final output with ShepherdGate LLM/ReActAgent analysis, guard skills, and natural-language user rules. Decisions allow, block, redact, or require confirmation; audit-only records without blocking.
+
 ## Supported Platforms
 
 | Platform | Target | Architecture | Status |
