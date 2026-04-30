@@ -15,6 +15,7 @@
 - Go 以 `c-shared` 构建单一动态库：`botsec.dylib` / `botsec.so` / `botsec.dll`。
 - 支持平台：macOS（arm64/x86_64）、Linux（arm64/x86_64）、Windows（x86_64）、webui。
 - 任何改动都需要兼容desktop版本和webui版本的工作
+- 代理和ShepherdGate安全检测引擎需要能支持一个代理并发接收请求，不能破坏这个约定
 
 ## 2. 目录职责
 
