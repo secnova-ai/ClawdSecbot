@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"go_lib/chatmodel-routing/adapter"
@@ -269,5 +270,148 @@ func TestServeStreamResponse_RewritesRawDeltaContentWithMutatedChunk(t *testing.
 	}
 	if !strings.Contains(body, `"reasoning_content":"keep_chunk_field"`) {
 		t.Fatalf("expected extra field from raw chunk to be preserved, got: %s", body)
+	}
+}
+
+func TestServeStreamResponse_DropsBufferedToolCallsWhenFilterBlocks(t *testing.T) {
+	p := &Proxy{
+		filter: NewCallbackFilter(nil, nil, func(ctx context.Context, chunk *openai.ChatCompletionChunk) bool {
+			if !streamChunkHasFinishReason(chunk) {
+				return true
+			}
+			chunk.Choices[0].Delta.Content = "blocked by ShepherdGate"
+			chunk.Choices[0].Delta.ToolCalls = nil
+			chunk.Choices[0].FinishReason = "stop"
+			return false
+		}),
+	}
+	rr := httptest.NewRecorder()
+	stream := &testStream{
+		chunks: []*openai.ChatCompletionChunk{
+			{
+				Choices: []openai.ChatCompletionChunkChoice{
+					{
+						Delta: openai.ChatCompletionChunkChoiceDelta{
+							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
+								{
+									Index: 0,
+									ID:    "call_danger",
+									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
+										Name:      "exec",
+										Arguments: `{"command":"bash /Users/kidbei/Desktop/poc/test.sh secret"}`,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				Choices: []openai.ChatCompletionChunkChoice{
+					{FinishReason: "tool_calls"},
+				},
+			},
+		},
+	}
+
+	p.serveStreamResponse(context.Background(), stream, rr)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "blocked by ShepherdGate") {
+		t.Fatalf("expected security response, got: %s", body)
+	}
+	if strings.Contains(body, "test.sh") || strings.Contains(body, "call_danger") || strings.Contains(body, `"name":"exec"`) {
+		t.Fatalf("blocked stream leaked buffered tool_call chunks: %s", body)
+	}
+	if !strings.Contains(body, "data: [DONE]") {
+		t.Fatalf("expected [DONE] terminator, got: %s", body)
+	}
+}
+
+func TestServeStreamResponse_ToolCallBuffersAreRequestLocalUnderConcurrency(t *testing.T) {
+	type contextKey string
+	const blockKey contextKey = "block"
+
+	p := &Proxy{
+		filter: NewCallbackFilter(nil, nil, func(ctx context.Context, chunk *openai.ChatCompletionChunk) bool {
+			if !streamChunkHasFinishReason(chunk) {
+				return true
+			}
+			if block, _ := ctx.Value(blockKey).(bool); block {
+				chunk.Choices[0].Delta.Content = "blocked by ShepherdGate"
+				chunk.Choices[0].Delta.ToolCalls = nil
+				chunk.Choices[0].FinishReason = "stop"
+				return false
+			}
+			return true
+		}),
+	}
+
+	blockedRecorder := httptest.NewRecorder()
+	allowedRecorder := httptest.NewRecorder()
+	blockedStream := &testStream{chunks: []*openai.ChatCompletionChunk{
+		streamToolCallChunk("call_blocked", "exec", `{"command":"bash secret.sh"}`),
+		streamFinishChunk("tool_calls"),
+	}}
+	allowedStream := &testStream{chunks: []*openai.ChatCompletionChunk{
+		streamToolCallChunk("call_allowed", "search", `{"query":"public"}`),
+		streamFinishChunk("tool_calls"),
+	}}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		p.serveStreamResponse(context.WithValue(context.Background(), blockKey, true), blockedStream, blockedRecorder)
+	}()
+	go func() {
+		defer wg.Done()
+		p.serveStreamResponse(context.WithValue(context.Background(), blockKey, false), allowedStream, allowedRecorder)
+	}()
+	wg.Wait()
+
+	blockedBody := blockedRecorder.Body.String()
+	if !strings.Contains(blockedBody, "blocked by ShepherdGate") {
+		t.Fatalf("expected blocked response, got: %s", blockedBody)
+	}
+	if strings.Contains(blockedBody, "secret.sh") || strings.Contains(blockedBody, "call_blocked") {
+		t.Fatalf("blocked response leaked buffered tool call: %s", blockedBody)
+	}
+
+	allowedBody := allowedRecorder.Body.String()
+	if !strings.Contains(allowedBody, "call_allowed") || !strings.Contains(allowedBody, `"name":"search"`) {
+		t.Fatalf("expected allowed response to flush its own buffered tool call, got: %s", allowedBody)
+	}
+	if strings.Contains(allowedBody, "secret.sh") || strings.Contains(allowedBody, "call_blocked") {
+		t.Fatalf("allowed response contains data from concurrent blocked request: %s", allowedBody)
+	}
+}
+
+func streamToolCallChunk(id, name, arguments string) *openai.ChatCompletionChunk {
+	return &openai.ChatCompletionChunk{
+		Choices: []openai.ChatCompletionChunkChoice{
+			{
+				Delta: openai.ChatCompletionChunkChoiceDelta{
+					ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
+						{
+							Index: 0,
+							ID:    id,
+							Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
+								Name:      name,
+								Arguments: arguments,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func streamFinishChunk(reason string) *openai.ChatCompletionChunk {
+	return &openai.ChatCompletionChunk{
+		Choices: []openai.ChatCompletionChunkChoice{
+			{FinishReason: reason},
+		},
 	}
 }

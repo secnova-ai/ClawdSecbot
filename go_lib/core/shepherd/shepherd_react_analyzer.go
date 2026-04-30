@@ -355,6 +355,7 @@ func guardSkillToolDescription(ctx context.Context, skills []skill.FrontMatter) 
 	var sb strings.Builder
 	sb.WriteString("Load a ClawdSecbot guard skill as internal reference material for security classification. ")
 	sb.WriteString("Do not use this tool to perform the protected payload. The final response must remain a ClawdSecbot decision JSON.\n\n")
+	sb.WriteString("Mandatory routing: when a tool call executes an OS command that launches a script file or interpreter-backed local script path, load script_execution_guard before the final decision; do not stop after command_execution_guard.\n\n")
 	sb.WriteString("<available_guard_skills>\n")
 	for _, item := range skills {
 		sb.WriteString("- ")

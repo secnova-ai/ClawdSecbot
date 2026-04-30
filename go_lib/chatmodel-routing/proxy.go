@@ -190,6 +190,8 @@ func (p *Proxy) serveStreamResponse(ctx context.Context, stream adapter.Stream, 
 
 	flusher, _ := w.(http.Flusher)
 	sawFinishReason := false
+	bufferingToolCalls := false
+	var bufferedToolCallChunks [][]byte
 
 	for {
 		chunk, err := stream.Recv()
@@ -198,7 +200,7 @@ func (p *Proxy) serveStreamResponse(ctx context.Context, stream adapter.Stream, 
 				// Some providers may end stream without an explicit finish_reason chunk.
 				// Trigger a synthetic terminal chunk so filter logic can finalize accounting.
 				if p.filter != nil && !sawFinishReason {
-					_ = p.filter.FilterStreamChunk(ctx, &openai.ChatCompletionChunk{
+					syntheticChunk := &openai.ChatCompletionChunk{
 						Choices: []openai.ChatCompletionChunkChoice{
 							{
 								Index:        0,
@@ -206,7 +208,18 @@ func (p *Proxy) serveStreamResponse(ctx context.Context, stream adapter.Stream, 
 								FinishReason: "stop",
 							},
 						},
-					})
+					}
+					if !p.filter.FilterStreamChunk(ctx, syntheticChunk) {
+						_ = p.writeStreamChunk(w, syntheticChunk, flusher)
+						w.Write([]byte("data: [DONE]\n\n"))
+						if flusher != nil {
+							flusher.Flush()
+						}
+						return
+					}
+				}
+				if bufferingToolCalls {
+					p.writeBufferedStreamChunks(w, bufferedToolCallChunks, flusher)
 				}
 				// Send [DONE]
 				w.Write([]byte("data: [DONE]\n\n"))
@@ -242,11 +255,8 @@ func (p *Proxy) serveStreamResponse(ctx context.Context, stream adapter.Stream, 
 		if p.filter != nil {
 			pass := p.filter.FilterStreamChunk(ctx, chunk)
 			if !pass {
-				// 被拦截：发送当前 chunk 后关闭流
-				chunkBytes, marshalErr := json.Marshal(chunk)
-				if marshalErr == nil {
-					w.Write([]byte(fmt.Sprintf("data: %s\n\n", string(chunkBytes))))
-				}
+				// Drop buffered tool_call chunks; only forward the security response.
+				_ = p.writeStreamChunk(w, chunk, flusher)
 				w.Write([]byte("data: [DONE]\n\n"))
 				if flusher != nil {
 					flusher.Flush()
@@ -255,34 +265,90 @@ func (p *Proxy) serveStreamResponse(ctx context.Context, stream adapter.Stream, 
 			}
 		}
 
-		var chunkBytes []byte
-		if raw := chunk.RawJSON(); raw != "" {
-			rewritten, changed, rewriteErr := rewriteRawChunkToolCallIDs(raw, chunk)
-			if rewriteErr != nil {
-				logging.Warning("[Proxy] Failed to rewrite stream raw JSON tool_call IDs: %v", rewriteErr)
-				chunkBytes, rewriteErr = json.Marshal(chunk)
-				if rewriteErr != nil {
-					continue
-				}
-			} else if changed {
-				chunkBytes = []byte(rewritten)
-			} else {
-				chunkBytes = []byte(raw)
-			}
-		} else {
-			var marshalErr error
-			chunkBytes, marshalErr = json.Marshal(chunk)
+		if streamChunkHasToolCallDelta(chunk) {
+			bufferingToolCalls = true
+		}
+		if bufferingToolCalls {
+			chunkBytes, marshalErr := marshalStreamChunk(chunk)
 			if marshalErr != nil {
+				logging.Warning("[Proxy] Failed to marshal buffered stream chunk: %v", marshalErr)
 				continue
 			}
+			bufferedToolCallChunks = append(bufferedToolCallChunks, chunkBytes)
+			if streamChunkHasFinishReason(chunk) {
+				p.writeBufferedStreamChunks(w, bufferedToolCallChunks, flusher)
+				bufferedToolCallChunks = nil
+				bufferingToolCalls = false
+			}
+			continue
 		}
 
-		sseData := fmt.Sprintf("data: %s\n\n", string(chunkBytes))
-		w.Write([]byte(sseData))
-		if flusher != nil {
-			flusher.Flush()
+		_ = p.writeStreamChunk(w, chunk, flusher)
+	}
+}
+
+func (p *Proxy) writeBufferedStreamChunks(w http.ResponseWriter, chunks [][]byte, flusher http.Flusher) {
+	for _, chunkBytes := range chunks {
+		w.Write([]byte(fmt.Sprintf("data: %s\n\n", string(chunkBytes))))
+	}
+	if flusher != nil && len(chunks) > 0 {
+		flusher.Flush()
+	}
+}
+
+func (p *Proxy) writeStreamChunk(w http.ResponseWriter, chunk *openai.ChatCompletionChunk, flusher http.Flusher) error {
+	chunkBytes, err := marshalStreamChunk(chunk)
+	if err != nil {
+		logging.Warning("[Proxy] Failed to marshal stream chunk: %v", err)
+		return err
+	}
+	w.Write([]byte(fmt.Sprintf("data: %s\n\n", string(chunkBytes))))
+	if flusher != nil {
+		flusher.Flush()
+	}
+	return nil
+}
+
+func marshalStreamChunk(chunk *openai.ChatCompletionChunk) ([]byte, error) {
+	if chunk == nil {
+		return json.Marshal(chunk)
+	}
+	if raw := chunk.RawJSON(); raw != "" {
+		rewritten, changed, rewriteErr := rewriteRawChunkToolCallIDs(raw, chunk)
+		if rewriteErr != nil {
+			logging.Warning("[Proxy] Failed to rewrite stream raw JSON tool_call IDs: %v", rewriteErr)
+			return json.Marshal(chunk)
+		}
+		if changed {
+			return []byte(rewritten), nil
+		}
+		return []byte(raw), nil
+	}
+	return json.Marshal(chunk)
+}
+
+func streamChunkHasToolCallDelta(chunk *openai.ChatCompletionChunk) bool {
+	if chunk == nil {
+		return false
+	}
+	for _, choice := range chunk.Choices {
+		if len(choice.Delta.ToolCalls) > 0 {
+			return true
 		}
 	}
+	return false
+}
+
+func streamChunkHasFinishReason(chunk *openai.ChatCompletionChunk) bool {
+	if chunk == nil {
+		return false
+	}
+	for _, choice := range chunk.Choices {
+		if choice.FinishReason != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func rewriteRawResponseToolCallIDs(raw string, resp *openai.ChatCompletion) (string, bool, error) {

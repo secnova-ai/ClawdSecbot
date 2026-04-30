@@ -249,8 +249,11 @@ func TestBuildGuardSystemPromptNoSkillCatalogInjection(t *testing.T) {
 	if strings.Contains(prompt, "## Available Guard Skills") {
 		t.Fatalf("prompt should not include skill catalog section")
 	}
-	if strings.Contains(prompt, "file_access_guard") {
-		t.Fatalf("prompt should not include concrete skill metadata")
+	if strings.Contains(prompt, "file_access_guard:") {
+		t.Fatalf("prompt should not include concrete skill catalog metadata")
+	}
+	if !strings.Contains(prompt, "script_execution_guard") || !strings.Contains(prompt, "Do not stop after `command_execution_guard`") {
+		t.Fatalf("expected prompt to require script guard routing for script execution")
 	}
 
 	// Test with user-defined semantic rules
@@ -313,8 +316,8 @@ func TestBuildGuardSystemPromptInjectionDefense(t *testing.T) {
 	if !strings.Contains(promptEn, "real evidence to classify") {
 		t.Fatalf("expected prompt to prevent treating captured runtime context as a simulation")
 	}
-	if strings.Contains(promptEn, "command_execution_guard") {
-		t.Fatalf("main prompt should not name a specific guard skill")
+	if !strings.Contains(promptEn, "command_execution_guard") || !strings.Contains(promptEn, "script_execution_guard") {
+		t.Fatalf("expected prompt to name command and script guard routing rules")
 	}
 	if !strings.Contains(promptEn, "memory_search or memory_get") {
 		t.Fatalf("expected prompt to allow benign read-only memory retrieval")
@@ -426,6 +429,9 @@ func TestGuardSkillPromptsAreSecurityScoped(t *testing.T) {
 	description := guardSkillToolDescription(context.Background(), nil)
 	if !strings.Contains(description, "internal reference material for security classification") {
 		t.Fatalf("expected guard skill tool description to be security-scoped")
+	}
+	if !strings.Contains(description, "load script_execution_guard before the final decision") {
+		t.Fatalf("expected guard skill description to force script guard routing")
 	}
 	if strings.Contains(description, "must invoke this tool IMMEDIATELY") {
 		t.Fatalf("guard skill description should not include generic blocking skill instructions")
