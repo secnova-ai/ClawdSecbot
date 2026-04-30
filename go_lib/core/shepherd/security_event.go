@@ -12,17 +12,18 @@ import (
 
 // SecurityEvent represents a security event recorded by ReAct Agent or heuristic detection.
 type SecurityEvent struct {
-	ID         string `json:"id"`
-	BotID      string `json:"bot_id,omitempty"`
-	Timestamp  string `json:"timestamp"`
-	EventType  string `json:"event_type"`  // tool_execution | blocked | other
-	ActionDesc string `json:"action_desc"` // Action description (LLM generated)
-	RiskType   string `json:"risk_type"`   // Risk type
-	Detail     string `json:"detail"`      // Additional detail
-	Source     string `json:"source"`      // react_agent | heuristic
-	AssetName  string `json:"asset_name,omitempty"`
-	AssetID    string `json:"asset_id,omitempty"`
-	RequestID  string `json:"request_id,omitempty"`
+	ID                 string `json:"id"`
+	BotID              string `json:"bot_id,omitempty"`
+	Timestamp          string `json:"timestamp"`
+	EventType          string `json:"event_type"`  // tool_execution | blocked | other
+	ActionDesc         string `json:"action_desc"` // Action description (LLM generated)
+	RiskType           string `json:"risk_type"`   // Risk type
+	Detail             string `json:"detail"`      // Additional detail
+	Source             string `json:"source"`      // react_agent | heuristic
+	AssetName          string `json:"asset_name,omitempty"`
+	AssetID            string `json:"asset_id,omitempty"`
+	RequestID          string `json:"request_id,omitempty"`
+	InstructionChainID string `json:"instruction_chain_id,omitempty"`
 }
 
 // SecurityEventCallback is a function to notify external systems of security events.
@@ -92,16 +93,17 @@ func (b *SecurityEventBuffer) AddSecurityEvent(event SecurityEvent) {
 
 	// Persist to SQLite
 	record := &repository.SecurityEventRecord{
-		ID:         event.ID,
-		Timestamp:  event.Timestamp,
-		EventType:  event.EventType,
-		ActionDesc: event.ActionDesc,
-		RiskType:   event.RiskType,
-		Detail:     event.Detail,
-		Source:     event.Source,
-		AssetName:  event.AssetName,
-		AssetID:    event.AssetID,
-		RequestID:  event.RequestID,
+		ID:                 event.ID,
+		Timestamp:          event.Timestamp,
+		EventType:          event.EventType,
+		ActionDesc:         event.ActionDesc,
+		RiskType:           event.RiskType,
+		Detail:             event.Detail,
+		Source:             event.Source,
+		AssetName:          event.AssetName,
+		AssetID:            event.AssetID,
+		RequestID:          event.RequestID,
+		InstructionChainID: event.InstructionChainID,
 	}
 	repo := repository.NewSecurityEventRepository(nil)
 	if err := repo.SaveSecurityEventsBatch([]*repository.SecurityEventRecord{record}); err != nil {

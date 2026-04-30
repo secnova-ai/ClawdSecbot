@@ -1030,6 +1030,8 @@
 
   "auditOnlyMode": "Audit Only Mode",
   "auditOnlyModeDesc": "No risk analysis, only record audit logs",
+  "userInputDetection": "User Input Detection",
+  "userInputDetectionDesc": "Analyze user messages before forwarding. Turn this off to reduce security-model token usage.",
   "auditOnlyModeShort": "Audit Only",
   "auditOnlyModePendingHint": "Analysis in progress, changes will take effect after completion",
 

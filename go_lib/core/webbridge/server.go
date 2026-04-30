@@ -772,18 +772,18 @@ func (s *Server) dispatch(method string, req rpcRequest) (string, error) {
 			return "", err
 		}
 		return toJSON(service.ClearProtectionStatistics(v)), nil
-	case "GetShepherdSensitiveActionsFFI":
-		v, err := arg(0)
-		if err != nil {
-			return "", err
-		}
-		return toJSON(service.GetShepherdSensitiveActions(v)), nil
-	case "SaveShepherdSensitiveActionsFFI":
-		v, err := arg(0)
-		if err != nil {
-			return "", err
-		}
-		return toJSON(service.SaveShepherdSensitiveActions(v)), nil
+		case "GetShepherdRulesFFI":
+			v, err := arg(0)
+			if err != nil {
+				return "", err
+			}
+			return toJSON(service.GetShepherdRules(v)), nil
+		case "SaveShepherdRulesFFI":
+			v, err := arg(0)
+			if err != nil {
+				return "", err
+			}
+			return toJSON(service.SaveShepherdRules(v)), nil
 	case "ClearAllDataFFI":
 		return toJSON(service.ClearAllData()), nil
 	case "SaveHomeDirectoryPermissionFFI":

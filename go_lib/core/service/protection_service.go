@@ -77,6 +77,7 @@ func SaveProtectionConfig(jsonStr string) map[string]interface{} {
 	}
 
 	repo := repository.NewProtectionRepository(nil)
+	hasUserInputDetectionEnabled := jsonHasKey(jsonStr, "user_input_detection_enabled")
 
 	// 如果传入的配置没有 BotModelConfig，从数据库中读取已有的值并保留。
 	// 如果没有显式传入 inherits_default_policy，仅在内容未变化时保留继承标记；
@@ -89,6 +90,14 @@ func SaveProtectionConfig(jsonStr string) map[string]interface{} {
 			}
 			if !hasInheritsDefaultPolicy {
 				config.InheritsDefaultPolicy = shouldPreserveInheritedDefaultPolicy(existing, &config)
+			}
+		}
+	}
+	if !hasUserInputDetectionEnabled {
+		config.UserInputDetectionEnabled = true
+		if strings.TrimSpace(config.AssetID) != "" {
+			if existing, err := repo.GetProtectionConfig(config.AssetID); err == nil && existing != nil {
+				config.UserInputDetectionEnabled = existing.UserInputDetectionEnabled
 			}
 		}
 	}
@@ -212,6 +221,15 @@ func permissionListsAreEmpty(value interface{}) bool {
 	}
 }
 
+func jsonHasKey(raw, key string) bool {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return false
+	}
+	_, ok := payload[key]
+	return ok
+}
+
 // GetProtectionConfig returns the protection config for the specified asset instance.
 func GetProtectionConfig(assetID string) map[string]interface{} {
 	repo := repository.NewProtectionRepository(nil)
@@ -331,21 +349,20 @@ func ClearProtectionStatistics(assetID string) map[string]interface{} {
 
 // ========== Shepherd规则操作 ==========
 
-// GetShepherdSensitiveActions returns the sensitive actions for the specified asset instance.
-func GetShepherdSensitiveActions(assetID string) map[string]interface{} {
+// GetShepherdRules returns the structured Shepherd rules for the specified asset instance.
+func GetShepherdRules(assetID string) map[string]interface{} {
 	if strings.TrimSpace(assetID) == "" {
 		defaultRules, err := shepherd.GetDefaultUserRules()
 		if err != nil {
 			logging.Error("Failed to load default shepherd rules: %v", err)
 			return errorResult(err)
 		}
-		return successDataResult(defaultRules.SensitiveActions)
+		return successDataResult(defaultRules)
 	}
 	repo := repository.NewProtectionRepository(nil)
-	assetName := ""
-	actions, found, err := repo.GetShepherdSensitiveActions(assetName, assetID)
+	raw, found, err := repo.GetShepherdRulesRaw(assetID)
 	if err != nil {
-		logging.Error("Failed to get shepherd sensitive actions: %v", err)
+		logging.Error("Failed to get shepherd rules: %v", err)
 		return errorResult(err)
 	}
 	if !found {
@@ -354,18 +371,22 @@ func GetShepherdSensitiveActions(assetID string) map[string]interface{} {
 			logging.Error("Failed to load default shepherd rules: %v", defaultErr)
 			return errorResult(defaultErr)
 		}
-		actions = defaultRules.SensitiveActions
+		return successDataResult(defaultRules)
 	}
-	return successDataResult(actions)
+	rules, err := shepherd.DecodeUserRulesJSON([]byte(raw))
+	if err != nil {
+		logging.Error("Failed to parse shepherd rules: %v", err)
+		return errorResult(err)
+	}
+	return successDataResult(rules)
 }
 
-// SaveShepherdSensitiveActions 保存指定资产实例的 Shepherd 敏感操作。
-func SaveShepherdSensitiveActions(jsonStr string) map[string]interface{} {
+// SaveShepherdRules saves structured Shepherd rules for an asset instance.
+func SaveShepherdRules(jsonStr string) map[string]interface{} {
 	var input struct {
-		AssetName        string   `json:"asset_name"`
-		AssetID          string   `json:"asset_id"`
-		Actions          []string `json:"actions"`
-		SensitiveActions []string `json:"SensitiveActions"`
+		AssetName     string                  `json:"asset_name"`
+		AssetID       string                  `json:"asset_id"`
+		SemanticRules []shepherd.SemanticRule `json:"semantic_rules"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &input); err != nil {
 		return errorMessageResult("invalid JSON: " + err.Error())
@@ -375,22 +396,21 @@ func SaveShepherdSensitiveActions(jsonStr string) map[string]interface{} {
 		return errorResult(fmt.Errorf("asset_id is required"))
 	}
 
-	actions := input.Actions
-	if len(actions) == 0 && len(input.SensitiveActions) > 0 {
-		actions = input.SensitiveActions
+	rules := &shepherd.UserRules{
+		SemanticRules: input.SemanticRules,
 	}
-
-	repo := repository.NewProtectionRepository(nil)
-	if err := repo.SaveShepherdSensitiveActions(input.AssetName, input.AssetID, actions); err != nil {
-		logging.Error("Failed to save shepherd sensitive actions: %v", err)
-		return errorResult(err)
-	}
-	applyRuntimeUserRules(input.AssetName, input.AssetID, actions)
-
-	rulesJSON, err := json.Marshal(map[string]interface{}{"SensitiveActions": actions})
+	rulesJSON, err := json.Marshal(rules)
 	if err != nil {
 		return errorResult(err)
 	}
+
+	repo := repository.NewProtectionRepository(nil)
+	if err := repo.SaveShepherdRulesRaw(input.AssetName, input.AssetID, string(rulesJSON)); err != nil {
+		logging.Error("Failed to save shepherd user rules: %v", err)
+		return errorResult(err)
+	}
+	applyRuntimeUserRules(input.AssetID, rules)
+
 	if result := proxy.UpdateShepherdRulesByAssetInternal(input.AssetID, string(rulesJSON)); result != "ok" {
 		return errorMessageResult(result)
 	}
@@ -398,13 +418,12 @@ func SaveShepherdSensitiveActions(jsonStr string) map[string]interface{} {
 	return successResult()
 }
 
-func applyRuntimeUserRules(assetName string, assetID string, actions []string) {
-	_ = assetName
+func applyRuntimeUserRules(assetID string, rules *shepherd.UserRules) {
 	pp := proxy.GetProxyProtectionByAsset(assetID)
 	if pp == nil || !pp.IsRunning() {
 		return
 	}
-	pp.UpdateUserRules(actions)
+	pp.UpdateUserRulesConfig(rules)
 }
 
 // ========== 全局操作 ==========

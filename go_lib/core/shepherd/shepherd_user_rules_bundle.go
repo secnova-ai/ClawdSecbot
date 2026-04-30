@@ -144,7 +144,7 @@ func loadDefaultUserRules() (*UserRules, error) {
 		}
 	}
 
-	logging.Info("ShepherdGate: Default user rules loaded. Sensitive: %d", len(rules.SensitiveActions))
+	logging.Info("ShepherdGate: Default user rules loaded. Semantic rules: %d", len(rules.SemanticRules))
 	return cloneUserRules(rules), nil
 }
 
@@ -172,9 +172,7 @@ func loadUserRulesFromFile(path string) (*UserRules, error) {
 
 func decodeUserRules(data []byte) (*UserRules, error) {
 	type alias struct {
-		SensitiveActions      []string `json:"SensitiveActions"`
-		SensitiveActionsCamel []string `json:"sensitiveActions"`
-		SensitiveActionsSnake []string `json:"sensitive_actions"`
+		SemanticRules []SemanticRule `json:"semantic_rules"`
 	}
 
 	var payload alias
@@ -182,17 +180,14 @@ func decodeUserRules(data []byte) (*UserRules, error) {
 		return nil, fmt.Errorf("parse user rules JSON failed: %w", err)
 	}
 
-	actions := payload.SensitiveActions
-	if len(actions) == 0 {
-		actions = payload.SensitiveActionsCamel
-	}
-	if len(actions) == 0 {
-		actions = payload.SensitiveActionsSnake
-	}
+	return normalizeUserRules(&UserRules{
+		SemanticRules: payload.SemanticRules,
+	}), nil
+}
 
-	return &UserRules{
-		SensitiveActions: normalizeSensitiveActions(actions),
-	}, nil
+// DecodeUserRulesJSON parses structured Shepherd rules from JSON bytes.
+func DecodeUserRulesJSON(data []byte) (*UserRules, error) {
+	return decodeUserRules(data)
 }
 
 func saveUserRulesToFile(path string, rules *UserRules) error {
@@ -219,11 +214,51 @@ func saveUserRulesToFile(path string, rules *UserRules) error {
 	return nil
 }
 
-func normalizeSensitiveActions(actions []string) []string {
-	seen := make(map[string]struct{}, len(actions))
-	normalized := make([]string, 0, len(actions))
-	for _, action := range actions {
-		trimmed := strings.TrimSpace(action)
+func cloneUserRules(rules *UserRules) *UserRules {
+	return normalizeUserRules(rules)
+}
+
+func normalizeUserRules(rules *UserRules) *UserRules {
+	if rules == nil {
+		return &UserRules{SemanticRules: []SemanticRule{}}
+	}
+	return &UserRules{
+		SemanticRules: normalizeSemanticRules(rules.SemanticRules),
+	}
+}
+
+func normalizeSemanticRules(rules []SemanticRule) []SemanticRule {
+	normalized := make([]SemanticRule, 0, len(rules))
+	seen := make(map[string]struct{}, len(rules))
+	for _, rule := range rules {
+		rule.ID = strings.TrimSpace(rule.ID)
+		rule.Scope = strings.TrimSpace(rule.Scope)
+		rule.Description = strings.TrimSpace(rule.Description)
+		rule.Action = strings.TrimSpace(rule.Action)
+		rule.RiskType = strings.TrimSpace(rule.RiskType)
+		if rule.ID == "" && rule.Description == "" {
+			continue
+		}
+		key := rule.ID
+		if key == "" {
+			key = rule.Description
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		rule.AppliesTo = normalizeStringList(rule.AppliesTo)
+		rule.OWASPAgentic = normalizeStringList(rule.OWASPAgentic)
+		normalized = append(normalized, rule)
+	}
+	return normalized
+}
+
+func normalizeStringList(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
 		if trimmed == "" {
 			continue
 		}
@@ -231,16 +266,7 @@ func normalizeSensitiveActions(actions []string) []string {
 			continue
 		}
 		seen[trimmed] = struct{}{}
-		normalized = append(normalized, trimmed)
+		out = append(out, trimmed)
 	}
-	return normalized
-}
-
-func cloneUserRules(rules *UserRules) *UserRules {
-	if rules == nil {
-		return &UserRules{SensitiveActions: []string{}}
-	}
-	cloned := make([]string, len(rules.SensitiveActions))
-	copy(cloned, rules.SensitiveActions)
-	return &UserRules{SensitiveActions: cloned}
+	return out
 }

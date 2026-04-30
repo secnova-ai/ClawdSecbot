@@ -184,6 +184,12 @@ type ExecutionResult struct {
 
 	// TokensUsed 是估算的 token 使用量（如果可用）
 	TokensUsed int `json:"tokens_used,omitempty"`
+
+	// PromptTokens is the input token usage during execution.
+	PromptTokens int `json:"prompt_tokens,omitempty"`
+
+	// CompletionTokens is the output token usage during execution.
+	CompletionTokens int `json:"completion_tokens,omitempty"`
 }
 
 // ToolCallRecord 表示执行期间的单次工具调用记录

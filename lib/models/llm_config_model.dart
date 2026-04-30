@@ -234,12 +234,16 @@ class ProtectionRuntimeConfig {
   /// 初始每日 token 使用量 (从数据库恢复)
   final int initialDailyTokenUsage;
 
+  /// 用户输入检测是否启用
+  final bool? userInputDetectionEnabled;
+
   /// 创建运行时配置
   const ProtectionRuntimeConfig({
     this.auditOnly = false,
     this.singleSessionTokenLimit = 0,
     this.dailyTokenLimit = 0,
     this.initialDailyTokenUsage = 0,
+    this.userInputDetectionEnabled,
   });
 
   /// 从 JSON 创建配置
@@ -249,6 +253,10 @@ class ProtectionRuntimeConfig {
       singleSessionTokenLimit: json['single_session_token_limit'] ?? 0,
       dailyTokenLimit: json['daily_token_limit'] ?? 0,
       initialDailyTokenUsage: json['initial_daily_token_usage'] ?? 0,
+      userInputDetectionEnabled: json['user_input_detection_enabled'] == null
+          ? null
+          : (json['user_input_detection_enabled'] == true ||
+                json['user_input_detection_enabled'] == 1),
     );
   }
 
@@ -259,6 +267,8 @@ class ProtectionRuntimeConfig {
       'single_session_token_limit': singleSessionTokenLimit,
       'daily_token_limit': dailyTokenLimit,
       'initial_daily_token_usage': initialDailyTokenUsage,
+      if (userInputDetectionEnabled != null)
+        'user_input_detection_enabled': userInputDetectionEnabled,
     };
   }
 
@@ -268,6 +278,7 @@ class ProtectionRuntimeConfig {
     int? singleSessionTokenLimit,
     int? dailyTokenLimit,
     int? initialDailyTokenUsage,
+    bool? userInputDetectionEnabled,
   }) {
     return ProtectionRuntimeConfig(
       auditOnly: auditOnly ?? this.auditOnly,
@@ -276,12 +287,14 @@ class ProtectionRuntimeConfig {
       dailyTokenLimit: dailyTokenLimit ?? this.dailyTokenLimit,
       initialDailyTokenUsage:
           initialDailyTokenUsage ?? this.initialDailyTokenUsage,
+      userInputDetectionEnabled:
+          userInputDetectionEnabled ?? this.userInputDetectionEnabled,
     );
   }
 
   @override
   String toString() {
-    return 'ProtectionRuntimeConfig(auditOnly: $auditOnly, sessionLimit: $singleSessionTokenLimit, dailyLimit: $dailyTokenLimit)';
+    return 'ProtectionRuntimeConfig(auditOnly: $auditOnly, userInputDetection: $userInputDetectionEnabled, sessionLimit: $singleSessionTokenLimit, dailyLimit: $dailyTokenLimit)';
   }
 }
 

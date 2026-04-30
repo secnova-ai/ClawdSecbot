@@ -13,6 +13,9 @@ class ProtectionConfig {
   // 仅审计模式：不进行风险研判,仅记录审计日志
   final bool auditOnly;
 
+  // 用户输入检测是否启用
+  final bool userInputDetectionEnabled;
+
   // 沙箱防护是否启用（macOS 使用 sandbox-exec，Linux 使用 LD_PRELOAD，Windows 使用 hook sandbox）
   final bool sandboxEnabled;
 
@@ -44,6 +47,7 @@ class ProtectionConfig {
     this.assetID = '',
     this.enabled = false,
     this.auditOnly = false,
+    this.userInputDetectionEnabled = true,
     this.sandboxEnabled = false,
     this.gatewayBinaryPath,
     this.gatewayConfigPath,
@@ -65,6 +69,7 @@ class ProtectionConfig {
       assetName: assetName,
       enabled: false,
       auditOnly: false,
+      userInputDetectionEnabled: true,
       sandboxEnabled: false,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
@@ -97,6 +102,10 @@ class ProtectionConfig {
       assetID: json['asset_id'] as String? ?? '',
       enabled: json['enabled'] == true || json['enabled'] == 1,
       auditOnly: json['audit_only'] == true || json['audit_only'] == 1,
+      userInputDetectionEnabled:
+          json['user_input_detection_enabled'] == null ||
+          json['user_input_detection_enabled'] == true ||
+          json['user_input_detection_enabled'] == 1,
       sandboxEnabled:
           json['sandbox_enabled'] == true || json['sandbox_enabled'] == 1,
       gatewayBinaryPath: json['gateway_binary_path'],
@@ -141,6 +150,7 @@ class ProtectionConfig {
       'asset_id': assetID,
       'enabled': enabled,
       'audit_only': auditOnly,
+      'user_input_detection_enabled': userInputDetectionEnabled,
       'sandbox_enabled': sandboxEnabled,
       'gateway_binary_path': gatewayBinaryPath,
       'gateway_config_path': gatewayConfigPath,
@@ -170,6 +180,7 @@ class ProtectionConfig {
     String? assetID,
     bool? enabled,
     bool? auditOnly,
+    bool? userInputDetectionEnabled,
     bool? sandboxEnabled,
     String? gatewayBinaryPath,
     String? gatewayConfigPath,
@@ -188,6 +199,8 @@ class ProtectionConfig {
       assetID: assetID ?? this.assetID,
       enabled: enabled ?? this.enabled,
       auditOnly: auditOnly ?? this.auditOnly,
+      userInputDetectionEnabled:
+          userInputDetectionEnabled ?? this.userInputDetectionEnabled,
       sandboxEnabled: sandboxEnabled ?? this.sandboxEnabled,
       gatewayBinaryPath: gatewayBinaryPath ?? this.gatewayBinaryPath,
       gatewayConfigPath: gatewayConfigPath ?? this.gatewayConfigPath,

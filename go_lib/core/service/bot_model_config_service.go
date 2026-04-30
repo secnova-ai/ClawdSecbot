@@ -50,8 +50,9 @@ func SaveBotModelConfig(jsonStr string) map[string]interface{} {
 			assetName = inferAssetNameFromAssetID(input.AssetID)
 		}
 		config = &repository.ProtectionConfig{
-			AssetName: assetName,
-			AssetID:   input.AssetID,
+			AssetName:                 assetName,
+			AssetID:                   input.AssetID,
+			UserInputDetectionEnabled: true,
 		}
 	} else {
 		if input.AssetName != "" {

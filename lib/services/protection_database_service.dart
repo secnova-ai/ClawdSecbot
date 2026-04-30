@@ -1,6 +1,7 @@
 import 'dart:convert';
 import '../models/protection_analysis_model.dart';
 import '../models/protection_config_model.dart';
+import '../models/shepherd_rule_model.dart';
 import '../core_transport/transport_registry.dart';
 import '../utils/app_logger.dart';
 
@@ -80,6 +81,7 @@ class ProtectionDatabaseService {
         'asset_id': config.assetID,
         'enabled': config.enabled,
         'audit_only': config.auditOnly,
+        'user_input_detection_enabled': config.userInputDetectionEnabled,
         'sandbox_enabled': config.sandboxEnabled,
         'gateway_binary_path': config.gatewayBinaryPath ?? '',
         'gateway_config_path': config.gatewayConfigPath ?? '',
@@ -259,30 +261,63 @@ class ProtectionDatabaseService {
 
   // --- Shepherd Rules methods ---
 
-  Future<List<String>> getShepherdSensitiveActions(
+  Future<List<String>> getShepherdRules(
     String assetName,
     String assetID,
   ) async {
-    final result = _callFFIOneArg('GetShepherdSensitiveActionsFFI', assetID);
-    if (result['success'] != true) return [];
-
-    final data = result['data'];
-    if (data == null || data is! List) return [];
-
-    return data.cast<String>();
+    final ruleSet = await getShepherdRuleSet(assetName, assetID);
+    return ruleSet.semanticRules
+        .map(
+          (rule) =>
+              rule.description.trim().isNotEmpty ? rule.description : rule.id,
+        )
+        .where((value) => value.trim().isNotEmpty)
+        .toList(growable: false);
   }
 
-  Future<void> saveShepherdSensitiveActions(
+  Future<ShepherdRuleSet> getShepherdRuleSet(
     String assetName,
     String assetID,
-    List<String> actions,
+  ) async {
+    final result = _callFFIOneArg('GetShepherdRulesFFI', assetID);
+    if (result['success'] != true) return const ShepherdRuleSet();
+
+    final data = result['data'];
+    if (data is! Map) return const ShepherdRuleSet();
+    return ShepherdRuleSet.fromJson(Map<String, dynamic>.from(data));
+  }
+
+  Future<void> saveShepherdRules(
+    String assetName,
+    String assetID,
+    List<String> ruleDescriptions,
+  ) async {
+    final rules = [
+      for (final entry in ruleDescriptions.asMap().entries)
+        ShepherdSemanticRule(
+          id: 'user_rule_${entry.key + 1}',
+          scope: 'custom',
+          description: entry.value,
+        ),
+    ];
+    await saveShepherdRuleSet(
+      assetName,
+      assetID,
+      ShepherdRuleSet(semanticRules: rules),
+    );
+  }
+
+  Future<void> saveShepherdRuleSet(
+    String assetName,
+    String assetID,
+    ShepherdRuleSet ruleSet,
   ) async {
     final result = _callFFI(
-      'SaveShepherdSensitiveActionsFFI',
+      'SaveShepherdRulesFFI',
       jsonEncode({
         'asset_name': assetName,
         'asset_id': assetID,
-        'actions': actions,
+        ...ruleSet.toJson(),
       }),
     );
 
@@ -335,6 +370,10 @@ class ProtectionDatabaseService {
       assetID: map['asset_id'] as String? ?? '',
       enabled: map['enabled'] as bool? ?? false,
       auditOnly: map['audit_only'] as bool? ?? false,
+      userInputDetectionEnabled:
+          map['user_input_detection_enabled'] == null ||
+          map['user_input_detection_enabled'] == true ||
+          map['user_input_detection_enabled'] == 1,
       sandboxEnabled: map['sandbox_enabled'] as bool? ?? false,
       gatewayBinaryPath: map['gateway_binary_path'] as String?,
       gatewayConfigPath: map['gateway_config_path'] as String?,
@@ -393,10 +432,11 @@ class ProtectionDatabaseService {
       return 'empty';
     }
 
-    final fingerprints = configs
-        .map((config) => _buildProtectionConfigFingerprint(config))
-        .toList()
-      ..sort();
+    final fingerprints =
+        configs
+            .map((config) => _buildProtectionConfigFingerprint(config))
+            .toList()
+          ..sort();
     return fingerprints.join('||');
   }
 

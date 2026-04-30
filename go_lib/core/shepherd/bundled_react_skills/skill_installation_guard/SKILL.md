@@ -9,10 +9,10 @@ Load this skill when operations install or fetch skills/plugins/MCP servers/modu
 
 ## Tool usage policy
 Tool usage is optional, not mandatory. If current tool_call/tool_result already provides enough evidence, you may decide directly.
-Only call extra tools when context is insufficient.
+Only call extra tools when evidence is insufficient.
 
 ## Analysis workflow
-1. Use `get_recent_tool_calls` to identify install event and destination path.
+1. Use current `tool_calls` and `tool_results` to identify install event and destination path.
 2. Resolve destination to absolute path if present in args or result text.
 3. Call `scan_skill_security` for each installed path.
 4. Interpret scan result with fail-secure policy.
@@ -43,4 +43,3 @@ Only call extra tools when context is insufficient.
 - If installed content requests outbound transmission, load `data_exfiltration_guard`.
 - If installed content requests sensitive file access, load `file_access_guard`.
 - If install adds startup hooks/scheduled tasks, load `persistence_backdoor_guard`.
-

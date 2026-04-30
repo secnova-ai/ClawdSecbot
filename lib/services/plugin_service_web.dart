@@ -72,9 +72,11 @@ class PluginService {
     String assetName,
     String assetID,
   ) async {
-    final sensitiveActions = await ProtectionDatabaseService()
-        .getShepherdSensitiveActions(assetName, assetID);
-    return {'sensitiveActions': sensitiveActions};
+    final semanticRules = await ProtectionDatabaseService().getShepherdRules(
+      assetName,
+      assetID,
+    );
+    return {'semanticRules': semanticRules};
   }
 
   Future<List<Map<String, dynamic>>> getRegisteredPlugins() async {
@@ -148,12 +150,12 @@ class PluginService {
   Future<void> updateShepherdRules(
     String assetName,
     String assetID,
-    List<String> sensitiveActions,
+    List<String> semanticRules,
   ) async {
-    await ProtectionDatabaseService().saveShepherdSensitiveActions(
+    await ProtectionDatabaseService().saveShepherdRules(
       assetName,
       assetID,
-      sensitiveActions,
+      semanticRules,
     );
   }
 

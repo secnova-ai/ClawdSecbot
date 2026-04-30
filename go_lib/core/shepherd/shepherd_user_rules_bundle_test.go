@@ -3,7 +3,6 @@ package shepherd
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 )
 
@@ -29,8 +28,8 @@ func TestEnsureBundledShepherdRulesReleased(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to load released user rules: %v", err)
 	}
-	if len(rules.SensitiveActions) == 0 {
-		t.Fatal("expected bundled user rules to contain sensitive actions")
+	if len(rules.SemanticRules) == 0 {
+		t.Fatal("expected bundled user rules to contain semantic rules")
 	}
 }
 
@@ -41,9 +40,13 @@ func TestSaveUserRulesPersistsToJSON(t *testing.T) {
 		t.Fatalf("release bundled user rules failed: %v", err)
 	}
 
-	input := []string{"delete_file", "send_email", "delete_file", " "}
 	if err := saveUserRulesToFile(rulesFile, &UserRules{
-		SensitiveActions: normalizeSensitiveActions(input),
+		SemanticRules: []SemanticRule{
+			{ID: "delete_file", Enabled: true, Description: "不允许删除文件"},
+			{ID: "send_email", Enabled: true, Description: "不允许发送邮件"},
+			{ID: "delete_file", Enabled: true, Description: "duplicate"},
+			{ID: " ", Enabled: true},
+		},
 	}); err != nil {
 		t.Fatalf("saveUserRulesToFile failed: %v", err)
 	}
@@ -53,8 +56,10 @@ func TestSaveUserRulesPersistsToJSON(t *testing.T) {
 		t.Fatalf("load persisted user rules failed: %v", err)
 	}
 
-	expected := []string{"delete_file", "send_email"}
-	if !reflect.DeepEqual(loaded.SensitiveActions, expected) {
-		t.Fatalf("unexpected persisted sensitive actions: got=%v want=%v", loaded.SensitiveActions, expected)
+	if len(loaded.SemanticRules) != 2 {
+		t.Fatalf("unexpected persisted semantic rules: got=%v", loaded.SemanticRules)
+	}
+	if loaded.SemanticRules[0].ID != "delete_file" || loaded.SemanticRules[1].ID != "send_email" {
+		t.Fatalf("unexpected persisted semantic rule order: got=%v", loaded.SemanticRules)
 	}
 }

@@ -61,6 +61,11 @@ var databaseVersionMigrations = []databaseVersionMigration{
 		toVersion:   "1.0.3",
 		run:         migrateDatabaseFrom1_0_2To1_0_3,
 	},
+	{
+		fromVersion: "1.0.3",
+		toVersion:   "1.0.4",
+		run:         migrateDatabaseFrom1_0_3To1_0_4,
+	},
 }
 
 func initializeDatabaseState(db *sql.DB, currentVersion, versionFilePath string) (*DBInitSummary, error) {
@@ -590,6 +595,14 @@ func migrateDatabaseFrom1_0_2To1_0_3(db *sql.DB) error {
 		return fmt.Errorf("commit migration transaction failed: %w", err)
 	}
 
+	return nil
+}
+
+func migrateDatabaseFrom1_0_3To1_0_4(db *sql.DB) error {
+	logging.Info("Migrating database 1.0.3 -> 1.0.4: adding ShepherdGate instruction chain fields and user input detection switch")
+	ensureAuditLogTruthRecordColumns(db)
+	addColumnSafe(db, "security_events", "instruction_chain_id", "TEXT NOT NULL DEFAULT ''")
+	addColumnSafe(db, "protection_config", "user_input_detection_enabled", "INTEGER NOT NULL DEFAULT 1")
 	return nil
 }
 

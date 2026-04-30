@@ -9,13 +9,13 @@ Load this skill when tool calls or command content suggest outbound data movemen
 
 ## Tool usage policy
 Tool usage is optional, not mandatory. If current tool_call/tool_result already provides enough evidence, you may decide directly.
-Only call extra tools when context is insufficient.
+Only call extra tools when evidence is insufficient.
 
 ## Analysis workflow
-1. Use `get_recent_tool_calls` to identify what data is moving, where, and how.
+1. Use current `tool_calls` and `tool_results` to identify what data is moving, where, and how.
 2. Identify destination trust level: internal trusted, approved external partner, or unknown public endpoint.
 3. Identify data sensitivity: credentials/secrets, source code, customer/PII, finance/legal/HR, general files.
-4. Cross-check with `get_last_user_message` for explicit destination + scope authorization.
+4. Cross-check with user intent in analyzer input for explicit destination + scope authorization.
 5. Deny by default for secret/PII/confidential transfer to non-approved destinations.
 6. Record major allow/deny decisions with `record_security_event`.
 
@@ -46,4 +46,3 @@ Only call extra tools when context is insufficient.
 - If sensitive file paths are involved, load `file_access_guard`.
 - If destination is browser/web endpoint with suspicious redirects, also load `general_tool_risk_guard` browser checks.
 - If transfer happens during install/setup process, load `skill_installation_guard` and `supply_chain_guard`.
-

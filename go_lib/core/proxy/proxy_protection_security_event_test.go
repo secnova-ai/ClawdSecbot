@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -53,6 +54,35 @@ func TestEmitSecurityEvent_FixedSourceAndFields(t *testing.T) {
 	}
 	if ev.ID == "" || ev.Timestamp == "" {
 		t.Errorf("expected ID and Timestamp to be auto-filled, got %+v", ev)
+	}
+}
+
+func TestEmitSecurityEvent_IncludesInstructionChainMetadataInDetail(t *testing.T) {
+	_ = drainSecurityEvents()
+
+	pp := newProxyForSecurityEventTest("openclaw", "asset-123")
+	chain := pp.createSecurityChain("req-chain", securityChainSourceTool, "ambiguous_tool_call_id")
+	pp.emitSecurityEvent("req-chain", "blocked", "Blocked tool result", "CRITICAL", "reason text")
+
+	events := drainSecurityEvents()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].InstructionChainID != chain.ChainID {
+		t.Fatalf("expected top-level chain id %s, got %s", chain.ChainID, events[0].InstructionChainID)
+	}
+	var detail map[string]interface{}
+	if err := json.Unmarshal([]byte(events[0].Detail), &detail); err != nil {
+		t.Fatalf("expected JSON detail, got %q: %v", events[0].Detail, err)
+	}
+	if detail["message"] != "reason text" {
+		t.Fatalf("expected original detail message, got %#v", detail["message"])
+	}
+	if detail["instruction_chain_id"] != chain.ChainID || detail["chain_source"] != securityChainSourceTool {
+		t.Fatalf("expected chain metadata in detail, got %#v", detail)
+	}
+	if detail["chain_degraded"] != true || detail["chain_degrade_reason"] != "ambiguous_tool_call_id" {
+		t.Fatalf("expected degraded metadata in detail, got %#v", detail)
 	}
 }
 

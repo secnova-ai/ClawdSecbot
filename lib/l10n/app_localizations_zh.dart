@@ -1860,6 +1860,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get auditOnlyModeDesc => '不进行风险研判，仅记录审计日志';
 
   @override
+  String get userInputDetection => '用户输入检测';
+
+  @override
+  String get userInputDetectionDesc => '转发前分析用户消息。关闭后可减少安全模型 token 消耗。';
+
+  @override
   String get auditOnlyModeShort => '仅审计';
 
   @override

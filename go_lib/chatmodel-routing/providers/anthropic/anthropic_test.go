@@ -83,3 +83,80 @@ func TestConvertResponseMapsAnthropicMessage(t *testing.T) {
 		t.Fatalf("Expected assistant content hello, got %s", body)
 	}
 }
+
+func TestAnthropicInputTokensIncludesPromptCacheUsage(t *testing.T) {
+	usage := gjson.Parse(`{
+		"input_tokens": 50,
+		"cache_creation_input_tokens": 200,
+		"cache_read_input_tokens": 100000,
+		"output_tokens": 12
+	}`)
+
+	if got := anthropicInputTokens(usage); got != 100250 {
+		t.Fatalf("expected total input tokens 100250, got %d", got)
+	}
+}
+
+func TestConvertResponse_IncludesPromptCacheUsage(t *testing.T) {
+	p := New("test")
+	resp, err := p.convertResponse([]byte(`{
+		"id": "msg_1",
+		"model": "claude-test",
+		"role": "assistant",
+		"content": [{"type": "text", "text": "done"}],
+		"stop_reason": "end_turn",
+		"usage": {
+			"input_tokens": 50,
+			"cache_creation_input_tokens": 200,
+			"cache_read_input_tokens": 100000,
+			"output_tokens": 12
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("convertResponse failed: %v", err)
+	}
+
+	if resp.Usage.PromptTokens != 100250 {
+		t.Fatalf("expected prompt tokens 100250, got %d", resp.Usage.PromptTokens)
+	}
+	if resp.Usage.CompletionTokens != 12 {
+		t.Fatalf("expected completion tokens 12, got %d", resp.Usage.CompletionTokens)
+	}
+	if resp.Usage.TotalTokens != 100262 {
+		t.Fatalf("expected total tokens 100262, got %d", resp.Usage.TotalTokens)
+	}
+}
+
+func TestAnthropicStream_IncludesPromptCacheUsage(t *testing.T) {
+	stream := &anthropicStream{}
+	if _, err := stream.processEvent("message_start", `{
+		"message": {
+			"id": "msg_1",
+			"model": "claude-test",
+			"usage": {
+				"input_tokens": 50,
+				"cache_creation_input_tokens": 200,
+				"cache_read_input_tokens": 100000
+			}
+		}
+	}`); err != nil {
+		t.Fatalf("message_start failed: %v", err)
+	}
+
+	chunk, err := stream.processEvent("message_delta", `{
+		"delta": {"stop_reason": "end_turn"},
+		"usage": {"output_tokens": 12}
+	}`)
+	if err != nil {
+		t.Fatalf("message_delta failed: %v", err)
+	}
+	if chunk == nil {
+		t.Fatalf("expected usage chunk")
+	}
+	if chunk.Usage.PromptTokens != 100250 {
+		t.Fatalf("expected prompt tokens 100250, got %d", chunk.Usage.PromptTokens)
+	}
+	if chunk.Usage.TotalTokens != 100262 {
+		t.Fatalf("expected total tokens 100262, got %d", chunk.Usage.TotalTokens)
+	}
+}

@@ -11,16 +11,17 @@ import (
 
 // SecurityEventRecord 安全事件数据库记录
 type SecurityEventRecord struct {
-	ID         string `json:"id"`
-	Timestamp  string `json:"timestamp"`
-	EventType  string `json:"event_type"`
-	ActionDesc string `json:"action_desc"`
-	RiskType   string `json:"risk_type"`
-	Detail     string `json:"detail"`
-	Source     string `json:"source"`
-	AssetName  string `json:"asset_name,omitempty"`
-	AssetID    string `json:"asset_id,omitempty"`
-	RequestID  string `json:"request_id,omitempty"`
+	ID                 string `json:"id"`
+	Timestamp          string `json:"timestamp"`
+	EventType          string `json:"event_type"`
+	ActionDesc         string `json:"action_desc"`
+	RiskType           string `json:"risk_type"`
+	Detail             string `json:"detail"`
+	Source             string `json:"source"`
+	AssetName          string `json:"asset_name,omitempty"`
+	AssetID            string `json:"asset_id,omitempty"`
+	RequestID          string `json:"request_id,omitempty"`
+	InstructionChainID string `json:"instruction_chain_id,omitempty"`
 }
 
 // SecurityEventRepository 安全事件仓库
@@ -53,8 +54,8 @@ func (r *SecurityEventRepository) SaveSecurityEventsBatch(events []*SecurityEven
 
 	stmt, err := tx.Prepare(`
 		INSERT OR REPLACE INTO security_events
-		(id, timestamp, event_type, action_desc, risk_type, detail, source, asset_name, asset_id, request_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(id, timestamp, event_type, action_desc, risk_type, detail, source, asset_name, asset_id, request_id, instruction_chain_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -65,7 +66,7 @@ func (r *SecurityEventRepository) SaveSecurityEventsBatch(events []*SecurityEven
 		_, err := stmt.Exec(evt.ID, evt.Timestamp, evt.EventType,
 			evt.ActionDesc, evt.RiskType, evt.Detail, evt.Source,
 			strings.TrimSpace(evt.AssetName), strings.TrimSpace(evt.AssetID),
-			strings.TrimSpace(evt.RequestID))
+			strings.TrimSpace(evt.RequestID), strings.TrimSpace(evt.InstructionChainID))
 		if err != nil {
 			logging.Warning("Failed to save security event %s: %v", evt.ID, err)
 		}
@@ -90,7 +91,7 @@ func (r *SecurityEventRepository) GetSecurityEvents(limit, offset int, assetID s
 	assetID = strings.TrimSpace(assetID)
 
 	query := `
-		SELECT id, timestamp, event_type, action_desc, risk_type, detail, source, asset_name, asset_id, request_id
+		SELECT id, timestamp, event_type, action_desc, risk_type, detail, source, asset_name, asset_id, request_id, instruction_chain_id
 		FROM security_events
 	`
 	args := make([]interface{}, 0, 4)
@@ -198,10 +199,10 @@ func (r *SecurityEventRepository) ClearAllSecurityEvents(assetID string) error {
 func scanSecurityEvent(rows *sql.Rows) (*SecurityEventRecord, error) {
 	var evt SecurityEventRecord
 	var riskType, detail sql.NullString
-	var assetName, assetID, requestID sql.NullString
+	var assetName, assetID, requestID, instructionChainID sql.NullString
 
 	err := rows.Scan(&evt.ID, &evt.Timestamp, &evt.EventType,
-		&evt.ActionDesc, &riskType, &detail, &evt.Source, &assetName, &assetID, &requestID)
+		&evt.ActionDesc, &riskType, &detail, &evt.Source, &assetName, &assetID, &requestID, &instructionChainID)
 	if err != nil {
 		return nil, err
 	}
@@ -211,6 +212,7 @@ func scanSecurityEvent(rows *sql.Rows) (*SecurityEventRecord, error) {
 	evt.AssetName = assetName.String
 	evt.AssetID = assetID.String
 	evt.RequestID = requestID.String
+	evt.InstructionChainID = instructionChainID.String
 	return &evt, nil
 }
 
@@ -225,7 +227,7 @@ func (r *SecurityEventRepository) GetSecurityEventsByRequestID(requestID string)
 	}
 
 	query := `
-		SELECT id, timestamp, event_type, action_desc, risk_type, detail, source, asset_name, asset_id, request_id
+		SELECT id, timestamp, event_type, action_desc, risk_type, detail, source, asset_name, asset_id, request_id, instruction_chain_id
 		FROM security_events
 		WHERE request_id = ?
 		ORDER BY timestamp ASC

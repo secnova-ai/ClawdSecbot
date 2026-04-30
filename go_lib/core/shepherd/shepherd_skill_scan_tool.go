@@ -21,10 +21,15 @@ import (
 
 type scanSkillSecurityTool struct {
 	modelConfig *repository.SecurityModelConfig
+	usageSink   func(Usage)
 }
 
-func newScanSkillSecurityTool(modelConfig *repository.SecurityModelConfig) tool.BaseTool {
-	return &scanSkillSecurityTool{modelConfig: modelConfig}
+func newScanSkillSecurityTool(modelConfig *repository.SecurityModelConfig, usageSink ...func(Usage)) tool.BaseTool {
+	t := &scanSkillSecurityTool{modelConfig: modelConfig}
+	if len(usageSink) > 0 {
+		t.usageSink = usageSink[0]
+	}
+	return t
 }
 
 func (t *scanSkillSecurityTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
@@ -44,6 +49,7 @@ type skillScanResultJSON struct {
 	Summary    string                  `json:"summary"`
 	ScanStatus string                  `json:"scan_status"`
 	Cached     bool                    `json:"cached,omitempty"`
+	TokenUsage *Usage                  `json:"token_usage,omitempty"`
 }
 
 type skillScanRiskItemJSON struct {
@@ -135,12 +141,25 @@ func (t *scanSkillSecurityTool) InvokableRun(ctx context.Context, argumentsInJSO
 
 	analysisResult, err := analyzer.AnalyzeSkill(analysisCtx, skillPath)
 	if err != nil {
+		if promptTokens, completionTokens, totalTokens, ok := skillscan.UsageFromAnalysisError(err); ok {
+			t.recordUsage(&Usage{
+				PromptTokens:     promptTokens,
+				CompletionTokens: completionTokens,
+				TotalTokens:      totalTokens,
+			})
+		}
 		logging.ShepherdGateError("[ScanSkillSecurity] analysis failed: %v", err)
 		return t.errorResponse(fmt.Sprintf("security analysis failed: %v", err)), nil
 	}
 
 	logging.ShepherdGateInfo("[ScanSkillSecurity] analysis complete: safe=%v, risk_level=%s",
 		analysisResult.Safe, analysisResult.RiskLevel)
+	usage := normalizeUsage(&Usage{
+		PromptTokens:     analysisResult.PromptTokens,
+		CompletionTokens: analysisResult.CompletionTokens,
+		TotalTokens:      analysisResult.TotalTokens,
+	})
+	t.recordUsage(usage)
 
 	skillName := filepath.Base(skillPath)
 	issues := extractIssueStrings(analysisResult.Issues)
@@ -164,6 +183,7 @@ func (t *scanSkillSecurityTool) InvokableRun(ctx context.Context, argumentsInJSO
 		Summary:    analysisResult.Summary,
 		ScanStatus: "completed",
 		Cached:     false,
+		TokenUsage: usage,
 	}
 	return t.successResponse(result), nil
 }
@@ -177,6 +197,13 @@ func storedSkillScanReusable(skillPath string, record *repository.SkillScanRecor
 	}
 	filteredIssues, _ := skillscan.ValidateStoredIssueStrings(skillPath, record.Issues)
 	return len(filteredIssues) > 0
+}
+
+func (t *scanSkillSecurityTool) recordUsage(usage *Usage) {
+	if t == nil || t.usageSink == nil || usage == nil {
+		return
+	}
+	t.usageSink(*usage)
 }
 
 func (t *scanSkillSecurityTool) errorResponse(errMsg string) string {

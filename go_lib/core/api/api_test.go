@@ -1126,7 +1126,7 @@ func TestSetProtectionPolicy_WithoutBotIDCreatesDefaultPolicy(t *testing.T) {
 	_, ts, token := setupTestServer(t)
 	defer ts.Close()
 
-	body := bytes.NewBufferString(`{"protection":"enabled","userRules":["confirm-delete"],"botModel":{"provider":"openai","id":"gpt-4.1","url":"https://bot.example.com/v1","key":"bot-key"}}`)
+	body := bytes.NewBufferString(`{"protection":"enabled","userRules":{"semantic_rules":[{"id":"confirm-delete","enabled":true,"description":"confirm delete","applies_to":["tool_call"],"action":"needs_confirmation","risk_type":"HIGH_RISK_OPERATION"}]},"botModel":{"provider":"openai","id":"gpt-4.1","url":"https://bot.example.com/v1","key":"bot-key"}}`)
 	req, err := http.NewRequest("POST", ts.URL+"/api/v1/protection/policy", body)
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
@@ -1156,15 +1156,12 @@ func TestSetProtectionPolicy_WithoutBotIDCreatesDefaultPolicy(t *testing.T) {
 		t.Fatalf("expected default bot model to be saved, got %+v", config.BotModelConfig)
 	}
 
-	rules, found, err := repository.NewProtectionRepository(nil).GetShepherdSensitiveActions(
-		repository.DefaultProtectionPolicyAssetName,
-		repository.DefaultProtectionPolicyAssetID,
-	)
+	rulesRaw, found, err := repository.NewProtectionRepository(nil).GetShepherdRulesRaw(repository.DefaultProtectionPolicyAssetID)
 	if err != nil {
-		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+		t.Fatalf("GetShepherdRulesRaw failed: %v", err)
 	}
-	if !found || len(rules) != 1 || rules[0] != "confirm-delete" {
-		t.Fatalf("expected default user rules to be saved, got found=%v rules=%v", found, rules)
+	if !found || !strings.Contains(rulesRaw, "confirm-delete") {
+		t.Fatalf("expected default user rules to be saved, got found=%v rules=%s", found, rulesRaw)
 	}
 }
 
@@ -1193,8 +1190,12 @@ func TestSetProtectionPolicy_WithoutBotIDFullySyncsInheritedAssets(t *testing.T)
 	}); err != nil {
 		t.Fatalf("SaveProtectionConfig asset failed: %v", err)
 	}
-	if err := repo.SaveShepherdSensitiveActions("openclaw", "policy-inherit-sync", []string{"old-rule"}); err != nil {
-		t.Fatalf("SaveShepherdSensitiveActions asset failed: %v", err)
+	if err := repo.SaveShepherdRulesRaw(
+		"openclaw",
+		"policy-inherit-sync",
+		`{"semantic_rules":[{"id":"old-rule","enabled":true,"description":"old rule","applies_to":["tool_call"],"action":"needs_confirmation","risk_type":"HIGH_RISK_OPERATION"}]}`,
+	); err != nil {
+		t.Fatalf("SaveShepherdRulesRaw asset failed: %v", err)
 	}
 
 	_, ts, token := setupTestServer(t)
@@ -1202,7 +1203,7 @@ func TestSetProtectionPolicy_WithoutBotIDFullySyncsInheritedAssets(t *testing.T)
 
 	body := bytes.NewBufferString(`{
 		"protection":"disabled",
-		"userRules":["new-rule"],
+		"userRules":{"semantic_rules":[{"id":"new-rule","enabled":true,"description":"new rule","applies_to":["tool_call"],"action":"needs_confirmation","risk_type":"HIGH_RISK_OPERATION"}]},
 		"tokenLimit":{"session":2000,"daily":3000},
 		"permission":{
 			"open":true,
@@ -1253,12 +1254,12 @@ func TestSetProtectionPolicy_WithoutBotIDFullySyncsInheritedAssets(t *testing.T)
 		t.Fatalf("expected inherited permissions to match default, got path=%s network=%s shell=%s", config.PathPermission, config.NetworkPermission, config.ShellPermission)
 	}
 
-	rules, found, err := repo.GetShepherdSensitiveActions("openclaw", "policy-inherit-sync")
+	rulesRaw, found, err := repo.GetShepherdRulesRaw("policy-inherit-sync")
 	if err != nil {
-		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+		t.Fatalf("GetShepherdRulesRaw failed: %v", err)
 	}
-	if !found || len(rules) != 1 || rules[0] != "new-rule" {
-		t.Fatalf("expected inherited user rules to match default, got found=%v rules=%v", found, rules)
+	if !found || !strings.Contains(rulesRaw, "new-rule") {
+		t.Fatalf("expected inherited user rules to match default, got found=%v rules=%s", found, rulesRaw)
 	}
 }
 
@@ -1289,12 +1290,12 @@ func TestHandleScan_AppliesDefaultPolicyToNewAssets(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save security model failed: %v", err)
 	}
-	if err := repo.SaveShepherdSensitiveActions(
+	if err := repo.SaveShepherdRulesRaw(
 		repository.DefaultProtectionPolicyAssetName,
 		repository.DefaultProtectionPolicyAssetID,
-		[]string{"confirm-delete"},
+		`{"semantic_rules":[{"id":"confirm-delete","enabled":true,"description":"confirm delete","applies_to":["tool_call"],"action":"needs_confirmation","risk_type":"HIGH_RISK_OPERATION"}]}`,
 	); err != nil {
-		t.Fatalf("SaveShepherdSensitiveActions failed: %v", err)
+		t.Fatalf("SaveShepherdRulesRaw failed: %v", err)
 	}
 
 	registerScannedAPITestAsset(t, "PolicyScanAutoApply", "policy-scan-auto-apply")
@@ -1325,12 +1326,12 @@ func TestHandleScan_AppliesDefaultPolicyToNewAssets(t *testing.T) {
 		t.Fatalf("expected new asset to be marked as inheriting default policy, got %+v", config)
 	}
 
-	rules, found, err := repo.GetShepherdSensitiveActions("PolicyScanAutoApply", "policy-scan-auto-apply")
+	rulesRaw, found, err := repo.GetShepherdRulesRaw("policy-scan-auto-apply")
 	if err != nil {
-		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+		t.Fatalf("GetShepherdRulesRaw failed: %v", err)
 	}
-	if !found || len(rules) != 1 || rules[0] != "confirm-delete" {
-		t.Fatalf("expected inherited user rules, got found=%v rules=%v", found, rules)
+	if !found || !strings.Contains(rulesRaw, "confirm-delete") {
+		t.Fatalf("expected inherited user rules, got found=%v rules=%s", found, rulesRaw)
 	}
 }
 
@@ -2086,7 +2087,7 @@ func TestProtectionPolicyRequest_Parsing(t *testing.T) {
 		},
 		{
 			name:    "valid with all fields",
-			json:    `{"botId":["test"],"protection":"bypass","userRules":["rule1"],"tokenLimit":{"session":100,"daily":1000},"botModel":{"provider":"openai","id":"gpt-4","url":"https://api.openai.com"}}`,
+			json:    `{"botId":["test"],"protection":"bypass","userRules":{"semantic_rules":[{"id":"rule1","enabled":true}]},"tokenLimit":{"session":100,"daily":1000},"botModel":{"provider":"openai","id":"gpt-4","url":"https://api.openai.com"}}`,
 			wantErr: false,
 		},
 		{

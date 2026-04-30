@@ -90,7 +90,8 @@ func (t *recordSecurityEventTool) InvokableRun(ctx context.Context, argumentsInJ
 	}
 	securityEventBuffer.AddSecurityEvent(event)
 
-	logging.ShepherdGateInfo("[ShepherdGate][Tool:record_security_event][-] type=%s, action=%s, risk=%s",
+	logging.ShepherdGateInfo("%s[react][Tool:record_security_event][-] type=%s action=%s risk=%s",
+		shepherdFlowLogPrefix,
 		event.EventType, shortenForLog(event.ActionDesc, 120), event.RiskType)
 
 	result := map[string]interface{}{

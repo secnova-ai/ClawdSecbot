@@ -10,6 +10,7 @@ class SecurityEvent {
   final String assetName; // openclaw | nullclaw
   final String assetID; // 资产实例ID
   final String requestID; // 关联的请求ID（审计日志 request_id）
+  final String instructionChainID; // ShepherdGate 指令链ID
 
   SecurityEvent({
     required this.id,
@@ -22,6 +23,7 @@ class SecurityEvent {
     this.assetName = '',
     this.assetID = '',
     this.requestID = '',
+    this.instructionChainID = '',
   });
 
   factory SecurityEvent.fromJson(Map<String, dynamic> json) {
@@ -36,6 +38,7 @@ class SecurityEvent {
       assetName: json['asset_name'] as String? ?? '',
       assetID: json['asset_id'] as String? ?? '',
       requestID: json['request_id'] as String? ?? '',
+      instructionChainID: json['instruction_chain_id'] as String? ?? '',
     );
   }
 
@@ -51,6 +54,7 @@ class SecurityEvent {
       'asset_name': assetName,
       'asset_id': assetID,
       'request_id': requestID,
+      'instruction_chain_id': instructionChainID,
     };
   }
 

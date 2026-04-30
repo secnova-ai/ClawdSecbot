@@ -31,19 +31,23 @@ func SyncDefaultProtectionPolicyForAssets(assets []core.Asset) error {
 		return nil
 	}
 
-	defaultUserRules, foundDefaultUserRules, err := repo.GetShepherdSensitiveActions(
-		repository.DefaultProtectionPolicyAssetName,
-		repository.DefaultProtectionPolicyAssetID,
-	)
+	defaultRulesRaw, foundDefaultUserRules, err := repo.GetShepherdRulesRaw(repository.DefaultProtectionPolicyAssetID)
+	var defaultUserRules *shepherd.UserRules
 	if err != nil {
 		logging.Warning("Default policy sync: failed to load default user rules: %v", err)
-		defaultUserRules = nil
 		foundDefaultUserRules = false
+	} else if foundDefaultUserRules {
+		defaultUserRules, err = shepherd.DecodeUserRulesJSON([]byte(defaultRulesRaw))
+		if err != nil {
+			logging.Warning("Default policy sync: failed to decode default user rules: %v", err)
+			defaultUserRules = nil
+			foundDefaultUserRules = false
+		}
 	}
 	if !foundDefaultUserRules {
 		defaultRules, defaultErr := shepherd.GetDefaultUserRules()
 		if defaultErr == nil {
-			defaultUserRules = defaultRules.SensitiveActions
+			defaultUserRules = defaultRules
 			foundDefaultUserRules = true
 		}
 	}
@@ -68,17 +72,17 @@ func SyncDefaultProtectionPolicyForAssets(assets []core.Asset) error {
 			return err
 		}
 		previousConfig := cloneProtectionConfigForSync(existingConfig)
-		previousUserRules, foundPreviousUserRules, err := repo.GetShepherdSensitiveActions(assetName, assetID)
+		previousUserRulesRaw, foundPreviousUserRules, err := repo.GetShepherdRulesRaw(assetID)
 		if err != nil {
 			return err
 		}
 		snapshots[assetID] = &defaultPolicySyncSnapshot{
-			assetID:             assetID,
-			assetName:           strings.TrimSpace(assetName),
-			previousConfig:      previousConfig,
-			previousUserRules:   append([]string(nil), previousUserRules...),
-			foundPreviousRules:  foundPreviousUserRules,
-			foundCurrentRequest: true,
+			assetID:              assetID,
+			assetName:            strings.TrimSpace(assetName),
+			previousConfig:       previousConfig,
+			previousUserRulesRaw: previousUserRulesRaw,
+			foundPreviousRules:   foundPreviousUserRules,
+			foundCurrentRequest:  true,
 		}
 
 		config := cloneProtectionConfigForSync(defaultConfig)
@@ -100,10 +104,14 @@ func SyncDefaultProtectionPolicyForAssets(assets []core.Asset) error {
 		}
 		appliedAssetIDs = append(appliedAssetIDs, assetID)
 
-		runtimeUserRules := []string(nil)
+		var runtimeUserRules *shepherd.UserRules
 		if foundDefaultUserRules {
-			runtimeUserRules = append([]string(nil), defaultUserRules...)
-			if err := repo.SaveShepherdSensitiveActions(config.AssetName, assetID, runtimeUserRules); err != nil {
+			runtimeUserRules = defaultUserRules
+			rulesJSON, marshalErr := json.Marshal(runtimeUserRules)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if err := repo.SaveShepherdRulesRaw(config.AssetName, assetID, string(rulesJSON)); err != nil {
 				if rollbackErr := rollbackDefaultPolicySync(repo, appliedAssetIDs, snapshots); rollbackErr != nil {
 					return fmt.Errorf("default policy sync failed: %w; rollback failed: %v", err, rollbackErr)
 				}
@@ -115,7 +123,7 @@ func SyncDefaultProtectionPolicyForAssets(assets []core.Asset) error {
 			previousConfig:    previousConfig,
 			currentConfig:     config,
 			userRules:         runtimeUserRules,
-			previousUserRules: append([]string(nil), previousUserRules...),
+			previousUserRules: previousUserRulesRaw,
 		})
 	}
 
@@ -269,16 +277,17 @@ func buildPolicyProxyConfigForSync(config *repository.ProtectionConfig) (*proxy.
 			SecretKey: config.BotModelConfig.SecretKey,
 		},
 		Runtime: &proxy.ProtectionRuntimeConfig{
-			AuditOnly:               config.AuditOnly,
-			SingleSessionTokenLimit: config.SingleSessionTokenLimit,
-			DailyTokenLimit:         config.DailyTokenLimit,
+			AuditOnly:                 config.AuditOnly,
+			SingleSessionTokenLimit:   config.SingleSessionTokenLimit,
+			DailyTokenLimit:           config.DailyTokenLimit,
+			UserInputDetectionEnabled: &config.UserInputDetectionEnabled,
 		},
 	}, nil
 }
 
 // applyProtectionPolicyRuntimeForSync 将策略变化同步到运行时代理。
 // 返回 error 表示运行时同步失败，供上层触发原子回滚。
-func applyProtectionPolicyRuntimeForSync(previousConfig, config *repository.ProtectionConfig, userRules []string) error {
+func applyProtectionPolicyRuntimeForSync(previousConfig, config *repository.ProtectionConfig, userRules *shepherd.UserRules) error {
 	if config == nil || config.AssetName == "" || config.AssetID == "" {
 		return nil
 	}
@@ -326,13 +335,14 @@ func applyProtectionPolicyRuntimeForSync(previousConfig, config *repository.Prot
 	runningProxy := proxy.GetProxyProtectionByAsset(config.AssetID)
 	if runningProxy != nil && runningProxy.IsRunning() {
 		runtimeCfg := &proxy.ProtectionRuntimeConfig{
-			AuditOnly:               config.AuditOnly,
-			SingleSessionTokenLimit: config.SingleSessionTokenLimit,
-			DailyTokenLimit:         config.DailyTokenLimit,
+			AuditOnly:                 config.AuditOnly,
+			SingleSessionTokenLimit:   config.SingleSessionTokenLimit,
+			DailyTokenLimit:           config.DailyTokenLimit,
+			UserInputDetectionEnabled: &config.UserInputDetectionEnabled,
 		}
 		runningProxy.UpdateProtectionConfig(runtimeCfg)
 		if userRules != nil {
-			runningProxy.UpdateUserRules(userRules)
+			runningProxy.UpdateUserRulesConfig(userRules)
 		}
 	}
 
@@ -347,19 +357,19 @@ func applyProtectionPolicyRuntimeForSync(previousConfig, config *repository.Prot
 }
 
 type defaultPolicySyncSnapshot struct {
-	assetID             string
-	assetName           string
-	previousConfig      *repository.ProtectionConfig
-	previousUserRules   []string
-	foundPreviousRules  bool
-	foundCurrentRequest bool
+	assetID              string
+	assetName            string
+	previousConfig       *repository.ProtectionConfig
+	previousUserRulesRaw string
+	foundPreviousRules   bool
+	foundCurrentRequest  bool
 }
 
 type defaultPolicyRuntimePlan struct {
 	previousConfig    *repository.ProtectionConfig
 	currentConfig     *repository.ProtectionConfig
-	userRules         []string
-	previousUserRules []string
+	userRules         *shepherd.UserRules
+	previousUserRules string
 }
 
 // rollbackDefaultPolicySync 回滚已应用的默认策略同步变更，保证同步过程具备原子语义。
@@ -398,13 +408,13 @@ func rollbackDefaultPolicySync(
 			if snapshot.previousConfig != nil && strings.TrimSpace(snapshot.previousConfig.AssetName) != "" {
 				assetName = strings.TrimSpace(snapshot.previousConfig.AssetName)
 			}
-			if err := repo.SaveShepherdSensitiveActions(assetName, assetID, snapshot.previousUserRules); err != nil {
+			if err := repo.SaveShepherdRulesRaw(assetName, assetID, snapshot.previousUserRulesRaw); err != nil {
 				return err
 			}
 			continue
 		}
 
-		if err := repo.DeleteShepherdSensitiveActions(assetID); err != nil {
+		if err := repo.DeleteShepherdRules(assetID); err != nil {
 			return err
 		}
 	}
@@ -422,7 +432,14 @@ func rollbackRuntimePlansForDefaultPolicySync(appliedPlans []*defaultPolicyRunti
 		}
 
 		restoreConfig := plan.previousConfig
-		restoreUserRules := append([]string(nil), plan.previousUserRules...)
+		var restoreUserRules *shepherd.UserRules
+		if strings.TrimSpace(plan.previousUserRules) != "" {
+			decoded, err := shepherd.DecodeUserRulesJSON([]byte(plan.previousUserRules))
+			if err != nil {
+				return err
+			}
+			restoreUserRules = decoded
+		}
 		if restoreConfig == nil {
 			// 该资产此前无配置，回滚时将运行时恢复为关闭状态。
 			restoreConfig = cloneProtectionConfigForSync(plan.currentConfig)

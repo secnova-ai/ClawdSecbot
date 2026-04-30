@@ -7,6 +7,7 @@ import '../config/build_config.dart';
 import '../l10n/app_localizations.dart';
 import '../models/protection_config_model.dart';
 import '../models/llm_config_model.dart';
+import '../models/shepherd_rule_model.dart';
 import '../services/model_config_database_service.dart';
 import '../services/model_config_service.dart';
 import '../services/protection_service.dart';
@@ -16,9 +17,11 @@ import '../utils/runtime_platform.dart';
 import 'bot_model_config_form.dart';
 import 'processing_notice_card.dart';
 import 'security_model_config_form.dart';
+import 'shepherd_rules_editor.dart';
 import '../services/plugin_service.dart';
 
 part 'protection_config_dialog_network.dart';
+part 'protection_config_dialog_user_input.dart';
 
 /// Token 单位枚举
 ///
@@ -79,73 +82,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
   static const String _botModelUpdatingMessage =
       '正在更新Openclaw配置，$_dashboardReconnectHint';
 
-  static const Map<String, String> _zhSensitiveActionLabels = {
-    'delete': '删除',
-    'remove': '移除',
-    'drop': '删除（数据库）',
-    'truncate': '清空（数据库）',
-    'update': '更新',
-    'write': '写入',
-    'edit': '编辑',
-    'modify': '修改',
-    'execute': '执行',
-    'exec': '执行',
-    'run': '运行',
-    'install': '安装',
-    'uninstall': '卸载',
-    'chmod': '修改权限',
-    'chown': '修改属主',
-    'sudo': '提权执行',
-    'kill': '终止进程',
-    'shutdown': '关机',
-    'reboot': '重启',
-    'format': '格式化',
-    'rm': '删除文件',
-    'mv': '移动文件',
-    'cp': '复制文件',
-    'curl': '网络请求',
-    'wget': '网络下载',
-    'ssh': '远程连接',
-    'scp': '远程传输',
-    'powershell': 'PowerShell 执行',
-    'bash': 'Bash 执行',
-    'cmd': '命令行执行',
-  };
-
-  static const Map<String, String> _zhBundledSkillNameLabels = {
-    'data_exfiltration_guard': '数据外泄防护',
-    'file_access_guard': '文件访问防护',
-    'email_delete_guard': '邮件高风险操作防护',
-    'email_read_guard': '邮件高风险操作防护',
-    'email_operation_guard': '邮件高风险操作防护',
-    'browser_web_access_guard': '网页访问风险防护',
-    'prompt_injection_guard': '提示注入防护',
-    'script_execution_guard': '脚本执行防护',
-    'general_tool_risk_guard': '通用工具风险防护',
-    'supply_chain_guard': '供应链风险防护',
-    'persistence_backdoor_guard': '持久化后门防护',
-    'lateral_movement_guard': '横向移动风险防护',
-    'resource_exhaustion_guard': '资源耗尽风险防护',
-    'skill_installation_guard': '技能安装风险防护',
-  };
-
-  static const Map<String, String> _zhBundledSkillDescLabels = {
-    'data_exfiltration_guard': '检测并拦截可疑的数据导出、上传、批量外发行为。',
-    'file_access_guard': '约束高风险文件路径访问，防止越权读取和敏感文件操作。',
-    'email_delete_guard': '识别邮件删除、批量修改等高风险邮件行为并触发保护。',
-    'email_read_guard': '识别邮件读取与检索中的敏感访问场景并触发保护。',
-    'email_operation_guard': '统一评估邮件相关操作（读/写/删/导出）的安全风险。',
-    'browser_web_access_guard': '分析网页访问与外部内容注入风险，防止诱导后续危险操作。',
-    'prompt_injection_guard': '检测提示注入与越权指令，阻断恶意上下文污染。',
-    'script_execution_guard': '审查脚本与命令执行行为，拦截高危执行链路。',
-    'general_tool_risk_guard': '兜底评估未被专用规则覆盖的工具调用风险。',
-    'supply_chain_guard': '识别不可信依赖、来源异常和供应链投毒风险。',
-    'persistence_backdoor_guard': '检测建立持久化机制与后门驻留的可疑行为。',
-    'lateral_movement_guard': '识别跨主机/跨账户扩散与横向移动行为。',
-    'resource_exhaustion_guard': '识别可能导致 CPU、内存、磁盘或网络耗尽的行为。',
-    'skill_installation_guard': '审查技能安装和加载行为，阻止潜在恶意能力注入。',
-  };
-
   late TabController _tabController;
   late ProtectionConfig _config;
   bool _isLoading = true;
@@ -199,18 +135,20 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
   // 仅审计模式
   bool _auditOnly = false;
 
+  // 用户输入检测
+  bool _userInputDetectionEnabled = true;
+
+  void _setUserInputDetectionEnabled(bool value) {
+    setState(() => _userInputDetectionEnabled = value);
+  }
+
   // 防止重复点击保存
   bool _isSaving = false;
   // Bot 模型连通性测试态，驱动 footer 验证按钮的转圈动画并屏蔽保存/取消。
   bool _isValidatingBotModel = false;
   String _savingProgressMessage = _defaultSavingMessage;
 
-  // Shepherd User Rules
-  final List<String> _sensitiveActions = [];
-  final TextEditingController _sensitiveActionsInputController =
-      TextEditingController();
-  // 临时关闭用户自定义规则配置区，保留实现便于后续恢复。
-  static const bool _showUserCustomRulesSection = false;
+  final List<ShepherdSemanticRule> _semanticRules = [];
 
   // 内置安全技能列表
   List<Map<String, dynamic>> _bundledSkills = [];
@@ -304,7 +242,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     _pathInputController.dispose();
     _networkOutboundInputController.dispose();
     _shellInputController.dispose();
-    _sensitiveActionsInputController.dispose();
     super.dispose();
   }
 
@@ -377,19 +314,14 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
 
       // 仅审计模式
       _auditOnly = _config.auditOnly;
+      _userInputDetectionEnabled = _config.userInputDetectionEnabled;
 
-      // Load Shepherd Rules
-      final rules = fallbackToDefaultPolicy
-          ? <String, List<String>>{
-              'sensitiveActions': await protectionDatabaseService
-                  .getShepherdSensitiveActions(widget.assetName, ''),
-            }
-          : await pluginService.loadAndSyncShepherdRules(
-              widget.assetName,
-              widget.assetID,
-            );
-      _sensitiveActions.clear();
-      _sensitiveActions.addAll(rules['sensitiveActions'] ?? const []);
+      final ruleSet = await protectionDatabaseService.getShepherdRuleSet(
+        widget.assetName,
+        fallbackToDefaultPolicy ? '' : widget.assetID,
+      );
+      _semanticRules.clear();
+      _semanticRules.addAll(ruleSet.semanticRules);
 
       // Load bundled ReAct skills
       _bundledSkills = pluginService.listBundledReActSkills();
@@ -692,20 +624,20 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
         '[ProtectionConfig] Save config: asset=${widget.assetName}, editMode=${widget.isEditMode}, enabled=$shouldEnable, wasEnabled=$wasEnabled',
       );
 
-      // Shepherd rules are persisted by Go JSON file directly.
       final ruleAssetID = _config.assetID.isNotEmpty
           ? _config.assetID
           : widget.assetID;
-      await PluginService().updateShepherdRules(
+      await ProtectionDatabaseService().saveShepherdRuleSet(
         widget.assetName,
         ruleAssetID,
-        _sensitiveActions,
+        ShepherdRuleSet(semanticRules: List.of(_semanticRules)),
       );
 
       final newConfig = _config.copyWith(
         assetID: _config.assetID.isNotEmpty ? _config.assetID : widget.assetID,
         enabled: shouldEnable,
         auditOnly: _auditOnly,
+        userInputDetectionEnabled: _userInputDetectionEnabled,
         sandboxEnabled: _sandboxEnabled,
         singleSessionTokenLimit: _displayToRaw(
           _singleSessionDisplayController.text,
@@ -797,7 +729,10 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           try {
             final result = await protectionService.startProtectionProxy(
               securityModelConfig,
-              ProtectionRuntimeConfig(auditOnly: _auditOnly),
+              ProtectionRuntimeConfig(
+                auditOnly: _auditOnly,
+                userInputDetectionEnabled: _userInputDetectionEnabled,
+              ),
             );
             if (result['success'] == true) {
               appLogger.info(
@@ -825,6 +760,7 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
             assetID: newConfig.assetID,
             singleSessionTokenLimit: newConfig.singleSessionTokenLimit,
             dailyTokenLimit: newConfig.dailyTokenLimit,
+            userInputDetectionEnabled: _userInputDetectionEnabled,
           );
 
           // 4b. 沙箱配置变更时同步到网关（修改 systemd unit / sandbox-exec 并重启 gateway）
@@ -1078,204 +1014,20 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
           // 仅审计模式开关
           _buildAuditOnlySwitch(l10n),
           const SizedBox(height: 16),
+          _buildUserInputDetectionSwitch(l10n),
+          const SizedBox(height: 16),
 
-          // Shepherd User Rules（标题 + 敏感操作，整体框起来）
-          if (_showUserCustomRulesSection)
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.03),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        LucideIcons.shieldAlert,
-                        color: Color(0xFF6366F1),
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              l10n.shepherdRulesTitle,
-                              style: AppFonts.inter(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              l10n.shepherdRulesDesc,
-                              style: AppFonts.inter(
-                                fontSize: 12,
-                                color: Colors.white54,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Input
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Container(
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.05),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.1),
-                            ),
-                          ),
-                          child: TextField(
-                            controller: _sensitiveActionsInputController,
-                            style: AppFonts.firaCode(
-                              fontSize: 12,
-                              color: Colors.white,
-                            ),
-                            decoration: InputDecoration(
-                              hintText: l10n.shepherdSensitivePlaceholder,
-                              hintStyle: AppFonts.inter(
-                                fontSize: 11,
-                                color: Colors.white38,
-                              ),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 10,
-                              ),
-                            ),
-                            onSubmitted: (_) {
-                              final val = _sensitiveActionsInputController.text
-                                  .trim();
-                              if (val.isNotEmpty &&
-                                  !_sensitiveActions.contains(val)) {
-                                setState(() => _sensitiveActions.add(val));
-                                _sensitiveActionsInputController.clear();
-                                _saveConfig(closeOnSave: false);
-                              }
-                            },
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: GestureDetector(
-                          onTap: () {
-                            final val = _sensitiveActionsInputController.text
-                                .trim();
-                            if (val.isNotEmpty &&
-                                !_sensitiveActions.contains(val)) {
-                              setState(() => _sensitiveActions.add(val));
-                              _sensitiveActionsInputController.clear();
-                              _saveConfig(closeOnSave: false);
-                            }
-                          },
-                          child: Container(
-                            height: 36,
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF6366F1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Icon(
-                              LucideIcons.plus,
-                              size: 16,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  // Items
-                  if (_sensitiveActions.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _sensitiveActions.asMap().entries.map((entry) {
-                        final localized = _localizeSensitiveActionForDisplay(
-                          entry.value,
-                          l10n,
-                        );
-                        final displayText = localized == entry.value
-                            ? entry.value
-                            : localized;
-                        return Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(
-                              0xFFEF4444,
-                            ).withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(
-                              color: const Color(
-                                0xFFEF4444,
-                              ).withValues(alpha: 0.3),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  displayText,
-                                  style: AppFonts.firaCode(
-                                    fontSize: 11,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(
-                                      () =>
-                                          _sensitiveActions.removeAt(entry.key),
-                                    );
-                                    _saveConfig(closeOnSave: false);
-                                  },
-                                  child: const Icon(
-                                    LucideIcons.x,
-                                    size: 12,
-                                    color: Colors.white54,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-
-          if (_showUserCustomRulesSection) const SizedBox(height: 16),
-
-          // 安全技能展示区域
-          _buildSecuritySkillsSection(l10n),
+          ShepherdRulesEditor(
+            rules: _semanticRules,
+            bundledSkills: _bundledSkills,
+            onChanged: (rules) {
+              setState(() {
+                _semanticRules
+                  ..clear()
+                  ..addAll(rules);
+              });
+            },
+          ),
 
           const SizedBox(height: 16),
           Container(
@@ -1308,194 +1060,6 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
         ],
       ),
     );
-  }
-
-  /// 构建安全技能只读展示区域
-  Widget _buildSecuritySkillsSection(AppLocalizations l10n) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSectionHeader(
-            l10n.securitySkillsTitle,
-            LucideIcons.shieldCheck,
-            l10n.securitySkillsDesc,
-          ),
-          const SizedBox(height: 16),
-          if (_bundledSkills.isEmpty)
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.03),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-              ),
-              child: Text(
-                '-',
-                style: AppFonts.inter(fontSize: 12, color: Colors.white38),
-              ),
-            )
-          else
-            Column(
-              children: _bundledSkills.map((skill) {
-                final rawName = skill['name']?.toString() ?? '';
-                final rawDesc = skill['description']?.toString() ?? '';
-                final localizedName = _localizeBundledSkillNameForDisplay(
-                  rawName,
-                  l10n,
-                );
-                final localizedDesc = _localizeBundledSkillDescForDisplay(
-                  rawName,
-                  rawDesc,
-                  l10n,
-                );
-                final name = localizedName == rawName ? rawName : localizedName;
-                final desc = localizedDesc == rawDesc ? rawDesc : localizedDesc;
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF22C55E).withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: const Color(0xFF22C55E).withValues(alpha: 0.25),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF22C55E).withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: const Icon(
-                          LucideIcons.zap,
-                          size: 16,
-                          color: Color(0xFF22C55E),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              name,
-                              style: AppFonts.firaCode(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                            if (desc.isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                desc,
-                                style: AppFonts.inter(
-                                  fontSize: 11,
-                                  color: Colors.white54,
-                                ),
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
-        ],
-      ),
-    );
-  }
-
-  String _localizeSensitiveActionForDisplay(
-    String rawAction,
-    AppLocalizations l10n,
-  ) {
-    if (!l10n.localeName.startsWith('zh')) {
-      return rawAction;
-    }
-    final normalized = rawAction.trim().toLowerCase();
-    if (normalized.isEmpty) {
-      return rawAction;
-    }
-
-    // Match bundled default user rules by sentence template.
-    if (normalized.startsWith(
-      'writing to or modifying critical system files or files outside the project workspace',
-    )) {
-      return '写入或修改关键系统文件，或修改项目工作区之外的文件属于敏感操作（说明：在项目内创建/编辑文件不属于敏感操作）';
-    }
-    if (normalized.startsWith(
-      'sending emails, messages, or notifications to external recipients',
-    )) {
-      return '向外部接收方发送邮件、消息或通知属于敏感操作（说明：仅“读取”邮件/消息不属于敏感操作）';
-    }
-    if (normalized.startsWith(
-      'executing potentially dangerous shell commands',
-    )) {
-      return '执行潜在危险的 Shell 命令属于敏感操作（如 rm -rf /、chmod、systemctl）；常规开发命令（如 mkdir、touch、构建工具）及只读命令不属于敏感操作';
-    }
-    if (normalized.startsWith(
-      'changing global system settings or configuration',
-    )) {
-      return '修改全局系统设置或配置属于敏感操作';
-    }
-    if (normalized.startsWith(
-      'reading/writing memory.md, memory/yyyy-mm-dd.md, agents.md, tools.md is considered safe',
-    )) {
-      return '读取/写入 MEMORY.md、memory/YYYY-MM-DD.md、AGENTS.md、TOOLS.md 视为安全操作，无需二次确认';
-    }
-    if (normalized.startsWith(
-          'any payment or money transfer operations need to be confirmed',
-        ) ||
-        normalized.startsWith(
-          'any payment or money transfer operations must be confirmed',
-        )) {
-      return '任何支付或转账操作都需要用户确认';
-    }
-
-    return _zhSensitiveActionLabels[normalized] ?? rawAction;
-  }
-
-  String _localizeBundledSkillNameForDisplay(
-    String rawName,
-    AppLocalizations l10n,
-  ) {
-    if (!l10n.localeName.startsWith('zh')) {
-      return rawName;
-    }
-    final normalized = rawName.trim().toLowerCase();
-    if (normalized.isEmpty) {
-      return rawName;
-    }
-    return _zhBundledSkillNameLabels[normalized] ?? rawName;
-  }
-
-  String _localizeBundledSkillDescForDisplay(
-    String rawName,
-    String rawDesc,
-    AppLocalizations l10n,
-  ) {
-    if (!l10n.localeName.startsWith('zh')) {
-      return rawDesc;
-    }
-    final normalized = rawName.trim().toLowerCase();
-    if (normalized.isEmpty) {
-      return rawDesc;
-    }
-    return _zhBundledSkillDescLabels[normalized] ?? rawDesc;
   }
 
   Widget _buildAuditOnlySwitch(AppLocalizations l10n) {

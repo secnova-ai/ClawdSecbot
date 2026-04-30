@@ -8,11 +8,11 @@ import (
 	"github.com/cloudwego/eino/adk"
 )
 
-// collectAgentOutput 遍历 ADK AsyncIterator，收集最终输出文本。
-// 用于同步式 Execute 调用。
-func collectAgentOutput(ctx context.Context, iter *adk.AsyncIterator[*adk.AgentEvent]) (string, error) {
+// collectAgentOutput iterates ADK events and collects final output plus model usage.
+func collectAgentOutput(ctx context.Context, iter *adk.AsyncIterator[*adk.AgentEvent]) (string, TokenUsage, error) {
 	var lastContent string
 	var lastErr error
+	totalUsage := TokenUsage{}
 
 	for {
 		event, ok := iter.Next()
@@ -30,16 +30,17 @@ func collectAgentOutput(ctx context.Context, iter *adk.AsyncIterator[*adk.AgentE
 		if err != nil {
 			continue
 		}
+		totalUsage = addTokenUsage(totalUsage, tokenUsageFromMessage(msg))
 		if msg != nil && msg.Content != "" {
 			lastContent = msg.Content
 		}
 	}
 
 	if lastErr != nil && lastContent == "" {
-		return "", lastErr
+		return "", totalUsage, lastErr
 	}
 
-	return lastContent, nil
+	return lastContent, totalUsage, nil
 }
 
 // streamAgentEvents 遍历 ADK AsyncIterator，将 AgentEvent 转换为 StreamEvent 发送到 emitter。

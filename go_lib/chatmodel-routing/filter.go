@@ -7,9 +7,14 @@ import (
 	"github.com/openai/openai-go"
 )
 
-// FilterRequestResult 请求过滤附带的结果数据（仅当拦截时有意义）
+// FilterRequestResult carries request-filter decisions back to the HTTP proxy.
 type FilterRequestResult struct {
-	MockContent string // 非空时 Proxy 返回包含此内容的 mock ChatCompletion，而非 HTTP 错误
+	// MockContent is used when the request is blocked and the proxy should
+	// return a model-shaped assistant response instead of an HTTP error.
+	MockContent string
+	// ForwardBody replaces the raw upstream request body when the filter allows
+	// the request but rewrites payload content such as redacted messages.
+	ForwardBody []byte
 }
 
 // OnRequest 请求过滤回调，接收解析后的 ChatCompletionNewParams 和原始请求体

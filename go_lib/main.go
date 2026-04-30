@@ -404,20 +404,14 @@ func ClearProtectionStatisticsFFI(assetIDC *C.char) *C.char {
 	return jsonToCString(service.ClearProtectionStatistics(C.GoString(assetIDC)))
 }
 
-//export GetShepherdSensitiveActionsFFI
-func GetShepherdSensitiveActionsFFI(assetIDC *C.char) *C.char {
-	return jsonToCString(service.GetShepherdSensitiveActions(C.GoString(assetIDC)))
+//export GetShepherdRulesFFI
+func GetShepherdRulesFFI(assetIDC *C.char) *C.char {
+	return jsonToCString(service.GetShepherdRules(C.GoString(assetIDC)))
 }
 
-//export GetShepherdSensitiveActionsByAssetFFI
-func GetShepherdSensitiveActionsByAssetFFI(assetNameC, assetIDC *C.char) *C.char {
-	_ = C.GoString(assetNameC)
-	return jsonToCString(service.GetShepherdSensitiveActions(C.GoString(assetIDC)))
-}
-
-//export SaveShepherdSensitiveActionsFFI
-func SaveShepherdSensitiveActionsFFI(jsonC *C.char) *C.char {
-	return jsonToCString(service.SaveShepherdSensitiveActions(C.GoString(jsonC)))
+//export SaveShepherdRulesFFI
+func SaveShepherdRulesFFI(jsonC *C.char) *C.char {
+	return jsonToCString(service.SaveShepherdRules(C.GoString(jsonC)))
 }
 
 //export ClearAllDataFFI
@@ -1351,8 +1345,8 @@ func UpdateShepherdRulesFFI(assetIDC, rulesJSON *C.char) *C.char {
 	))
 }
 
-//export GetShepherdRulesFFI
-func GetShepherdRulesFFI(assetIDC *C.char) *C.char {
+//export GetActiveShepherdRulesFFI
+func GetActiveShepherdRulesFFI(assetIDC *C.char) *C.char {
 	return C.CString(proxy.GetShepherdRulesByAssetInternal(
 		C.GoString(assetIDC),
 	))

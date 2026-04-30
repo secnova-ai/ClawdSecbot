@@ -152,10 +152,11 @@ func (pp *ProxyProtection) currentDailyTokenUsage() int {
 	return initialUsage + runtimeUsage
 }
 
-func (pp *ProxyProtection) updateRecordTokenTotals(requestID string, promptTokens, completionTokens, conversationTokens, dailyTokens int) {
+func (pp *ProxyProtection) updateRecordTokenTotals(requestID string, promptTokens, completionTokens, totalTokens, conversationTokens, dailyTokens int) {
 	pp.updateTruthRecord(requestID, func(r *TruthRecord) {
 		r.PromptTokens = promptTokens
 		r.CompletionTokens = completionTokens
+		r.TotalTokens = totalTokens
 		r.ConversationTokens = conversationTokens
 		r.DailyTokens = dailyTokens
 	})

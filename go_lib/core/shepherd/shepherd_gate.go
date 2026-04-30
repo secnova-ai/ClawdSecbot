@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"unicode"
@@ -14,6 +15,7 @@ import (
 	"go_lib/core/skillscan"
 
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
 // PostValidationOverrideTag is appended to a ReAct decision's reason when the
@@ -50,7 +52,19 @@ type Usage struct {
 
 // UserRules holds the parsed user security rules
 type UserRules struct {
-	SensitiveActions []string `json:"SensitiveActions"`
+	SemanticRules []SemanticRule `json:"semantic_rules"`
+}
+
+// SemanticRule is a structured user-defined security rule scoped to an asset.
+type SemanticRule struct {
+	ID           string   `json:"id,omitempty"`
+	Scope        string   `json:"scope,omitempty"`
+	Enabled      bool     `json:"enabled"`
+	Description  string   `json:"description,omitempty"`
+	AppliesTo    []string `json:"applies_to,omitempty"`
+	Action       string   `json:"action,omitempty"`
+	RiskType     string   `json:"risk_type,omitempty"`
+	OWASPAgentic []string `json:"owasp_agentic,omitempty"`
 }
 
 // ShepherdGate implements the security gate logic
@@ -87,7 +101,7 @@ func NewShepherdGateWithRuntime(config *repository.SecurityModelConfig, reactCfg
 	defaultRules, err := loadDefaultUserRules()
 	if err != nil {
 		logging.Warning("[ShepherdGate] Failed to load default user rules, fallback to empty rules: %v", err)
-		defaultRules = &UserRules{SensitiveActions: []string{}}
+		defaultRules = &UserRules{SemanticRules: []SemanticRule{}}
 	}
 
 	sg := &ShepherdGate{
@@ -112,14 +126,34 @@ func NewShepherdGateWithRuntime(config *repository.SecurityModelConfig, reactCfg
 	return sg, nil
 }
 
+// NewShepherdGateWithoutModel creates a rules and formatting holder for
+// detector backends that do not use a local security LLM.
+func NewShepherdGateWithoutModel() (*ShepherdGate, error) {
+	defaultRules, err := loadDefaultUserRules()
+	if err != nil {
+		logging.Warning("[ShepherdGate] Failed to load default user rules, fallback to empty rules: %v", err)
+		defaultRules = &UserRules{SemanticRules: []SemanticRule{}}
+	}
+	sg := &ShepherdGate{
+		language:      "en",
+		reactSkillCfg: DefaultReActSkillRuntimeConfig(),
+		userRules:     cloneUserRules(defaultRules),
+	}
+	if lang := skillscan.GetLanguageFromAppSettings(); lang != "" {
+		sg.SetLanguage(lang)
+	}
+	return sg, nil
+}
+
 // NewShepherdGateForTesting creates a ShepherdGate with injected dependencies for unit testing.
 // This bypasses config validation and model creation, allowing mock models.
 func NewShepherdGateForTesting(chatModel model.ChatModel, language string, modelConfig *repository.SecurityModelConfig) *ShepherdGate {
 	return &ShepherdGate{
-		chatModel:   chatModel,
-		language:    language,
-		modelConfig: modelConfig,
-		userRules:   &UserRules{SensitiveActions: []string{}},
+		chatModel:     chatModel,
+		language:      language,
+		modelConfig:   modelConfig,
+		userRules:     &UserRules{SemanticRules: []SemanticRule{}},
+		reactSkillCfg: DefaultReActSkillRuntimeConfig(),
 	}
 }
 
@@ -130,12 +164,10 @@ func (sg *ShepherdGate) GetUserRules() *UserRules {
 	return cloneUserRules(sg.userRules)
 }
 
-// UpdateUserRules updates user rules for this gate instance.
-func (sg *ShepherdGate) UpdateUserRules(sensitiveActions []string) {
+// UpdateUserRulesConfig updates the full user rule set for this gate instance.
+func (sg *ShepherdGate) UpdateUserRulesConfig(rules *UserRules) {
 	sg.mu.Lock()
-	sg.userRules = &UserRules{
-		SensitiveActions: normalizeSensitiveActions(sensitiveActions),
-	}
+	sg.userRules = normalizeUserRules(rules)
 	sg.mu.Unlock()
 }
 
@@ -172,6 +204,14 @@ func (sg *ShepherdGate) SetLanguage(lang string) {
 	if reactAnalyzer != nil {
 		reactAnalyzer.SetLanguage(finalLang)
 	}
+}
+
+// EffectiveLanguage returns the current app-configured ShepherdGate language.
+func (sg *ShepherdGate) EffectiveLanguage() string {
+	if sg == nil {
+		return normalizeShepherdLanguage(skillscan.GetLanguageFromAppSettings())
+	}
+	return sg.getEffectiveLanguage()
 }
 
 // SetAssetContext sets asset identity used for security event attribution.
@@ -271,16 +311,20 @@ func extractUsage(extra map[string]interface{}, defaultPromptTokens, defaultComp
 
 	if ok {
 		if usageMap, ok := usageVal.(map[string]interface{}); ok {
-			return &Usage{
+			if usage := normalizeUsage(&Usage{
 				PromptTokens:     getIntFromMap(usageMap, "prompt_tokens"),
 				CompletionTokens: getIntFromMap(usageMap, "completion_tokens"),
 				TotalTokens:      getIntFromMap(usageMap, "total_tokens"),
+			}); usage != nil {
+				return usage
 			}
 		}
 		if jsonBytes, err := json.Marshal(usageVal); err == nil {
 			var u Usage
 			if err := json.Unmarshal(jsonBytes, &u); err == nil {
-				return &u
+				if usage := normalizeUsage(&u); usage != nil {
+					return usage
+				}
 			}
 		}
 	}
@@ -292,33 +336,115 @@ func extractUsage(extra map[string]interface{}, defaultPromptTokens, defaultComp
 	}
 }
 
-// CheckToolCall performs the security check
-func (sg *ShepherdGate) CheckToolCall(ctx context.Context, contextMessages []ConversationMessage, toolCalls []ToolCallInfo, toolResults []ToolResultInfo, lastUserMessage string, requestID ...string) (*ShepherdDecision, error) {
+func extractUsageFromMessage(msg *schema.Message, defaultPromptTokens, defaultCompletionTokens int) *Usage {
+	if usage := usageFromMessageMetadata(msg); usage != nil {
+		return usage
+	}
+	if msg != nil {
+		return extractUsage(msg.Extra, defaultPromptTokens, defaultCompletionTokens)
+	}
+	return &Usage{
+		PromptTokens:     defaultPromptTokens,
+		CompletionTokens: defaultCompletionTokens,
+		TotalTokens:      defaultPromptTokens + defaultCompletionTokens,
+	}
+}
+
+func usageFromMessageMetadata(msg *schema.Message) *Usage {
+	if usage := usageFromMessageResponseMeta(msg); usage != nil {
+		return usage
+	}
+	if msg == nil || msg.Extra == nil {
+		return nil
+	}
+	return normalizeUsage(extractUsage(msg.Extra, 0, 0))
+}
+
+func usageFromMessageResponseMeta(msg *schema.Message) *Usage {
+	if msg == nil || msg.ResponseMeta == nil || msg.ResponseMeta.Usage == nil {
+		return nil
+	}
+	usage := &Usage{
+		PromptTokens:     msg.ResponseMeta.Usage.PromptTokens,
+		CompletionTokens: msg.ResponseMeta.Usage.CompletionTokens,
+		TotalTokens:      msg.ResponseMeta.Usage.TotalTokens,
+	}
+	return normalizeUsage(usage)
+}
+
+func normalizeUsage(usage *Usage) *Usage {
+	if usage == nil {
+		return nil
+	}
+	if usage.PromptTokens < 0 {
+		usage.PromptTokens = 0
+	}
+	if usage.CompletionTokens < 0 {
+		usage.CompletionTokens = 0
+	}
+	if usage.TotalTokens < 0 {
+		usage.TotalTokens = 0
+	}
+	if usage.TotalTokens == 0 {
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
+	if usage.PromptTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 {
+		return nil
+	}
+	return usage
+}
+
+func usageWithFallbackFloor(actual *Usage, fallback *Usage) *Usage {
+	actual = normalizeUsage(actual)
+	fallback = normalizeUsage(fallback)
+	if actual == nil {
+		return fallback
+	}
+	if fallback == nil {
+		return actual
+	}
+	if actual.TotalTokens < fallback.TotalTokens {
+		return fallback
+	}
+	return actual
+}
+
+// CheckUserInput asks the security model to semantically classify user input
+// before it is forwarded to the protected agent.
+func (sg *ShepherdGate) CheckUserInput(ctx context.Context, userInput string, requestID ...string) (*ShepherdDecision, error) {
+	userInput = strings.TrimSpace(userInput)
+	if userInput == "" {
+		allowed := true
+		return &ShepherdDecision{Status: "ALLOWED", Allowed: &allowed, Reason: "Empty user input."}, nil
+	}
+
 	sg.mu.RLock()
 	reactAnalyzer := sg.reactAnalyzer
+	chatModel := sg.chatModel
+	modelConfig := sg.modelConfig
+	reactSkillCfg := sg.reactSkillCfg
 	rules := cloneUserRules(sg.userRules)
 	sg.mu.RUnlock()
 	lang := sg.getEffectiveLanguage()
 
-	var toolNames []string
-	for _, tc := range toolCalls {
-		toolNames = append(toolNames, tc.Name)
-	}
-	logging.ShepherdGateInfo("[ShepherdGate][CheckToolCall][-] invoked: tools=[%s], contextMessages=%d, toolResults=%d", strings.Join(toolNames, ", "), len(contextMessages), len(toolResults))
-
-	for i, tc := range toolCalls {
-		argsDisplay := tc.RawArgs
-		if len(argsDisplay) > 500 {
-			argsDisplay = argsDisplay[:500] + "...(truncated)"
+	if reactAnalyzer == nil {
+		if chatModel == nil {
+			allowed := true
+			return &ShepherdDecision{Status: "ALLOWED", Allowed: &allowed, Reason: "Security model is not configured for user input analysis."}, nil
 		}
-		logging.Info("[ShepherdGate][CheckToolCall] toolCall[%d]: name=%s, id=%s, args=%s", i, tc.Name, tc.ToolCallID, argsDisplay)
-	}
-	for i, tr := range toolResults {
-		contentDisplay := tr.Content
-		if len(contentDisplay) > 500 {
-			contentDisplay = contentDisplay[:500] + "...(truncated)"
+		analyzer, err := NewToolCallReActAnalyzerWithConfig(ctx, chatModel, lang, modelConfig, &reactSkillCfg)
+		if err != nil {
+			return nil, fmt.Errorf("initialize ReAct analyzer failed: %w", err)
 		}
-		logging.Info("[ShepherdGate][CheckToolCall] toolResult[%d]: func=%s, id=%s, content=%s", i, tr.FuncName, tr.ToolCallID, contentDisplay)
+		sg.mu.Lock()
+		if sg.reactAnalyzer == nil {
+			sg.reactAnalyzer = analyzer
+			reactAnalyzer = analyzer
+		} else {
+			analyzer.Close()
+			reactAnalyzer = sg.reactAnalyzer
+		}
+		sg.mu.Unlock()
 	}
 
 	reactAnalyzer.SetLanguage(lang)
@@ -326,22 +452,172 @@ func (sg *ShepherdGate) CheckToolCall(ctx context.Context, contextMessages []Con
 	if len(requestID) > 0 {
 		reqID = requestID[0]
 	}
-	reactDecision, reactErr := reactAnalyzer.Analyze(ctx, contextMessages, toolCalls, toolResults, rules, lastUserMessage, reqID)
+	reactDecision, reactErr := reactAnalyzer.AnalyzeUserInput(ctx, userInput, rules, reqID)
 	if reactErr != nil {
-		logging.ShepherdGateError("[ShepherdGate][CheckToolCall][-] ReAct analyzer failed: %v, fail-open", reactErr)
+		logging.ShepherdGateError("%s[user_input][CheckUserInput][-] ReAct analyzer failed: %v", shepherdFlowLogPrefix, reactErr)
+		return nil, reactErr
+	}
+	allowed := reactDecision.Allowed
+	status := "ALLOWED"
+	if !allowed {
+		status = "NEEDS_CONFIRMATION"
+	}
+	logging.ShepherdGateInfo("%s[user_input][CheckUserInput][-] result: status=%s skill=%s risk_type=%s confidence=%d", shepherdFlowLogPrefix, status, reactDecision.Skill, reactDecision.RiskType, reactDecision.Confidence)
+	return &ShepherdDecision{
+		Status:     status,
+		Allowed:    &allowed,
+		Reason:     reactDecision.Reason,
+		ActionDesc: reactDecision.ActionDesc,
+		RiskType:   reactDecision.RiskType,
+		Skill:      reactDecision.Skill,
+		Usage:      reactDecision.Usage,
+	}, nil
+}
+
+// CheckFinalResult asks the security model to classify final assistant output
+// before it is returned to the user.
+func (sg *ShepherdGate) CheckFinalResult(ctx context.Context, finalContent string, requestID ...string) (*ShepherdDecision, error) {
+	finalContent = strings.TrimSpace(finalContent)
+	if finalContent == "" {
+		allowed := true
+		return &ShepherdDecision{Status: "ALLOWED", Allowed: &allowed, Reason: "Empty final output."}, nil
+	}
+
+	sg.mu.RLock()
+	reactAnalyzer := sg.reactAnalyzer
+	chatModel := sg.chatModel
+	modelConfig := sg.modelConfig
+	reactSkillCfg := sg.reactSkillCfg
+	rules := cloneUserRules(sg.userRules)
+	sg.mu.RUnlock()
+	lang := sg.getEffectiveLanguage()
+
+	if reactAnalyzer == nil {
+		if chatModel == nil {
+			allowed := true
+			return &ShepherdDecision{Status: "ALLOWED", Allowed: &allowed, Reason: "Security model is not configured for final output analysis."}, nil
+		}
+		analyzer, err := NewToolCallReActAnalyzerWithConfig(ctx, chatModel, lang, modelConfig, &reactSkillCfg)
+		if err != nil {
+			return nil, fmt.Errorf("initialize ReAct analyzer failed: %w", err)
+		}
+		sg.mu.Lock()
+		if sg.reactAnalyzer == nil {
+			sg.reactAnalyzer = analyzer
+			reactAnalyzer = analyzer
+		} else {
+			analyzer.Close()
+			reactAnalyzer = sg.reactAnalyzer
+		}
+		sg.mu.Unlock()
+	}
+
+	reactAnalyzer.SetLanguage(lang)
+	reqID := ""
+	if len(requestID) > 0 {
+		reqID = requestID[0]
+	}
+	reactDecision, reactErr := reactAnalyzer.AnalyzeFinalResult(ctx, finalContent, rules, reqID)
+	if reactErr != nil {
+		logging.ShepherdGateError("%s[final_result][CheckFinalResult][-] ReAct analyzer failed: %v action=fail_open", shepherdFlowLogPrefix, reactErr)
 		allowed := true
 		return &ShepherdDecision{
 			Status:  "ALLOWED",
 			Allowed: &allowed,
 			Reason:  fmt.Sprintf("Security check bypassed due to ReAct error: %v", reactErr),
+			Usage:   UsageFromError(reactErr),
+		}, nil
+	}
+	allowed := reactDecision.Allowed
+	status := "ALLOWED"
+	if !allowed {
+		status = "NEEDS_CONFIRMATION"
+	}
+	logging.ShepherdGateInfo("%s[final_result][CheckFinalResult][-] result: status=%s skill=%s risk_type=%s confidence=%d", shepherdFlowLogPrefix, status, reactDecision.Skill, reactDecision.RiskType, reactDecision.Confidence)
+	return &ShepherdDecision{
+		Status:     status,
+		Allowed:    &allowed,
+		Reason:     reactDecision.Reason,
+		ActionDesc: reactDecision.ActionDesc,
+		RiskType:   reactDecision.RiskType,
+		Skill:      reactDecision.Skill,
+		Usage:      reactDecision.Usage,
+	}, nil
+}
+
+// CheckToolCall performs the security check
+func (sg *ShepherdGate) CheckToolCall(ctx context.Context, toolCalls []ToolCallInfo, toolResults []ToolResultInfo, requestID ...string) (*ShepherdDecision, error) {
+	sg.mu.RLock()
+	reactAnalyzer := sg.reactAnalyzer
+	chatModel := sg.chatModel
+	modelConfig := sg.modelConfig
+	reactSkillCfg := sg.reactSkillCfg
+	rules := cloneUserRules(sg.userRules)
+	sg.mu.RUnlock()
+	lang := sg.getEffectiveLanguage()
+
+	if reactAnalyzer == nil {
+		if chatModel == nil {
+			return nil, fmt.Errorf("ReAct analyzer is not initialized")
+		}
+		analyzer, err := NewToolCallReActAnalyzerWithConfig(ctx, chatModel, lang, modelConfig, &reactSkillCfg)
+		if err != nil {
+			return nil, fmt.Errorf("initialize ReAct analyzer failed: %w", err)
+		}
+		sg.mu.Lock()
+		if sg.reactAnalyzer == nil {
+			sg.reactAnalyzer = analyzer
+			reactAnalyzer = analyzer
+		} else {
+			analyzer.Close()
+			reactAnalyzer = sg.reactAnalyzer
+		}
+		sg.mu.Unlock()
+	}
+
+	var toolNames []string
+	for _, tc := range toolCalls {
+		toolNames = append(toolNames, tc.Name)
+	}
+	logging.ShepherdGateInfo("%s[tool_call_result][CheckToolCall][-] invoked: tools=[%s] tool_results=%d", shepherdFlowLogPrefix, strings.Join(toolNames, ", "), len(toolResults))
+
+	for i, tc := range toolCalls {
+		argsDisplay := tc.RawArgs
+		if len(argsDisplay) > 500 {
+			argsDisplay = argsDisplay[:500] + "...(truncated)"
+		}
+		logging.Info("%s[tool_call_result][CheckToolCall] tool_call[%d]: name=%s id=%s args=%s", shepherdFlowLogPrefix, i, tc.Name, tc.ToolCallID, argsDisplay)
+	}
+	for i, tr := range toolResults {
+		contentDisplay := tr.Content
+		if len(contentDisplay) > 500 {
+			contentDisplay = contentDisplay[:500] + "...(truncated)"
+		}
+		logging.Info("%s[tool_call_result][CheckToolCall] tool_result[%d]: func=%s id=%s content=%s", shepherdFlowLogPrefix, i, tr.FuncName, tr.ToolCallID, contentDisplay)
+	}
+
+	reactAnalyzer.SetLanguage(lang)
+	reqID := ""
+	if len(requestID) > 0 {
+		reqID = requestID[0]
+	}
+	reactDecision, reactErr := reactAnalyzer.Analyze(ctx, toolCalls, toolResults, rules, reqID)
+	if reactErr != nil {
+		logging.ShepherdGateError("%s[tool_call_result][CheckToolCall][-] ReAct analyzer failed: %v action=fail_open", shepherdFlowLogPrefix, reactErr)
+		allowed := true
+		return &ShepherdDecision{
+			Status:  "ALLOWED",
+			Allowed: &allowed,
+			Reason:  fmt.Sprintf("Security check bypassed due to ReAct error: %v", reactErr),
+			Usage:   UsageFromError(reactErr),
 		}, nil
 	}
 
 	if reactDecision.Allowed && len(toolResults) > 0 {
 		if isPromptInjectionRisk(reactDecision.RiskType) && isHighOrCriticalRisk(reactDecision.RiskLevel) {
-			logging.ShepherdGateWarning("[ShepherdGate][CheckToolCall][-] post-validation override: "+
+			logging.ShepherdGateWarning("%s[tool_call_result][CheckToolCall][-] post-validation override: "+
 				"LLM allowed but prompt injection detected in tool result, forcing block. "+
-				"risk_type=%s, risk_level=%s", reactDecision.RiskType, reactDecision.RiskLevel)
+				"risk_type=%s, risk_level=%s", shepherdFlowLogPrefix, reactDecision.RiskType, reactDecision.RiskLevel)
 			reactDecision.Allowed = false
 			reactDecision.Reason = reactDecision.Reason + " " + PostValidationOverrideTag
 		}
@@ -352,8 +628,8 @@ func (sg *ShepherdGate) CheckToolCall(ctx context.Context, contextMessages []Con
 	if !allowed {
 		status = "NEEDS_CONFIRMATION"
 	}
-	logging.ShepherdGateInfo("[ShepherdGate][CheckToolCall][-] result: status=%s, skill=%s, confidence=%d",
-		status, reactDecision.Skill, reactDecision.Confidence)
+	logging.ShepherdGateInfo("%s[tool_call_result][CheckToolCall][-] result: status=%s skill=%s confidence=%d",
+		shepherdFlowLogPrefix, status, reactDecision.Skill, reactDecision.Confidence)
 	return &ShepherdDecision{
 		Status:     status,
 		Allowed:    &allowed,
@@ -429,22 +705,23 @@ type recoveryIntentLocalePack struct {
 	noneReason       string
 	noUserTextReason string
 	outOfScopeReason string
+	compoundReason   string
 	confirmKeywords  []string
 	rejectKeywords   []string
 }
 
 func getRecoveryIntentLocalePack(lang string) recoveryIntentLocalePack {
 	zhConfirmKeywords := []string{
-		"好的", "继续", "ok", "okay", "没问题", "确认", "可以", "行", "继续执行", "同意",
+		"好的", "继续", "ok", "okay", "没问题", "确认", "确定", "可以", "行", "继续执行", "同意",
 	}
 	zhRejectKeywords := []string{
-		"取消", "停止", "不要", "不执行", "算了", "拒绝", "终止", "不用了", "不继续", "别执行",
+		"取消执行", "不要执行", "不要继续", "取消", "停止", "不要", "不执行", "算了", "拒绝", "终止", "不用了", "不继续", "别执行",
 	}
 	enConfirmKeywords := []string{
 		"ok", "okay", "yes", "yep", "sure", "continue", "go ahead", "proceed", "no problem", "confirm",
 	}
 	enRejectKeywords := []string{
-		"cancel", "stop", "nope", "no thanks", "no thank you", "reject", "abort", "don't", "do not", "not now", "nevermind", "never mind",
+		"do not continue", "don't continue", "stop execution", "cancel", "stop", "nope", "no thanks", "no thank you", "reject", "abort", "don't", "do not", "not now", "nevermind", "never mind",
 	}
 
 	if normalizeShepherdLanguage(lang) == "zh" {
@@ -466,6 +743,7 @@ func getRecoveryIntentLocalePack(lang string) recoveryIntentLocalePack {
 			noneReason:       "No confirmation or rejection keyword matched, keep pending recovery.",
 			noUserTextReason: "No user reply found, keep pending recovery.",
 			outOfScopeReason: "Latest user reply does not respond to the pending recovery prompt.",
+			compoundReason:   "Latest user reply contains additional instructions, keep pending recovery and continue normal user-input checks.",
 			confirmKeywords:  deduplicateRecoveryIntentKeywords(append(zhConfirmKeywords, enConfirmKeywords...)),
 			rejectKeywords:   deduplicateRecoveryIntentKeywords(append(zhRejectKeywords, enRejectKeywords...)),
 		}
@@ -489,6 +767,7 @@ func getRecoveryIntentLocalePack(lang string) recoveryIntentLocalePack {
 		noneReason:       "No confirmation or rejection keyword matched, keep pending recovery.",
 		noUserTextReason: "No user reply found, keep pending recovery.",
 		outOfScopeReason: "Latest user reply does not respond to the pending recovery prompt.",
+		compoundReason:   "Latest user reply contains additional instructions, keep pending recovery and continue normal user-input checks.",
 		confirmKeywords:  deduplicateRecoveryIntentKeywords(append(enConfirmKeywords, zhConfirmKeywords...)),
 		rejectKeywords:   deduplicateRecoveryIntentKeywords(append(enRejectKeywords, zhRejectKeywords...)),
 	}
@@ -500,6 +779,11 @@ func localizeDecisionStatus(status string, pack recoveryIntentLocalePack) string
 		return pack.statusAllowed
 	case "NEEDS_CONFIRMATION":
 		return pack.statusNeedsConf
+	case "BLOCK":
+		if pack.statusLabel == "状态" {
+			return "已拦截"
+		}
+		return "Blocked"
 	default:
 		return pack.statusUnknown
 	}
@@ -528,10 +812,44 @@ func deduplicateRecoveryIntentKeywords(keywords []string) []string {
 func latestUserMessageWithIndex(contextMessages []ConversationMessage) (int, string) {
 	for i := len(contextMessages) - 1; i >= 0; i-- {
 		if strings.EqualFold(strings.TrimSpace(contextMessages[i].Role), "user") {
-			return i, strings.TrimSpace(contextMessages[i].Content)
+			return i, extractCurrentUserReplyText(contextMessages[i].Content)
 		}
 	}
 	return -1, ""
+}
+
+func extractCurrentUserReplyText(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if !isOpenClawTimestampLine(line) {
+			continue
+		}
+		closeIdx := strings.Index(line, "]")
+		if closeIdx < 0 || closeIdx+1 >= len(line) {
+			continue
+		}
+		replyLines := []string{strings.TrimSpace(line[closeIdx+1:])}
+		for _, nextLine := range lines[i+1:] {
+			replyLines = append(replyLines, strings.TrimSpace(nextLine))
+		}
+		reply := strings.TrimSpace(strings.Join(replyLines, "\n"))
+		if reply != "" {
+			return reply
+		}
+	}
+	return content
+}
+
+func isOpenClawTimestampLine(line string) bool {
+	if !strings.HasPrefix(line, "[") || !strings.Contains(line, "]") {
+		return false
+	}
+	return strings.Contains(line, "GMT") && strings.Contains(line, "20")
 }
 
 func latestAssistantMessageBefore(contextMessages []ConversationMessage, beforeIndex int) string {
@@ -663,6 +981,43 @@ func hasRecoveryIntentKeyword(normalizedText, compactText string, keywords []str
 	return false
 }
 
+func recoveryIntentOnlyRemainder(userText string, keywords []string) string {
+	remaining := compactIntentText(userText)
+	if remaining == "" {
+		return ""
+	}
+	compactKeywords := make([]string, 0, len(keywords))
+	for _, keyword := range keywords {
+		compactKeyword := compactIntentText(keyword)
+		if compactKeyword == "" {
+			continue
+		}
+		compactKeywords = append(compactKeywords, compactKeyword)
+	}
+	sort.Slice(compactKeywords, func(i, j int) bool {
+		return len(compactKeywords[i]) > len(compactKeywords[j])
+	})
+	for _, compactKeyword := range compactKeywords {
+		remaining = strings.ReplaceAll(remaining, compactKeyword, "")
+	}
+	for _, filler := range []string{"please", "pls", "kindly", "the", "it", "now", "吧", "请", "麻烦", "谢谢", "谢了", "哈", "啊", "呀"} {
+		compactFiller := compactIntentText(filler)
+		if compactFiller == "" {
+			continue
+		}
+		remaining = strings.ReplaceAll(remaining, compactFiller, "")
+	}
+	return strings.TrimSpace(remaining)
+}
+
+func isRecoveryIntentOnly(userText string, pack recoveryIntentLocalePack, intent string) bool {
+	keywords := pack.confirmKeywords
+	if intent == "REJECT" {
+		keywords = append(append([]string{}, pack.rejectKeywords...), "no")
+	}
+	return recoveryIntentOnlyRemainder(userText, keywords) == ""
+}
+
 // EvaluateRecoveryIntent determines whether the latest user reply confirms or rejects continuation.
 func (sg *ShepherdGate) EvaluateRecoveryIntent(ctx context.Context, contextMessages []ConversationMessage, pendingToolCalls []ToolCallInfo, pendingReason string) (*RecoveryIntentDecision, error) {
 	_ = ctx
@@ -670,7 +1025,8 @@ func (sg *ShepherdGate) EvaluateRecoveryIntent(ctx context.Context, contextMessa
 	pack := getRecoveryIntentLocalePack(lang)
 
 	logging.ShepherdGateInfo(
-		"[ShepherdGate][RecoveryIntent] Keyword analysis start: contextMessages=%d, pendingToolCalls=%d, pendingReason=%q",
+		"%s[recovery][RecoveryIntent] keyword_analysis_start: context_messages=%d pending_tool_calls=%d pending_reason=%q",
+		shepherdFlowLogPrefix,
 		len(contextMessages),
 		len(pendingToolCalls),
 		strings.TrimSpace(pendingReason),
@@ -705,9 +1061,14 @@ func (sg *ShepherdGate) EvaluateRecoveryIntent(ctx context.Context, contextMessa
 		intent = "CONFIRM"
 		reason = pack.confirmReason
 	}
+	if intent != "NONE" && !isRecoveryIntentOnly(userText, pack, intent) {
+		intent = "NONE"
+		reason = pack.compoundReason
+	}
 
 	logging.ShepherdGateInfo(
-		"[ShepherdGate][RecoveryIntent] Keyword analysis done: intent=%s, reason=%s, userText=%q",
+		"%s[recovery][RecoveryIntent] keyword_analysis_done: intent=%s reason=%s user_text=%q",
+		shepherdFlowLogPrefix,
 		intent,
 		reason,
 		userText,
@@ -722,6 +1083,17 @@ func (sg *ShepherdGate) EvaluateRecoveryIntent(ctx context.Context, contextMessa
 // NormalizeShepherdLanguage normalizes a language string to a standard form (e.g., "zh", "en").
 func NormalizeShepherdLanguage(lang string) string {
 	return normalizeShepherdLanguage(lang)
+}
+
+func securityAnalysisLanguageName(lang string) string {
+	switch normalizeShepherdLanguage(lang) {
+	case "zh":
+		return "Simplified Chinese"
+	case "en":
+		return "English"
+	default:
+		return lang
+	}
 }
 
 func normalizeShepherdLanguage(lang string) string {
@@ -759,6 +1131,73 @@ func getIntFromMap(m map[string]interface{}, key string) int {
 	return 0
 }
 
+func localizeRiskTypeForUser(riskType, lang string) string {
+	switch strings.ToUpper(strings.TrimSpace(riskType)) {
+	case "PROMPT_INJECTION_DIRECT":
+		if normalizeShepherdLanguage(lang) == "zh" {
+			return "直接提示词注入"
+		}
+		return "Direct Prompt Injection"
+	case "PROMPT_INJECTION_INDIRECT":
+		if normalizeShepherdLanguage(lang) == "zh" {
+			return "间接提示词注入"
+		}
+		return "Indirect Prompt Injection"
+	case "SENSITIVE_DATA_EXFILTRATION":
+		if normalizeShepherdLanguage(lang) == "zh" {
+			return "敏感数据外泄"
+		}
+		return "Sensitive Data Exfiltration"
+	case "HIGH_RISK_OPERATION":
+		if normalizeShepherdLanguage(lang) == "zh" {
+			return "高危操作"
+		}
+		return "High-Risk Operation"
+	case "PRIVILEGE_ABUSE":
+		if normalizeShepherdLanguage(lang) == "zh" {
+			return "权限滥用"
+		}
+		return "Privilege Abuse"
+	case "UNEXPECTED_CODE_EXECUTION":
+		if normalizeShepherdLanguage(lang) == "zh" {
+			return "非预期代码执行"
+		}
+		return "Unexpected Code Execution"
+	case "CONTEXT_POISONING":
+		if normalizeShepherdLanguage(lang) == "zh" {
+			return "上下文污染"
+		}
+		return "Context Poisoning"
+	case "SUPPLY_CHAIN_RISK":
+		if normalizeShepherdLanguage(lang) == "zh" {
+			return "供应链风险"
+		}
+		return "Supply Chain Risk"
+	case "HUMAN_TRUST_EXPLOITATION":
+		if normalizeShepherdLanguage(lang) == "zh" {
+			return "人类信任利用"
+		}
+		return "Human Trust Exploitation"
+	case "CASCADING_FAILURE":
+		if normalizeShepherdLanguage(lang) == "zh" {
+			return "级联故障风险"
+		}
+		return "Cascading Failure Risk"
+	case "SANDBOX_BLOCKED":
+		if normalizeShepherdLanguage(lang) == "zh" {
+			return "沙箱拦截"
+		}
+		return "Sandbox Blocked"
+	case "QUOTA":
+		if normalizeShepherdLanguage(lang) == "zh" {
+			return "配额限制"
+		}
+		return "Quota Limited"
+	default:
+		return strings.TrimSpace(riskType)
+	}
+}
+
 func (sg *ShepherdGate) formatSecurityAnalysisLines(decision *ShepherdDecision, withHeader bool) string {
 	lang := sg.getEffectiveLanguage()
 	pack := getRecoveryIntentLocalePack(lang)
@@ -788,7 +1227,7 @@ func (sg *ShepherdGate) formatSecurityAnalysisLines(decision *ShepherdDecision, 
 		formattedMsg += fmt.Sprintf("\n%s: %s", pack.actionLabel, decision.ActionDesc)
 	}
 	if decision.RiskType != "" {
-		formattedMsg += fmt.Sprintf("\n%s: %s", pack.riskTypeLabel, decision.RiskType)
+		formattedMsg += fmt.Sprintf("\n%s: %s", pack.riskTypeLabel, localizeRiskTypeForUser(decision.RiskType, lang))
 	}
 	return formattedMsg
 }

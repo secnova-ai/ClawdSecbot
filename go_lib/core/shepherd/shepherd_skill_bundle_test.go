@@ -15,6 +15,7 @@ func TestEnsureBundledReActSkillsReleased(t *testing.T) {
 	}
 
 	requiredFiles := []string{
+		filepath.Join(releaseDir, "command_execution_guard", "SKILL.md"),
 		filepath.Join(releaseDir, "general_tool_risk_guard", "SKILL.md"),
 		filepath.Join(releaseDir, "email_operation_guard", "SKILL.md"),
 		filepath.Join(releaseDir, "script_execution_guard", "SKILL.md"),

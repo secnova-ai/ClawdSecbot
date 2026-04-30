@@ -1938,6 +1938,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get auditOnlyModeDesc => 'No risk analysis, only record audit logs';
 
   @override
+  String get userInputDetection => 'User Input Detection';
+
+  @override
+  String get userInputDetectionDesc =>
+      'Analyze user messages before forwarding. Turn this off to reduce security-model token usage.';
+
+  @override
   String get auditOnlyModeShort => 'Audit Only';
 
   @override

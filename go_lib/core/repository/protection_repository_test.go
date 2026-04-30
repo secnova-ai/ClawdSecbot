@@ -32,6 +32,25 @@ func setupProtectionTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+func TestShepherdRules_SaveRawStructuredRules(t *testing.T) {
+	db := setupProtectionTestDB(t)
+	defer db.Close()
+
+	repo := NewProtectionRepository(db)
+	raw := `{"semantic_rules":[{"id":"no_delete_files","enabled":true,"description":"不允许删除文件","applies_to":["tool_call"],"action":"needs_confirmation","risk_type":"HIGH_RISK_OPERATION"}]}`
+	if err := repo.SaveShepherdRulesRaw("openclaw", "bot-structured", raw); err != nil {
+		t.Fatalf("SaveShepherdRulesRaw failed: %v", err)
+	}
+
+	gotRaw, found, err := repo.GetShepherdRulesRaw("bot-structured")
+	if err != nil {
+		t.Fatalf("GetShepherdRulesRaw failed: %v", err)
+	}
+	if !found || gotRaw != raw {
+		t.Fatalf("expected structured raw rules, found=%v raw=%s", found, gotRaw)
+	}
+}
+
 func TestProtectionState_SaveAndGet(t *testing.T) {
 	db := setupProtectionTestDB(t)
 	defer db.Close()
@@ -100,16 +119,17 @@ func TestProtectionConfig_CRUD(t *testing.T) {
 
 	// 保存配置
 	config := &ProtectionConfig{
-		AssetName:               "openclaw",
-		AssetID:                 "openclaw:test-1",
-		Enabled:                 true,
-		AuditOnly:               false,
-		SandboxEnabled:          true,
-		SingleSessionTokenLimit: 1000,
-		DailyTokenLimit:         5000,
-		PathPermission:          `{"allowed":["/"]}`,
-		NetworkPermission:       `{"allowed":["*"]}`,
-		ShellPermission:         `{"allowed":["ls"]}`,
+		AssetName:                 "openclaw",
+		AssetID:                   "openclaw:test-1",
+		Enabled:                   true,
+		AuditOnly:                 false,
+		SandboxEnabled:            true,
+		UserInputDetectionEnabled: true,
+		SingleSessionTokenLimit:   1000,
+		DailyTokenLimit:           5000,
+		PathPermission:            `{"allowed":["/"]}`,
+		NetworkPermission:         `{"allowed":["*"]}`,
+		ShellPermission:           `{"allowed":["ls"]}`,
 	}
 	err := repo.SaveProtectionConfig(config)
 	if err != nil {
@@ -236,77 +256,76 @@ func TestShepherdRules_SaveAndGet(t *testing.T) {
 	repo := NewProtectionRepository(db)
 
 	// 初始为空
-	actions, found, err := repo.GetShepherdSensitiveActions("openclaw", "bot-1")
+	raw, found, err := repo.GetShepherdRulesRaw("bot-1")
 	if err != nil {
-		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+		t.Fatalf("GetShepherdRulesRaw failed: %v", err)
 	}
 	if found {
 		t.Fatalf("Expected found=false initially")
 	}
-	if len(actions) != 0 {
-		t.Fatalf("Expected 0 actions, got %d", len(actions))
+	if raw != "" {
+		t.Fatalf("Expected empty raw rules, got %s", raw)
 	}
 
 	// 保存
-	err = repo.SaveShepherdSensitiveActions("openclaw", "bot-1", []string{"action1", "action2"})
+	raw1 := `{"semantic_rules":[{"id":"rule1","enabled":true},{"id":"rule2","enabled":true}]}`
+	err = repo.SaveShepherdRulesRaw("openclaw", "bot-1", raw1)
 	if err != nil {
-		t.Fatalf("SaveShepherdSensitiveActions failed: %v", err)
+		t.Fatalf("SaveShepherdRulesRaw failed: %v", err)
 	}
 
 	// 获取
-	actions, found, err = repo.GetShepherdSensitiveActions("openclaw", "bot-1")
+	raw, found, err = repo.GetShepherdRulesRaw("bot-1")
 	if err != nil {
-		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+		t.Fatalf("GetShepherdRulesRaw failed: %v", err)
 	}
 	if !found {
 		t.Fatalf("Expected found=true after save")
 	}
-	if len(actions) != 2 {
-		t.Fatalf("Expected 2 actions, got %d", len(actions))
-	}
-	if actions[0] != "action1" || actions[1] != "action2" {
-		t.Errorf("Actions mismatch: %v", actions)
+	if raw != raw1 {
+		t.Errorf("Rules mismatch: %s", raw)
 	}
 
 	// 保存另一个资产的规则，不影响第一个
-	err = repo.SaveShepherdSensitiveActions("other_bot", "bot-9", []string{"action3"})
+	err = repo.SaveShepherdRulesRaw("other_bot", "bot-9", `{"semantic_rules":[{"id":"rule3","enabled":true}]}`)
 	if err != nil {
-		t.Fatalf("SaveShepherdSensitiveActions failed: %v", err)
+		t.Fatalf("SaveShepherdRulesRaw failed: %v", err)
 	}
-	actions, found, err = repo.GetShepherdSensitiveActions("openclaw", "bot-1")
+	raw, found, err = repo.GetShepherdRulesRaw("bot-1")
 	if err != nil {
-		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+		t.Fatalf("GetShepherdRulesRaw failed: %v", err)
 	}
 	if !found {
 		t.Fatalf("Expected found=true for openclaw after other bot save")
 	}
-	if len(actions) != 2 {
-		t.Fatalf("Expected 2 actions for openclaw, got %d", len(actions))
+	if raw != raw1 {
+		t.Fatalf("Expected openclaw rules unchanged, got %s", raw)
 	}
 
-	err = repo.SaveShepherdSensitiveActions("openclaw", "bot-2", []string{"action-x"})
+	raw2 := `{"semantic_rules":[{"id":"rule-x","enabled":true}]}`
+	err = repo.SaveShepherdRulesRaw("openclaw", "bot-2", raw2)
 	if err != nil {
-		t.Fatalf("SaveShepherdSensitiveActions failed: %v", err)
+		t.Fatalf("SaveShepherdRulesRaw failed: %v", err)
 	}
-	actions, found, err = repo.GetShepherdSensitiveActions("openclaw", "bot-2")
+	raw, found, err = repo.GetShepherdRulesRaw("bot-2")
 	if err != nil {
-		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+		t.Fatalf("GetShepherdRulesRaw failed: %v", err)
 	}
 	if !found {
 		t.Fatalf("Expected found=true for bot-2")
 	}
-	if len(actions) != 1 || actions[0] != "action-x" {
-		t.Fatalf("Expected isolated rules for bot-2, got %v", actions)
+	if raw != raw2 {
+		t.Fatalf("Expected isolated rules for bot-2, got %s", raw)
 	}
-	actions, found, err = repo.GetShepherdSensitiveActions("openclaw", "bot-1")
+	raw, found, err = repo.GetShepherdRulesRaw("bot-1")
 	if err != nil {
-		t.Fatalf("GetShepherdSensitiveActions failed: %v", err)
+		t.Fatalf("GetShepherdRulesRaw failed: %v", err)
 	}
 	if !found {
 		t.Fatalf("Expected found=true for bot-1")
 	}
-	if len(actions) != 2 || actions[0] != "action1" || actions[1] != "action2" {
-		t.Fatalf("Expected bot-1 rules unchanged, got %v", actions)
+	if raw != raw1 {
+		t.Fatalf("Expected bot-1 rules unchanged, got %s", raw)
 	}
 }
 

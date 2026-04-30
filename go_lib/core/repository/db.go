@@ -114,6 +114,7 @@ func createProtectionTables(db *sql.DB) error {
 			enabled INTEGER NOT NULL DEFAULT 0,
 			audit_only INTEGER NOT NULL DEFAULT 0,
 			sandbox_enabled INTEGER NOT NULL DEFAULT 0,
+			user_input_detection_enabled INTEGER NOT NULL DEFAULT 1,
 			gateway_binary_path TEXT,
 			gateway_config_path TEXT,
 			custom_security_prompt TEXT DEFAULT '',
@@ -180,6 +181,7 @@ func createAuditLogTables(db *sql.DB) error {
 			id TEXT PRIMARY KEY,
 			timestamp TEXT NOT NULL,
 			request_id TEXT NOT NULL,
+			instruction_chain_id TEXT NOT NULL DEFAULT '',
 			asset_name TEXT NOT NULL DEFAULT '',
 			asset_id TEXT NOT NULL DEFAULT '',
 			model TEXT,
@@ -228,6 +230,12 @@ func createAuditLogTables(db *sql.DB) error {
 		return fmt.Errorf("failed to create audit_logs asset index: %w", err)
 	}
 
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_instruction_chain_id ON audit_logs(instruction_chain_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create audit_logs instruction_chain_id index: %w", err)
+	}
+
 	logging.Info("Audit log tables created/verified successfully")
 	return nil
 }
@@ -240,6 +248,7 @@ func ensureAuditLogTruthRecordColumns(db *sql.DB) {
 		def  string
 	}{
 		{"phase", "TEXT DEFAULT 'completed'"},
+		{"instruction_chain_id", "TEXT NOT NULL DEFAULT ''"},
 		{"primary_content", "TEXT"},
 		{"primary_content_type", "TEXT DEFAULT 'unavailable'"},
 		{"finish_reason", "TEXT"},
@@ -336,7 +345,8 @@ func createSecurityEventTables(db *sql.DB) error {
 			source TEXT NOT NULL,
 			asset_name TEXT NOT NULL DEFAULT '',
 			asset_id TEXT NOT NULL DEFAULT '',
-			request_id TEXT NOT NULL DEFAULT ''
+			request_id TEXT NOT NULL DEFAULT '',
+			instruction_chain_id TEXT NOT NULL DEFAULT ''
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create security_events table: %w", err)
@@ -344,6 +354,9 @@ func createSecurityEventTables(db *sql.DB) error {
 
 	// Migrate: add request_id column for existing databases
 	if _, err := db.Exec(`ALTER TABLE security_events ADD COLUMN request_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		// Column already exists — safe to ignore
+	}
+	if _, err := db.Exec(`ALTER TABLE security_events ADD COLUMN instruction_chain_id TEXT NOT NULL DEFAULT ''`); err != nil {
 		// Column already exists — safe to ignore
 	}
 
@@ -375,6 +388,11 @@ func createSecurityEventTables(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_security_events_request_id ON security_events(request_id)
 	`); err != nil {
 		return fmt.Errorf("failed to create security_events request_id index: %w", err)
+	}
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_security_events_instruction_chain_id ON security_events(instruction_chain_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create security_events instruction_chain_id index: %w", err)
 	}
 
 	logging.Info("Security event tables created/verified successfully")

@@ -40,9 +40,10 @@ const (
 // 它同时服务于：清晰视图卡片展示、审计日志记录、安全事件过滤。
 type TruthRecord struct {
 	// 身份与归属
-	RequestID string `json:"request_id"`
-	AssetName string `json:"asset_name,omitempty"`
-	AssetID   string `json:"asset_id,omitempty"`
+	RequestID          string `json:"request_id"`
+	AssetName          string `json:"asset_name,omitempty"`
+	AssetID            string `json:"asset_id,omitempty"`
+	InstructionChainID string `json:"instruction_chain_id,omitempty"`
 
 	// 时间线 — CompletedAt 非空即表示已完成
 	StartedAt   string `json:"started_at"`
@@ -67,9 +68,10 @@ type TruthRecord struct {
 	// 安全决策 — nil 表示未经安全检测
 	Decision *SecurityDecision `json:"decision,omitempty"`
 
-	// Token 指标 — TotalTokens 由前端计算
+	// Token metrics.
 	PromptTokens       int `json:"prompt_tokens"`
 	CompletionTokens   int `json:"completion_tokens"`
+	TotalTokens        int `json:"total_tokens"`
 	ConversationTokens int `json:"conversation_tokens,omitempty"`
 	DailyTokens        int `json:"daily_tokens,omitempty"`
 }
@@ -321,6 +323,7 @@ func isRecordRisky(r *TruthRecord) bool {
 func normalizeTruthRecord(r *TruthRecord) {
 	r.AssetName = strings.TrimSpace(r.AssetName)
 	r.AssetID = strings.TrimSpace(r.AssetID)
+	r.InstructionChainID = strings.TrimSpace(r.InstructionChainID)
 	r.Model = strings.TrimSpace(r.Model)
 	r.PrimaryContent = strings.TrimSpace(r.PrimaryContent)
 	r.PrimaryContentType = normalizeRecordContentType(r.PrimaryContentType)

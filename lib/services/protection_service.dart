@@ -240,6 +240,8 @@ class ProtectionService {
     int? proxyPort,
   }) async {
     bool effectiveAuditOnly = runtimeConfig.auditOnly;
+    bool effectiveUserInputDetectionEnabled =
+        runtimeConfig.userInputDetectionEnabled ?? true;
     int effectiveSingleSessionTokenLimit =
         runtimeConfig.singleSessionTokenLimit;
     int effectiveDailyTokenLimit = runtimeConfig.dailyTokenLimit;
@@ -249,6 +251,8 @@ class ProtectionService {
             .getProtectionConfig(_assetName!, _assetID);
         if (protConfig != null) {
           effectiveAuditOnly = protConfig.auditOnly;
+          effectiveUserInputDetectionEnabled =
+              protConfig.userInputDetectionEnabled;
           effectiveSingleSessionTokenLimit = protConfig.singleSessionTokenLimit;
           effectiveDailyTokenLimit = protConfig.dailyTokenLimit;
         }
@@ -270,6 +274,7 @@ class ProtectionService {
       singleSessionTokenLimit: effectiveSingleSessionTokenLimit,
       dailyTokenLimit: effectiveDailyTokenLimit,
       initialDailyTokenUsage: initialDailyTokenUsage,
+      userInputDetectionEnabled: effectiveUserInputDetectionEnabled,
     );
 
     // 不再提前返回 already_running：Go 层 StartProtectionProxy 已正确处理
@@ -316,6 +321,8 @@ class ProtectionService {
             finalRuntimeConfig.singleSessionTokenLimit,
         'daily_token_limit': finalRuntimeConfig.dailyTokenLimit,
         'initial_daily_token_usage': finalRuntimeConfig.initialDailyTokenUsage,
+        'user_input_detection_enabled':
+            finalRuntimeConfig.userInputDetectionEnabled,
       },
       // 基线统计（从数据库恢复的历史数据）
       'baseline_analysis_count': statistics.analysisCount,
@@ -522,6 +529,7 @@ class ProtectionService {
     String assetID = '',
     required int singleSessionTokenLimit,
     required int dailyTokenLimit,
+    bool? userInputDetectionEnabled,
   }) async {
     try {
       final transport = TransportRegistry.transport;
@@ -542,6 +550,9 @@ class ProtectionService {
         'single_session_token_limit': singleSessionTokenLimit,
         'daily_token_limit': dailyTokenLimit,
         'initial_daily_token_usage': initialDailyTokenUsage,
+        ...?userInputDetectionEnabled == null
+            ? null
+            : {'user_input_detection_enabled': userInputDetectionEnabled},
       });
       Map<String, dynamic> result;
       if (assetID.isNotEmpty) {
@@ -666,6 +677,9 @@ class ProtectionService {
         'single_session_token_limit': runtimeConfig.singleSessionTokenLimit,
         'daily_token_limit': runtimeConfig.dailyTokenLimit,
         'initial_daily_token_usage': runtimeConfig.initialDailyTokenUsage,
+        if (runtimeConfig.userInputDetectionEnabled != null)
+          'user_input_detection_enabled':
+              runtimeConfig.userInputDetectionEnabled,
       });
       Map<String, dynamic> result;
       if (_hasAssetBinding) {

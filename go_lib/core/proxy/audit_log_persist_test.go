@@ -70,6 +70,30 @@ func TestToRepositoryAuditLog_ConvertsChainLog(t *testing.T) {
 	}
 }
 
+func TestToRepositoryAuditLog_PreservesProviderTotalTokens(t *testing.T) {
+	src := AuditLog{
+		ID:               "audit_provider_total",
+		Timestamp:        "2026-04-21T12:00:00Z",
+		RequestID:        "req_1",
+		AssetName:        "openclaw",
+		AssetID:          "openclaw:a1",
+		Model:            "gemini-test",
+		RequestContent:   "think",
+		OutputContent:    "done",
+		PromptTokens:     10,
+		CompletionTokens: 5,
+		TotalTokens:      18,
+	}
+
+	record, err := toRepositoryAuditLog(src)
+	if err != nil {
+		t.Fatalf("unexpected convert error: %v", err)
+	}
+	if record.TotalTokens != 18 {
+		t.Fatalf("expected provider total tokens 18, got %d", record.TotalTokens)
+	}
+}
+
 func TestToRepositoryAuditLog_RequiresID(t *testing.T) {
 	if _, err := toRepositoryAuditLog(AuditLog{}); err == nil {
 		t.Fatalf("expected error when id is empty")

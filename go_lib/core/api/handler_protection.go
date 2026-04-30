@@ -42,12 +42,12 @@ var (
 
 // ProtectionPolicyRequest represents the external API format for protection policy.
 type ProtectionPolicyRequest struct {
-	BotID      []string          `json:"botId"`
-	Protection string            `json:"protection"` // "enabled", "bypass", "disabled"
-	UserRules  []string          `json:"userRules,omitempty"`
-	TokenLimit *TokenLimitConfig `json:"tokenLimit,omitempty"`
-	Permission *PermissionConfig `json:"permission,omitempty"`
-	BotModel   *BotModelConfig   `json:"botModel,omitempty"`
+	BotID      []string            `json:"botId"`
+	Protection string              `json:"protection"` // "enabled", "bypass", "disabled"
+	UserRules  *shepherd.UserRules `json:"userRules,omitempty"`
+	TokenLimit *TokenLimitConfig   `json:"tokenLimit,omitempty"`
+	Permission *PermissionConfig   `json:"permission,omitempty"`
+	BotModel   *BotModelConfig     `json:"botModel,omitempty"`
 }
 
 // TokenLimitConfig represents token limit settings.
@@ -98,12 +98,12 @@ type BotModelConfig struct {
 
 // ProtectionPolicyResponse represents the response format for protection policy.
 type ProtectionPolicyResponse struct {
-	BotID      string            `json:"botId"`
-	Protection string            `json:"protection"`
-	UserRules  []string          `json:"userRules"`
-	TokenLimit *TokenLimitConfig `json:"tokenLimit"`
-	Permission *PermissionConfig `json:"permission"`
-	BotModel   *BotModelConfig   `json:"botModel"`
+	BotID      string              `json:"botId"`
+	Protection string              `json:"protection"`
+	UserRules  *shepherd.UserRules `json:"userRules"`
+	TokenLimit *TokenLimitConfig   `json:"tokenLimit"`
+	Permission *PermissionConfig   `json:"permission"`
+	BotModel   *BotModelConfig     `json:"botModel"`
 }
 
 // handleGetProtectionPolicy handles GET /api/v1/protection/policy
@@ -259,41 +259,44 @@ func buildProtectionPolicyResponse(repo *repository.ProtectionRepository, botID 
 			usesDefaultPolicy = true
 		} else {
 			config = &repository.ProtectionConfig{
-				AssetName: assetName,
-				AssetID:   botID,
+				AssetName:                 assetName,
+				AssetID:                   botID,
+				UserInputDetectionEnabled: true,
 			}
 		}
 	}
 
 	response := convertToExternalPolicy(config, botID)
 	userRulesAssetID := botID
-	userRulesAssetName := config.AssetName
 	if usesDefaultPolicy {
 		userRulesAssetID = repository.DefaultProtectionPolicyAssetID
-		userRulesAssetName = repository.DefaultProtectionPolicyAssetName
 	}
-	userRules, found, err := repo.GetShepherdSensitiveActions(userRulesAssetName, userRulesAssetID)
+	userRulesRaw, found, err := repo.GetShepherdRulesRaw(userRulesAssetID)
+	var userRules *shepherd.UserRules
 	if err != nil {
 		logging.Warning("API: Failed to query instance user rules for botId=%s: %v", botID, err)
 		defaultRules, defaultErr := shepherd.GetDefaultUserRules()
 		if defaultErr != nil {
 			logging.Warning("API: Failed to query default shepherd rules for botId=%s: %v", botID, defaultErr)
-			userRules = []string{}
+			userRules = &shepherd.UserRules{SemanticRules: []shepherd.SemanticRule{}}
 		} else {
-			userRules = defaultRules.SensitiveActions
+			userRules = defaultRules
 		}
 	} else if !found {
 		defaultRules, defaultErr := shepherd.GetDefaultUserRules()
 		if defaultErr != nil {
 			logging.Warning("API: Failed to query default shepherd rules for botId=%s: %v", botID, defaultErr)
-			userRules = []string{}
+			userRules = &shepherd.UserRules{SemanticRules: []shepherd.SemanticRule{}}
 		} else {
-			userRules = defaultRules.SensitiveActions
+			userRules = defaultRules
 		}
+	} else if decoded, decodeErr := shepherd.DecodeUserRulesJSON([]byte(userRulesRaw)); decodeErr != nil {
+		logging.Warning("API: Failed to decode shepherd rules for botId=%s: %v", botID, decodeErr)
+		userRules = &shepherd.UserRules{SemanticRules: []shepherd.SemanticRule{}}
+	} else {
+		userRules = decoded
 	}
-	if len(userRules) > 0 {
-		response.UserRules = userRules
-	}
+	response.UserRules = userRules
 
 	return response, nil
 }
@@ -304,17 +307,15 @@ func saveDefaultProtectionPolicy(repo *repository.ProtectionRepository, req *Pro
 		return err
 	}
 	previousConfig := cloneProtectionConfig(config)
-	previousUserRules, foundPreviousUserRules, err := repo.GetShepherdSensitiveActions(
-		repository.DefaultProtectionPolicyAssetName,
-		repository.DefaultProtectionPolicyAssetID,
-	)
+	previousUserRulesRaw, foundPreviousUserRules, err := repo.GetShepherdRulesRaw(repository.DefaultProtectionPolicyAssetID)
 	if err != nil {
 		return err
 	}
 	if config == nil {
 		config = &repository.ProtectionConfig{
-			AssetName: repository.DefaultProtectionPolicyAssetName,
-			AssetID:   repository.DefaultProtectionPolicyAssetID,
+			AssetName:                 repository.DefaultProtectionPolicyAssetName,
+			AssetID:                   repository.DefaultProtectionPolicyAssetID,
+			UserInputDetectionEnabled: true,
 		}
 	}
 	// 默认策略记录本身不应标记为“继承默认策略”。
@@ -326,12 +327,16 @@ func saveDefaultProtectionPolicy(repo *repository.ProtectionRepository, req *Pro
 	}
 
 	if req.UserRules != nil {
-		if err := repo.SaveShepherdSensitiveActions(
+		rulesJSON, marshalErr := json.Marshal(req.UserRules)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if err := repo.SaveShepherdRulesRaw(
 			repository.DefaultProtectionPolicyAssetName,
 			repository.DefaultProtectionPolicyAssetID,
-			req.UserRules,
+			string(rulesJSON),
 		); err != nil {
-			if rollbackErr := rollbackDefaultPolicyUpdate(repo, previousConfig, previousUserRules, foundPreviousUserRules); rollbackErr != nil {
+			if rollbackErr := rollbackDefaultPolicyUpdate(repo, previousConfig, previousUserRulesRaw, foundPreviousUserRules); rollbackErr != nil {
 				return errors.New(err.Error() + "; rollback failed: " + rollbackErr.Error())
 			}
 			return err
@@ -340,7 +345,7 @@ func saveDefaultProtectionPolicy(repo *repository.ProtectionRepository, req *Pro
 
 	// 默认策略更新后，批量同步所有“继承默认策略”的资产。
 	if err := service.SyncDefaultProtectionPolicyForAssets(nil); err != nil {
-		if rollbackErr := rollbackDefaultPolicyUpdate(repo, previousConfig, previousUserRules, foundPreviousUserRules); rollbackErr != nil {
+		if rollbackErr := rollbackDefaultPolicyUpdate(repo, previousConfig, previousUserRulesRaw, foundPreviousUserRules); rollbackErr != nil {
 			return errors.New(err.Error() + "; rollback failed: " + rollbackErr.Error())
 		}
 		return err
@@ -353,7 +358,7 @@ func saveDefaultProtectionPolicy(repo *repository.ProtectionRepository, req *Pro
 func rollbackDefaultPolicyUpdate(
 	repo *repository.ProtectionRepository,
 	previousConfig *repository.ProtectionConfig,
-	previousUserRules []string,
+	previousUserRulesRaw string,
 	foundPreviousUserRules bool,
 ) error {
 	if previousConfig == nil {
@@ -367,15 +372,15 @@ func rollbackDefaultPolicyUpdate(
 	}
 
 	if foundPreviousUserRules {
-		if err := repo.SaveShepherdSensitiveActions(
+		if err := repo.SaveShepherdRulesRaw(
 			repository.DefaultProtectionPolicyAssetName,
 			repository.DefaultProtectionPolicyAssetID,
-			previousUserRules,
+			previousUserRulesRaw,
 		); err != nil {
 			return err
 		}
 	} else {
-		if err := repo.DeleteShepherdSensitiveActions(repository.DefaultProtectionPolicyAssetID); err != nil {
+		if err := repo.DeleteShepherdRules(repository.DefaultProtectionPolicyAssetID); err != nil {
 			return err
 		}
 	}
@@ -398,8 +403,9 @@ func updateProtectionPolicyForBotID(repo *repository.ProtectionRepository, botID
 	previousConfig := cloneProtectionConfig(existingConfig)
 
 	config := &repository.ProtectionConfig{
-		AssetName: assetName,
-		AssetID:   botID,
+		AssetName:                 assetName,
+		AssetID:                   botID,
+		UserInputDetectionEnabled: true,
 	}
 	if existingConfig != nil {
 		config = existingConfig
@@ -414,7 +420,11 @@ func updateProtectionPolicyForBotID(repo *repository.ProtectionRepository, botID
 	}
 
 	if req.UserRules != nil {
-		if err := repo.SaveShepherdSensitiveActions(config.AssetName, botID, req.UserRules); err != nil {
+		rulesJSON, marshalErr := json.Marshal(req.UserRules)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if err := repo.SaveShepherdRulesRaw(config.AssetName, botID, string(rulesJSON)); err != nil {
 			logging.Warning("API: Failed to update user rules: %v", err)
 		}
 	}
@@ -555,7 +565,7 @@ func normalizeBotIDs(botIDs []string) []string {
 func convertToExternalPolicy(config *repository.ProtectionConfig, botID string) *ProtectionPolicyResponse {
 	response := &ProtectionPolicyResponse{
 		BotID:      botID,
-		UserRules:  []string{},
+		UserRules:  &shepherd.UserRules{SemanticRules: []shepherd.SemanticRule{}},
 		TokenLimit: &TokenLimitConfig{},
 		Permission: defaultPermissionConfig(),
 		BotModel:   &BotModelConfig{},
@@ -695,14 +705,15 @@ func buildPolicyProxyConfig(config *repository.ProtectionConfig) (*proxy.Protect
 			SecretKey: config.BotModelConfig.SecretKey,
 		},
 		Runtime: &proxy.ProtectionRuntimeConfig{
-			AuditOnly:               config.AuditOnly,
-			SingleSessionTokenLimit: config.SingleSessionTokenLimit,
-			DailyTokenLimit:         config.DailyTokenLimit,
+			AuditOnly:                 config.AuditOnly,
+			SingleSessionTokenLimit:   config.SingleSessionTokenLimit,
+			DailyTokenLimit:           config.DailyTokenLimit,
+			UserInputDetectionEnabled: &config.UserInputDetectionEnabled,
 		},
 	}, nil
 }
 
-func applyProtectionPolicyRuntime(previousConfig, config *repository.ProtectionConfig, userRules []string) {
+func applyProtectionPolicyRuntime(previousConfig, config *repository.ProtectionConfig, userRules *shepherd.UserRules) {
 	if config == nil || config.AssetName == "" || config.AssetID == "" {
 		return
 	}
@@ -742,13 +753,14 @@ func applyProtectionPolicyRuntime(previousConfig, config *repository.ProtectionC
 	runningProxy := proxy.GetProxyProtectionByAsset(config.AssetID)
 	if runningProxy != nil && runningProxy.IsRunning() {
 		runtimeCfg := &proxy.ProtectionRuntimeConfig{
-			AuditOnly:               config.AuditOnly,
-			SingleSessionTokenLimit: config.SingleSessionTokenLimit,
-			DailyTokenLimit:         config.DailyTokenLimit,
+			AuditOnly:                 config.AuditOnly,
+			SingleSessionTokenLimit:   config.SingleSessionTokenLimit,
+			DailyTokenLimit:           config.DailyTokenLimit,
+			UserInputDetectionEnabled: &config.UserInputDetectionEnabled,
 		}
 		runningProxy.UpdateProtectionConfig(runtimeCfg)
 		if userRules != nil {
-			runningProxy.UpdateUserRules(userRules)
+			runningProxy.UpdateUserRulesConfig(userRules)
 		}
 	}
 

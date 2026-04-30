@@ -1077,6 +1077,8 @@
 
   "auditOnlyMode": "仅审计模式",
   "auditOnlyModeDesc": "不进行风险研判，仅记录审计日志",
+  "userInputDetection": "用户输入检测",
+  "userInputDetectionDesc": "转发前分析用户消息。关闭后可减少安全模型 token 消耗。",
   "auditOnlyModeShort": "仅审计",
   "auditOnlyModePendingHint": "正在研判中，变更将在研判结束后生效",
 

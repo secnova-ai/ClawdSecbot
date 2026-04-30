@@ -187,29 +187,46 @@ func (sa *SkillAgent) Execute(ctx context.Context, userInput string, opts ...Exe
 	iter := agent.Run(execCtx, input)
 
 	// 收集输出
-	output, err := collectAgentOutput(execCtx, iter)
+	output, usage, err := collectAgentOutput(execCtx, iter)
 	if err != nil {
+		if usage.TotalTokens == 0 && output != "" {
+			usage = estimateSkillAgentUsage(instruction, userMessage, output)
+		}
 		if execCtx.Err() == context.DeadlineExceeded {
 			return &ExecutionResult{
-				Success:        false,
-				ActivatedSkill: options.ForceSkill,
-				Error:          ErrExecutionTimeout,
-				Duration:       time.Since(startTime),
+				Success:          false,
+				Output:           output,
+				ActivatedSkill:   options.ForceSkill,
+				Error:            ErrExecutionTimeout,
+				Duration:         time.Since(startTime),
+				TokensUsed:       usage.TotalTokens,
+				PromptTokens:     usage.PromptTokens,
+				CompletionTokens: usage.CompletionTokens,
 			}, ErrExecutionTimeout
 		}
 		return &ExecutionResult{
-			Success:        false,
-			ActivatedSkill: options.ForceSkill,
-			Error:          fmt.Errorf("agent execution failed: %w", err),
-			Duration:       time.Since(startTime),
+			Success:          false,
+			Output:           output,
+			ActivatedSkill:   options.ForceSkill,
+			Error:            fmt.Errorf("agent execution failed: %w", err),
+			Duration:         time.Since(startTime),
+			TokensUsed:       usage.TotalTokens,
+			PromptTokens:     usage.PromptTokens,
+			CompletionTokens: usage.CompletionTokens,
 		}, err
+	}
+	if usage.TotalTokens == 0 {
+		usage = estimateSkillAgentUsage(instruction, userMessage, output)
 	}
 
 	result := &ExecutionResult{
-		Success:        true,
-		Output:         output,
-		ActivatedSkill: options.ForceSkill,
-		Duration:       time.Since(startTime),
+		Success:          true,
+		Output:           output,
+		ActivatedSkill:   options.ForceSkill,
+		Duration:         time.Since(startTime),
+		TokensUsed:       usage.TotalTokens,
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
 	}
 
 	// 触发完成钩子

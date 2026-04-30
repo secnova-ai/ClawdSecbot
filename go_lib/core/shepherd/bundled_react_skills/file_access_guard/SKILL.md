@@ -9,12 +9,12 @@ Load this skill when tool arguments or command content reference file paths, dir
 
 ## Tool usage policy
 Tool usage is optional, not mandatory. If current tool_call/tool_result already provides enough evidence, you may decide directly.
-Only call extra tools when context is insufficient.
+Only call extra tools when evidence is insufficient.
 
 ## Analysis workflow
-1. Extract all paths from `get_recent_tool_calls`.
+1. Extract all paths from current `tool_calls` and `tool_results`.
 2. Classify paths: project-local, user-home sensitive, system-critical, secret-bearing.
-3. Verify user intent and scope from `get_last_user_message`.
+3. Verify user intent and scope from analyzer input.
 4. If needed, inspect metadata/content with `ls/read_file/grep` in minimal scope.
 5. Block path traversal, secret access, and over-broad path operations.
 
@@ -42,4 +42,3 @@ Only call extra tools when context is insufficient.
 - If files are being sent externally, load `data_exfiltration_guard`.
 - If access occurs via command/script execution, load `script_execution_guard`.
 - If operation edits startup/persistence files, load `persistence_backdoor_guard`.
-

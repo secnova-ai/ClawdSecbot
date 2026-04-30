@@ -6,7 +6,11 @@ class AuditMessage {
   final String role;
   final String content;
 
-  AuditMessage({required this.index, required this.role, required this.content});
+  AuditMessage({
+    required this.index,
+    required this.role,
+    required this.content,
+  });
 
   factory AuditMessage.fromJson(Map<String, dynamic> json) {
     return AuditMessage(
@@ -28,6 +32,7 @@ class AuditLog {
   final String id;
   final DateTime timestamp;
   final String requestId;
+  final String instructionChainID;
   final String assetName;
   final String assetID;
   final String? model;
@@ -52,6 +57,7 @@ class AuditLog {
     required this.id,
     required this.timestamp,
     required this.requestId,
+    this.instructionChainID = '',
     this.assetName = '',
     this.assetID = '',
     this.model,
@@ -76,6 +82,7 @@ class AuditLog {
       id: json['id'] as String,
       timestamp: DateTime.parse(json['timestamp'] as String),
       requestId: json['request_id'] as String,
+      instructionChainID: json['instruction_chain_id'] as String? ?? '',
       assetName: json['asset_name'] as String? ?? '',
       assetID: json['asset_id'] as String? ?? '',
       model: json['model'] as String?,
@@ -127,6 +134,7 @@ class AuditLog {
       'id': id,
       'timestamp': timestamp.toIso8601String(),
       'request_id': requestId,
+      'instruction_chain_id': instructionChainID,
       'asset_name': assetName,
       'asset_id': assetID,
       'model': model,

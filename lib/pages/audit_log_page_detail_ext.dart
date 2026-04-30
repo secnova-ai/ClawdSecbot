@@ -261,10 +261,13 @@ extension _AuditLogPageDetailExt on _AuditLogPageState {
     final blocked = evt.isBlocked;
     final accent = blocked ? Colors.red : Colors.amber;
     final typeLabel = switch (evt.eventType) {
-      'blocked' => 'BLOCKED',
-      'needs_confirmation' => 'NEEDS_CONFIRMATION',
-      'tool_execution' => 'TOOL',
-      _ => evt.eventType.toUpperCase(),
+      'blocked' => _isZh ? '已拦截' : 'Blocked',
+      'needs_confirmation' => _isZh ? '待确认' : 'Needs Confirmation',
+      'tool_execution' => _isZh ? '工具执行' : 'Tool Execution',
+      _ => localizeSecurityEventType(
+        evt.eventType,
+        AppLocalizations.of(context)!,
+      ),
     };
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -304,7 +307,10 @@ extension _AuditLogPageDetailExt on _AuditLogPageState {
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    evt.riskType,
+                    localizeSecurityRiskType(
+                      evt.riskType,
+                      AppLocalizations.of(context)!,
+                    ),
                     style: AppFonts.firaCode(
                       fontSize: 10,
                       color: Colors.white54,
@@ -322,7 +328,10 @@ extension _AuditLogPageDetailExt on _AuditLogPageState {
           ),
           const SizedBox(height: 6),
           SelectableText(
-            evt.actionDesc,
+            localizeSecurityActionDesc(
+              evt.actionDesc,
+              AppLocalizations.of(context)!,
+            ),
             style: AppFonts.inter(fontSize: 11, color: Colors.white70),
           ),
           if (evt.detail.isNotEmpty) ...[

@@ -4,40 +4,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../l10n/app_localizations.dart';
 import '../models/security_event_model.dart';
 import '../utils/app_fonts.dart';
-
-/// 将后端下发的 eventType 常量本地化（仅翻译 Go 侧写死的枚举值，
-/// 未识别值原样返回以兼容 LLM/启发式自由文本）。
-String localizeSecurityEventType(String raw, AppLocalizations l10n) {
-  switch (raw.trim().toLowerCase()) {
-    case 'blocked':
-      return l10n.eventBlocked;
-    case 'needs_confirmation':
-      return l10n.riskTypeNeedsConfirmation;
-    case 'tool_execution':
-      return l10n.eventToolExecution;
-    case 'warning':
-      return l10n.eventTypeWarning;
-    case 'other':
-      return l10n.eventOther;
-    default:
-      return raw;
-  }
-}
-
-/// 将后端下发的 riskType 常量本地化（仅翻译 Go 侧写死的枚举值，
-/// 启发式/LLM 返回的自由文本原样返回）。
-String localizeSecurityRiskType(String raw, AppLocalizations l10n) {
-  switch (raw.trim().toUpperCase()) {
-    case 'QUOTA':
-      return l10n.riskTypeQuota;
-    case 'SANDBOX_BLOCKED':
-      return l10n.riskTypeSandboxBlocked;
-    case 'NEEDS_CONFIRMATION':
-      return l10n.riskTypeNeedsConfirmation;
-    default:
-      return raw;
-  }
-}
+import '../utils/security_event_labels.dart';
 
 /// 安全事件面板：展示数据库驱动的安全事件记录
 class ProtectionMonitorEventPanel extends StatefulWidget {
@@ -211,7 +178,7 @@ class _ProtectionMonitorEventPanelState
                   Expanded(
                     child: Text(
                       event.actionDesc.isNotEmpty
-                          ? event.actionDesc
+                          ? localizeSecurityActionDesc(event.actionDesc, l10n)
                           : _getEventTypeLabel(event, l10n),
                       style: AppFonts.inter(
                         fontSize: 12,
@@ -441,7 +408,7 @@ class _SecurityEventDetailDialogState
                         if (event.actionDesc.isNotEmpty)
                           _buildDetailRow(
                             l10n.eventActionDesc,
-                            event.actionDesc,
+                            localizeSecurityActionDesc(event.actionDesc, l10n),
                           ),
                         if (event.riskType.isNotEmpty)
                           _buildDetailRow(
@@ -531,9 +498,15 @@ class _SecurityEventDetailDialogState
     final buf = StringBuffer();
     buf.writeln('Security Event: ${event.id}');
     buf.writeln('Time: ${_formatFullTime(event.timestamp)}');
-    buf.writeln('Type: ${event.eventType}');
-    if (event.actionDesc.isNotEmpty) buf.writeln('Action: ${event.actionDesc}');
-    if (event.riskType.isNotEmpty) buf.writeln('Risk: ${event.riskType}');
+    buf.writeln('Type: ${localizeSecurityEventType(event.eventType, l10n)}');
+    if (event.actionDesc.isNotEmpty) {
+      buf.writeln(
+        'Action: ${localizeSecurityActionDesc(event.actionDesc, l10n)}',
+      );
+    }
+    if (event.riskType.isNotEmpty) {
+      buf.writeln('Risk: ${localizeSecurityRiskType(event.riskType, l10n)}');
+    }
     buf.writeln('Source: ${event.source}');
     if (event.detail.isNotEmpty) buf.writeln('Detail: ${event.detail}');
     return buf.toString();

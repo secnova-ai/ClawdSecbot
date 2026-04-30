@@ -3,6 +3,7 @@ package skillscan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -57,11 +58,14 @@ var allScanSkills = []string{
 
 // SkillAnalysisResult represents the result of AI-based skill security analysis
 type SkillAnalysisResult struct {
-	Safe      bool                 `json:"safe"`
-	RiskLevel string               `json:"risk_level"`
-	Issues    []SkillSecurityIssue `json:"issues"`
-	Summary   string               `json:"summary"`
-	RawOutput string               `json:"raw_output,omitempty"`
+	Safe             bool                 `json:"safe"`
+	RiskLevel        string               `json:"risk_level"`
+	Issues           []SkillSecurityIssue `json:"issues"`
+	Summary          string               `json:"summary"`
+	RawOutput        string               `json:"raw_output,omitempty"`
+	PromptTokens     int                  `json:"prompt_tokens,omitempty"`
+	CompletionTokens int                  `json:"completion_tokens,omitempty"`
+	TotalTokens      int                  `json:"total_tokens,omitempty"`
 }
 
 // SkillSecurityIssue represents a security issue found during skill analysis
@@ -71,6 +75,41 @@ type SkillSecurityIssue struct {
 	File        string `json:"file"`
 	Description string `json:"description"`
 	Evidence    string `json:"evidence"`
+}
+
+// AnalysisUsageError preserves token usage when agent execution fails after model calls.
+type AnalysisUsageError struct {
+	Err              error
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
+func (e *AnalysisUsageError) Error() string {
+	if e == nil || e.Err == nil {
+		return "skill analysis failed"
+	}
+	return e.Err.Error()
+}
+
+func (e *AnalysisUsageError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// UsageFromAnalysisError extracts token usage from a failed skill analysis.
+func UsageFromAnalysisError(err error) (promptTokens, completionTokens, totalTokens int, ok bool) {
+	var usageErr *AnalysisUsageError
+	if !errors.As(err, &usageErr) || usageErr == nil {
+		return 0, 0, 0, false
+	}
+	totalTokens = usageErr.TotalTokens
+	if totalTokens == 0 {
+		totalTokens = usageErr.PromptTokens + usageErr.CompletionTokens
+	}
+	return usageErr.PromptTokens, usageErr.CompletionTokens, totalTokens, totalTokens > 0
 }
 
 // SkillSecurityAnalyzer is an AI-based skill security analyzer built on SkillAgent
@@ -149,11 +188,16 @@ func (sa *SkillSecurityAnalyzer) AnalyzeSkill(ctx context.Context, skillPath str
 	// Execute
 	result, err := agent.Execute(ctx, userPrompt)
 	if err != nil {
-		return nil, fmt.Errorf("skill agent execution failed: %w", err)
+		return nil, skillAnalysisUsageError("skill agent execution failed", err, result)
 	}
 
 	// Parse output
-	return parseAgentOutput(result.Output, skillPath)
+	analysisResult, err := parseAgentOutput(result.Output, skillPath)
+	if err != nil {
+		return nil, err
+	}
+	attachSkillAgentUsage(analysisResult, result)
+	return analysisResult, nil
 }
 
 // AnalyzeSkillStream performs streaming analysis of a skill directory using SkillAgent
@@ -222,7 +266,7 @@ func (sa *SkillSecurityAnalyzer) AnalyzeSkillStream(ctx context.Context, skillPa
 	// Execute agent
 	result, err := agent.Execute(ctx, userPrompt)
 	if err != nil {
-		return nil, fmt.Errorf("skill agent execution failed: %w", err)
+		return nil, skillAnalysisUsageError("skill agent execution failed", err, result)
 	}
 
 	// Send the response content to log
@@ -238,14 +282,43 @@ func (sa *SkillSecurityAnalyzer) AnalyzeSkillStream(ctx context.Context, skillPa
 		SendLog(logChan, fmt.Sprintf("Warning: Failed to parse structured output: %v", err))
 		// Return a basic result based on content analysis
 		return &SkillAnalysisResult{
-			Safe:      !containsRiskIndicators(result.Output),
-			RiskLevel: "unknown",
-			Summary:   "Analysis completed but structured output parsing failed",
-			RawOutput: result.Output,
+			Safe:             !containsRiskIndicators(result.Output),
+			RiskLevel:        "unknown",
+			Summary:          "Analysis completed but structured output parsing failed",
+			RawOutput:        result.Output,
+			PromptTokens:     result.PromptTokens,
+			CompletionTokens: result.CompletionTokens,
+			TotalTokens:      result.TokensUsed,
 		}, nil
 	}
 
+	attachSkillAgentUsage(analysisResult, result)
 	return analysisResult, nil
+}
+
+func attachSkillAgentUsage(result *SkillAnalysisResult, execution *skillagent.ExecutionResult) {
+	if result == nil || execution == nil {
+		return
+	}
+	result.PromptTokens = execution.PromptTokens
+	result.CompletionTokens = execution.CompletionTokens
+	result.TotalTokens = execution.TokensUsed
+	if result.TotalTokens == 0 {
+		result.TotalTokens = result.PromptTokens + result.CompletionTokens
+	}
+}
+
+func skillAnalysisUsageError(message string, err error, execution *skillagent.ExecutionResult) error {
+	wrapped := fmt.Errorf("%s: %w", message, err)
+	if execution == nil {
+		return wrapped
+	}
+	return &AnalysisUsageError{
+		Err:              wrapped,
+		PromptTokens:     execution.PromptTokens,
+		CompletionTokens: execution.CompletionTokens,
+		TotalTokens:      execution.TokensUsed,
+	}
 }
 
 // SendLog sends a log message to the log channel with timeout protection

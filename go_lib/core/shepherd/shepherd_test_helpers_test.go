@@ -12,10 +12,12 @@ type stubChatModel struct {
 	generateResp *schema.Message
 	generateErr  error
 	called       bool // 记录 Generate 是否被调用
+	messages     []*schema.Message
 }
 
-func (m *stubChatModel) Generate(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+func (m *stubChatModel) Generate(_ context.Context, messages []*schema.Message, _ ...model.Option) (*schema.Message, error) {
 	m.called = true
+	m.messages = messages
 	if m.generateErr != nil {
 		return nil, m.generateErr
 	}

@@ -101,6 +101,7 @@ class TruthRecordModel {
   final String requestId;
   final String assetName;
   final String assetID;
+  final String instructionChainID;
 
   // 时间线
   final DateTime startedAt;
@@ -138,6 +139,7 @@ class TruthRecordModel {
     this.completedAt,
     this.assetName = '',
     this.assetID = '',
+    this.instructionChainID = '',
     this.model = '',
     this.messageCount = 0,
     this.messages = const [],
@@ -211,6 +213,7 @@ class TruthRecordModel {
           : null,
       assetName: json['asset_name'] as String? ?? '',
       assetID: json['asset_id'] as String? ?? '',
+      instructionChainID: json['instruction_chain_id'] as String? ?? '',
       model: json['model'] as String? ?? '',
       messageCount: json['message_count'] as int? ?? 0,
       messages: ((json['messages'] as List?) ?? const [])
@@ -249,6 +252,7 @@ class TruthRecordModel {
       if (completedAt != null) 'completed_at': completedAt!.toIso8601String(),
       'asset_name': assetName,
       'asset_id': assetID,
+      'instruction_chain_id': instructionChainID,
       'model': model,
       'message_count': messageCount,
       'messages': messages

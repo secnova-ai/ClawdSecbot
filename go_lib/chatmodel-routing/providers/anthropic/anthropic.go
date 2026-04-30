@@ -567,7 +567,7 @@ func (p *Provider) convertResponse(body []byte) (*openai.ChatCompletion, error) 
 	}
 
 	// Usage
-	promptTokens := parsed.Get("usage.input_tokens").Int()
+	promptTokens := anthropicInputTokens(parsed.Get("usage"))
 	completionTokens := parsed.Get("usage.output_tokens").Int()
 
 	resp := &openai.ChatCompletion{
@@ -727,7 +727,7 @@ func (s *anthropicStream) processEvent(eventType, data string) (*openai.ChatComp
 	case "message_start":
 		s.id = parsed.Get("message.id").String()
 		s.model = parsed.Get("message.model").String()
-		s.inputTokens = parsed.Get("message.usage.input_tokens").Int()
+		s.inputTokens = anthropicInputTokens(parsed.Get("message.usage"))
 
 		// Return initial chunk with assistant role
 		return &openai.ChatCompletionChunk{
@@ -828,6 +828,15 @@ func (s *anthropicStream) processEvent(eventType, data string) (*openai.ChatComp
 
 	// Unknown event type, skip
 	return nil, nil
+}
+
+func anthropicInputTokens(usage gjson.Result) int64 {
+	if !usage.Exists() {
+		return 0
+	}
+	return usage.Get("input_tokens").Int() +
+		usage.Get("cache_creation_input_tokens").Int() +
+		usage.Get("cache_read_input_tokens").Int()
 }
 
 // processContentDelta handles content_block_delta events.

@@ -1,10 +1,10 @@
-﻿import 'package:bot_sec_manager/models/audit_log_model.dart';
+import 'package:bot_sec_manager/models/audit_log_model.dart';
 import 'package:bot_sec_manager/models/security_event_model.dart';
 import 'package:bot_sec_manager/utils/audit_log_export_helper.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  AuditLog _buildLog() {
+  AuditLog buildLog() {
     return AuditLog(
       id: 'log-001',
       timestamp: DateTime(2026, 1, 15, 10, 30),
@@ -26,7 +26,7 @@ void main() {
     test('generates markdown with all sections for Chinese locale', () {
       final md = buildAuditLogMarkdownContent(
         isZh: true,
-        log: _buildLog(),
+        log: buildLog(),
         relatedEvents: [],
         rawText: 'raw content',
         actionText: 'action content',
@@ -51,7 +51,7 @@ void main() {
     test('generates markdown with English locale', () {
       final md = buildAuditLogMarkdownContent(
         isZh: false,
-        log: _buildLog(),
+        log: buildLog(),
         relatedEvents: [],
         rawText: 'raw',
         actionText: 'action',
@@ -68,7 +68,7 @@ void main() {
     test('includes related events when provided', () {
       final md = buildAuditLogMarkdownContent(
         isZh: false,
-        log: _buildLog(),
+        log: buildLog(),
         relatedEvents: [
           SecurityEvent(
             id: 'evt-1',
@@ -91,7 +91,7 @@ void main() {
     test('escapes triple backticks in content', () {
       final md = buildAuditLogMarkdownContent(
         isZh: false,
-        log: _buildLog(),
+        log: buildLog(),
         relatedEvents: [],
         rawText: 'code: ```block```',
         actionText: 'action',
@@ -105,7 +105,7 @@ void main() {
     test('normalizes line endings', () {
       final md = buildAuditLogMarkdownContent(
         isZh: false,
-        log: _buildLog(),
+        log: buildLog(),
         relatedEvents: [],
         rawText: 'line1\r\nline2\rline3',
         actionText: 'a',

@@ -11,26 +11,27 @@ import (
 
 // AuditLog 审计日志记录
 type AuditLog struct {
-	ID               string `json:"id"`
-	Timestamp        string `json:"timestamp"`
-	RequestID        string `json:"request_id"`
-	AssetName        string `json:"asset_name,omitempty"`
-	AssetID          string `json:"asset_id,omitempty"`
-	Model            string `json:"model,omitempty"`
-	RequestContent   string `json:"request_content,omitempty"`
-	ToolCalls        string `json:"tool_calls,omitempty"`
-	OutputContent    string `json:"output_content,omitempty"`
-	HasRisk          bool   `json:"has_risk"`
-	RiskLevel        string `json:"risk_level,omitempty"`
-	RiskReason       string `json:"risk_reason,omitempty"`
-	Confidence       int    `json:"confidence,omitempty"`
-	Action           string `json:"action"`
-	PromptTokens     int    `json:"prompt_tokens,omitempty"`
-	CompletionTokens int    `json:"completion_tokens,omitempty"`
-	TotalTokens      int    `json:"total_tokens,omitempty"`
-	DurationMs       int    `json:"duration_ms"`
-	Messages         string `json:"messages,omitempty"`      // JSON array of {index, role, content}
-	MessageCount     int    `json:"message_count,omitempty"` // total message count in request
+	ID                 string `json:"id"`
+	Timestamp          string `json:"timestamp"`
+	RequestID          string `json:"request_id"`
+	InstructionChainID string `json:"instruction_chain_id,omitempty"`
+	AssetName          string `json:"asset_name,omitempty"`
+	AssetID            string `json:"asset_id,omitempty"`
+	Model              string `json:"model,omitempty"`
+	RequestContent     string `json:"request_content,omitempty"`
+	ToolCalls          string `json:"tool_calls,omitempty"`
+	OutputContent      string `json:"output_content,omitempty"`
+	HasRisk            bool   `json:"has_risk"`
+	RiskLevel          string `json:"risk_level,omitempty"`
+	RiskReason         string `json:"risk_reason,omitempty"`
+	Confidence         int    `json:"confidence,omitempty"`
+	Action             string `json:"action"`
+	PromptTokens       int    `json:"prompt_tokens,omitempty"`
+	CompletionTokens   int    `json:"completion_tokens,omitempty"`
+	TotalTokens        int    `json:"total_tokens,omitempty"`
+	DurationMs         int    `json:"duration_ms"`
+	Messages           string `json:"messages,omitempty"`      // JSON array of {index, role, content}
+	MessageCount       int    `json:"message_count,omitempty"` // total message count in request
 }
 
 // AuditLogFilter 审计日志查询过滤条件
@@ -95,12 +96,12 @@ func (r *AuditLogRepository) SaveAuditLog(log *AuditLog) error {
 
 	_, err := r.db.Exec(`
 		INSERT OR REPLACE INTO audit_logs 
-		(id, timestamp, request_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
+		(id, timestamp, request_id, instruction_chain_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
 		 has_risk, risk_level, risk_reason, confidence, action,
 		 prompt_tokens, completion_tokens, total_tokens, duration_ms,
 		 messages, message_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, log.ID, log.Timestamp, log.RequestID, strings.TrimSpace(log.AssetName), strings.TrimSpace(log.AssetID), log.Model,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, log.ID, log.Timestamp, log.RequestID, strings.TrimSpace(log.InstructionChainID), strings.TrimSpace(log.AssetName), strings.TrimSpace(log.AssetID), log.Model,
 		log.RequestContent, log.ToolCalls, log.OutputContent,
 		hasRisk, log.RiskLevel, log.RiskReason, log.Confidence, log.Action,
 		log.PromptTokens, log.CompletionTokens, log.TotalTokens, log.DurationMs,
@@ -129,11 +130,11 @@ func (r *AuditLogRepository) SaveAuditLogsBatch(logs []*AuditLog) error {
 
 	stmt, err := tx.Prepare(`
 		INSERT OR REPLACE INTO audit_logs 
-		(id, timestamp, request_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
+		(id, timestamp, request_id, instruction_chain_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
 		 has_risk, risk_level, risk_reason, confidence, action,
 		 prompt_tokens, completion_tokens, total_tokens, duration_ms,
 		 messages, message_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -145,7 +146,7 @@ func (r *AuditLogRepository) SaveAuditLogsBatch(logs []*AuditLog) error {
 		if log.HasRisk {
 			hasRisk = 1
 		}
-		_, err := stmt.Exec(log.ID, log.Timestamp, log.RequestID, strings.TrimSpace(log.AssetName), strings.TrimSpace(log.AssetID), log.Model,
+		_, err := stmt.Exec(log.ID, log.Timestamp, log.RequestID, strings.TrimSpace(log.InstructionChainID), strings.TrimSpace(log.AssetName), strings.TrimSpace(log.AssetID), log.Model,
 			log.RequestContent, log.ToolCalls, log.OutputContent,
 			hasRisk, log.RiskLevel, log.RiskReason, log.Confidence, log.Action,
 			log.PromptTokens, log.CompletionTokens, log.TotalTokens, log.DurationMs,
@@ -205,7 +206,7 @@ func (r *AuditLogRepository) GetAuditLogs(filter *AuditLogFilter) ([]*AuditLog, 
 
 	// 时间降序(最新在上), id 作次要键保证同刻多条时顺序稳定.
 	query := fmt.Sprintf(`
-		SELECT id, timestamp, request_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
+		SELECT id, timestamp, request_id, instruction_chain_id, asset_name, asset_id, model, request_content, tool_calls, output_content,
 			has_risk, risk_level, risk_reason, confidence, action,
 			prompt_tokens, completion_tokens, total_tokens, duration_ms,
 			messages, message_count
@@ -424,7 +425,9 @@ func scanAuditLog(rows *sql.Rows) (*AuditLog, error) {
 	var messages sql.NullString
 	var messageCount sql.NullInt64
 
-	err := rows.Scan(&log.ID, &log.Timestamp, &log.RequestID, &assetName, &assetID,
+	var instructionChainID sql.NullString
+
+	err := rows.Scan(&log.ID, &log.Timestamp, &log.RequestID, &instructionChainID, &assetName, &assetID,
 		&model, &requestContent, &toolCalls, &outputContent,
 		&hasRisk, &riskLevel, &riskReason, &confidence, &action,
 		&promptTokens, &completionTokens, &totalTokens, &log.DurationMs,
@@ -434,6 +437,7 @@ func scanAuditLog(rows *sql.Rows) (*AuditLog, error) {
 	}
 
 	log.AssetName = assetName.String
+	log.InstructionChainID = instructionChainID.String
 	log.AssetID = assetID.String
 	log.HasRisk = hasRisk == 1
 	log.Model = model.String

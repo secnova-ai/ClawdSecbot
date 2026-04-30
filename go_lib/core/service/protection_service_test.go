@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -254,107 +255,119 @@ func TestClearProtectionStatistics(t *testing.T) {
 	}
 }
 
-// TestSaveShepherdSensitiveActions 验证保存Shepherd敏感操作
-func TestSaveShepherdSensitiveActions(t *testing.T) {
+func TestSaveShepherdRules(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
 	input := `{
 		"asset_name": "openclaw",
 		"asset_id": "openclaw:test-1",
-		"actions": ["file_write", "shell_exec", "network_connect"]
+		"semantic_rules": [
+			{"id":"no_delete_files","enabled":true,"description":"不允许删除文件","applies_to":["tool_call"],"action":"needs_confirmation","risk_type":"HIGH_RISK_OPERATION"}
+		]
 	}`
 
-	result := SaveShepherdSensitiveActions(input)
+	result := SaveShepherdRules(input)
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
 }
 
-// TestGetShepherdSensitiveActions 验证获取Shepherd敏感操作
-func TestGetShepherdSensitiveActions(t *testing.T) {
+func TestGetShepherdRules(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	SaveShepherdSensitiveActions(`{"asset_name": "openclaw", "asset_id":"openclaw:test-1", "actions": ["file_write"]}`)
+	SaveShepherdRules(`{
+		"asset_name": "openclaw",
+		"asset_id":"openclaw:test-1",
+		"semantic_rules": [
+			{"id":"file_write","enabled":true,"description":"不允许写文件"}
+		]
+	}`)
 
-	result := GetShepherdSensitiveActions("openclaw:test-1")
+	result := GetShepherdRules("openclaw:test-1")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
+	}
+	raw, _ := json.Marshal(result["data"])
+	var parsed struct {
+		SemanticRules []map[string]interface{} `json:"semantic_rules"`
+	}
+	_ = json.Unmarshal(raw, &parsed)
+	if len(parsed.SemanticRules) != 1 {
+		t.Fatalf("unexpected shepherd rules: %s", string(raw))
 	}
 }
 
-// TestGetShepherdSensitiveActions_DefaultFallback 验证未保存实例规则时返回默认内置规则
-func TestGetShepherdSensitiveActions_DefaultFallback(t *testing.T) {
+func TestGetShepherdRules_DefaultFallback(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	result := GetShepherdSensitiveActions("openclaw:test-default")
+	result := GetShepherdRules("openclaw:test-default")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
-	data, ok := result["data"].([]string)
-	if !ok {
-		raw, _ := json.Marshal(result["data"])
-		var parsed []string
-		_ = json.Unmarshal(raw, &parsed)
-		data = parsed
+	raw, _ := json.Marshal(result["data"])
+	var parsed struct {
+		SemanticRules []map[string]interface{} `json:"semantic_rules"`
 	}
-	if len(data) == 0 {
+	_ = json.Unmarshal(raw, &parsed)
+	if len(parsed.SemanticRules) == 0 {
 		t.Fatal("Expected default shepherd rules to be non-empty")
 	}
 }
 
-// TestGetShepherdSensitiveActions_SavedEmptyRules 验证保存空规则后返回空列表
-func TestGetShepherdSensitiveActions_SavedEmptyRules(t *testing.T) {
+func TestGetShepherdRules_SavedEmptyRules(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	saveResult := SaveShepherdSensitiveActions(`{"asset_name":"openclaw","asset_id":"openclaw:test-empty","actions":[]}`)
+	saveResult := SaveShepherdRules(`{"asset_name":"openclaw","asset_id":"openclaw:test-empty","semantic_rules":[]}`)
 	if saveResult["success"] != true {
-		t.Fatalf("SaveShepherdSensitiveActions failed: %v", saveResult)
+		t.Fatalf("SaveShepherdRules failed: %v", saveResult)
 	}
 
-	result := GetShepherdSensitiveActions("openclaw:test-empty")
+	result := GetShepherdRules("openclaw:test-empty")
 	if result["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result)
 	}
-	data, ok := result["data"].([]string)
-	if !ok {
-		raw, _ := json.Marshal(result["data"])
-		var parsed []string
-		_ = json.Unmarshal(raw, &parsed)
-		data = parsed
+	raw, _ := json.Marshal(result["data"])
+	var parsed struct {
+		SemanticRules []map[string]interface{} `json:"semantic_rules"`
 	}
-	if len(data) != 0 {
-		t.Fatalf("Expected empty saved shepherd rules, got: %v", data)
+	_ = json.Unmarshal(raw, &parsed)
+	if len(parsed.SemanticRules) != 0 {
+		t.Fatalf("Expected empty saved shepherd rules, got: %v", parsed.SemanticRules)
 	}
 }
 
-func TestGetShepherdSensitiveActions_IsolatedByAssetID(t *testing.T) {
+func TestGetShepherdRules_IsolatedByAssetID(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	SaveShepherdSensitiveActions(`{"asset_name": "openclaw", "asset_id": "bot-1", "actions": ["file_write"]}`)
-	SaveShepherdSensitiveActions(`{"asset_name": "openclaw", "asset_id": "bot-2", "actions": ["shell_exec"]}`)
+	SaveShepherdRules(`{"asset_name":"openclaw","asset_id":"bot-1","semantic_rules":[{"id":"file_write","enabled":true}]}`)
+	SaveShepherdRules(`{"asset_name":"openclaw","asset_id":"bot-2","semantic_rules":[{"id":"shell_exec","enabled":true}]}`)
 
-	result1 := GetShepherdSensitiveActions("bot-1")
+	result1 := GetShepherdRules("bot-1")
 	if result1["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result1)
 	}
-	actions1 := result1["data"].([]string)
-	if len(actions1) != 1 || actions1[0] != "file_write" {
-		t.Fatalf("unexpected bot-1 rules: %v", actions1)
+	raw1, _ := json.Marshal(result1["data"])
+	if !json.Valid(raw1) || !containsJSONText(raw1, "file_write") {
+		t.Fatalf("unexpected bot-1 rules: %s", string(raw1))
 	}
 
-	result2 := GetShepherdSensitiveActions("bot-2")
+	result2 := GetShepherdRules("bot-2")
 	if result2["success"] != true {
 		t.Fatalf("Expected success=true, got: %v", result2)
 	}
-	actions2 := result2["data"].([]string)
-	if len(actions2) != 1 || actions2[0] != "shell_exec" {
-		t.Fatalf("unexpected bot-2 rules: %v", actions2)
+	raw2, _ := json.Marshal(result2["data"])
+	if !json.Valid(raw2) || !containsJSONText(raw2, "shell_exec") {
+		t.Fatalf("unexpected bot-2 rules: %s", string(raw2))
 	}
+}
+
+func containsJSONText(data []byte, needle string) bool {
+	return len(data) > 0 && json.Valid(data) && bytes.Contains(data, []byte(needle))
 }
 
 // TestClearAllData 验证清空所有运行数据
@@ -392,12 +405,11 @@ func TestSaveHomeDirectoryPermission_InvalidJSON(t *testing.T) {
 	}
 }
 
-// TestSaveShepherdSensitiveActions_InvalidJSON 验证JSON解析错误
-func TestSaveShepherdSensitiveActions_InvalidJSON(t *testing.T) {
+func TestSaveShepherdRules_InvalidJSON(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	result := SaveShepherdSensitiveActions("bad json")
+	result := SaveShepherdRules("bad json")
 	if result["success"] != false {
 		t.Error("Expected success=false for invalid JSON")
 	}

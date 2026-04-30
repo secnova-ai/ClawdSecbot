@@ -99,6 +99,39 @@ func TestConvertResponse_Logic(t *testing.T) {
 	}
 }
 
+func TestConvertResponse_PreservesOfficialUsageTotal(t *testing.T) {
+	p := New("test")
+
+	geminiResp := `{
+		"candidates": [{
+			"content": {
+				"parts": [{"text": "done"}]
+			}
+		}],
+		"usageMetadata": {
+			"promptTokenCount": 10,
+			"candidatesTokenCount": 5,
+			"thoughtsTokenCount": 3,
+			"totalTokenCount": 18
+		}
+	}`
+
+	resp, err := p.convertResponse([]byte(geminiResp), "model")
+	if err != nil {
+		t.Fatalf("convertResponse failed: %v", err)
+	}
+
+	if resp.Usage.PromptTokens != 10 {
+		t.Fatalf("expected prompt tokens 10, got %d", resp.Usage.PromptTokens)
+	}
+	if resp.Usage.CompletionTokens != 5 {
+		t.Fatalf("expected completion tokens 5, got %d", resp.Usage.CompletionTokens)
+	}
+	if resp.Usage.TotalTokens != 18 {
+		t.Fatalf("expected provider total tokens 18, got %d", resp.Usage.TotalTokens)
+	}
+}
+
 func TestStreamingID_Logic(t *testing.T) {
 	// Need to test geminiStream.Recv logic which adds unique IDs and signature.
 	// This is harder to mock without a real reader.

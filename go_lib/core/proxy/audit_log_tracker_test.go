@@ -43,6 +43,30 @@ func TestAuditChainTracker_StartFromRequestCreatesLogOnlyWhenLastRoleUser(t *tes
 	}
 }
 
+func TestAuditChainTracker_UpdateRequestTokensPreservesProviderTotal(t *testing.T) {
+	tracker := NewAuditChainTracker()
+	messages := buildMessagesFromRaw(t, `{
+	  "model":"gemini-test",
+	  "messages":[
+	    {"role":"user","content":"think"}
+	  ]
+	}`)
+	tracker.StartFromRequest("req_tokens", "openclaw", "openclaw:a1", "gemini-test", messages)
+
+	tracker.UpdateRequestTokens("req_tokens", 10, 5, 18)
+
+	logs := tracker.GetAuditLogs(10, 0, false)
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if logs[0].TotalTokens != 18 {
+		t.Fatalf("expected provider total tokens 18, got %d", logs[0].TotalTokens)
+	}
+	if logs[0].PromptTokens+logs[0].CompletionTokens == logs[0].TotalTokens {
+		t.Fatalf("expected non-additive provider total to be preserved")
+	}
+}
+
 func TestAuditChainTracker_ToolCallAndToolResultCorrelateAcrossRequests(t *testing.T) {
 	tracker := NewAuditChainTracker()
 

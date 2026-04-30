@@ -3,9 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
-	"time"
 
 	"go_lib/core/repository"
 	"go_lib/core/shepherd"
@@ -18,9 +16,13 @@ import (
 type stubChatModelForProxy struct {
 	generateResp *schema.Message
 	generateErr  error
+	called       bool
+	messages     []*schema.Message
 }
 
-func (m *stubChatModelForProxy) Generate(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+func (m *stubChatModelForProxy) Generate(_ context.Context, messages []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	m.called = true
+	m.messages = append([]*schema.Message(nil), messages...)
 	if m.generateErr != nil {
 		return nil, m.generateErr
 	}
@@ -39,8 +41,8 @@ func (m *stubChatModelForProxy) BindTools(_ []*schema.ToolInfo) error {
 }
 
 func TestArmPendingRecoveryFromContext_Confirm(t *testing.T) {
+	requestID := "req_recovery_confirm"
 	pp := &ProxyProtection{
-		recoveryMu: &sync.Mutex{},
 		shepherdGate: shepherd.NewShepherdGateForTesting(
 			&stubChatModelForProxy{
 				generateResp: &schema.Message{
@@ -50,37 +52,34 @@ func TestArmPendingRecoveryFromContext_Confirm(t *testing.T) {
 			"zh",
 			&repository.SecurityModelConfig{Model: "MiniMax-M2.5"},
 		),
-		pendingRecovery: &pendingToolCallRecovery{
-			ToolCalls: []openai.ChatCompletionMessageToolCall{
-				{
-					ID:   "call_1",
-					Type: "function",
-					Function: openai.ChatCompletionMessageToolCallFunction{
-						Name:      "delete_email",
-						Arguments: `{"email_id":"m1"}`,
-					},
-				},
-			},
-			RiskReason: "delete action requires confirmation",
-			CreatedAt:  time.Now(),
-		},
 	}
+	prepareTestSecurityChain(t, pp, requestID)
+	pp.storePendingToolCallRecoveryWithIDsForRequest(requestID, []openai.ChatCompletionMessageToolCall{
+		{
+			ID:   "call_1",
+			Type: "function",
+			Function: openai.ChatCompletionMessageToolCallFunction{
+				Name:      "delete_email",
+				Arguments: `{"email_id":"m1"}`,
+			},
+		},
+	}, nil, "", "delete action requires confirmation", "test")
 
-	ok := pp.armPendingRecoveryFromContext(context.Background(), []ConversationMessage{
+	ok := pp.armPendingRecoveryFromContext(context.Background(), requestID, []ConversationMessage{
 		{Role: "assistant", Content: "[ShepherdGate] 状态: NEEDS_CONFIRMATION"},
 		{Role: "user", Content: "确定，继续执行"},
 	})
 	if !ok {
 		t.Fatalf("expected recovery to be armed by security agent confirmation")
 	}
-	if !pp.pendingRecoveryArmed {
+	if !pendingRecoveryArmedForTest(t, pp, requestID) {
 		t.Fatalf("expected pendingRecoveryArmed=true")
 	}
 }
 
 func TestArmPendingRecoveryFromContext_Reject(t *testing.T) {
+	requestID := "req_recovery_reject"
 	pp := &ProxyProtection{
-		recoveryMu: &sync.Mutex{},
 		shepherdGate: shepherd.NewShepherdGateForTesting(
 			&stubChatModelForProxy{
 				generateResp: &schema.Message{
@@ -90,28 +89,26 @@ func TestArmPendingRecoveryFromContext_Reject(t *testing.T) {
 			"zh",
 			&repository.SecurityModelConfig{Model: "MiniMax-M2.5"},
 		),
-		pendingRecovery: &pendingToolCallRecovery{
-			ToolCalls: []openai.ChatCompletionMessageToolCall{
-				{ID: "call_1"},
-			},
-			CreatedAt: time.Now(),
-		},
 	}
+	prepareTestSecurityChain(t, pp, requestID)
+	pp.storePendingToolCallRecoveryWithIDsForRequest(requestID, []openai.ChatCompletionMessageToolCall{{ID: "call_1"}}, nil, "", "risk", "test")
 
-	ok := pp.armPendingRecoveryFromContext(context.Background(), []ConversationMessage{
+	ok := pp.armPendingRecoveryFromContext(context.Background(), requestID, []ConversationMessage{
 		{Role: "assistant", Content: "[ShepherdGate] 状态: NEEDS_CONFIRMATION"},
 		{Role: "user", Content: "取消，不要执行"},
 	})
 	if ok {
 		t.Fatalf("expected reject to prevent arming")
 	}
-	if pp.pendingRecovery != nil {
+	if pendingRecoveryForTest(t, pp, requestID) != nil {
 		t.Fatalf("expected pending recovery cleared on reject")
 	}
 }
 
 func TestPendingToolRecoveryArming(t *testing.T) {
 	pp := &ProxyProtection{}
+	requestID := "req_pending_recovery"
+	prepareTestSecurityChain(t, pp, requestID)
 
 	toolCalls := []openai.ChatCompletionMessageToolCall{
 		{
@@ -123,41 +120,35 @@ func TestPendingToolRecoveryArming(t *testing.T) {
 			},
 		},
 	}
-	pp.storePendingToolCallRecovery(toolCalls, "assistant tool call", "risk reason", "non_stream")
+	pp.storePendingToolCallRecoveryForRequest(requestID, toolCalls, "assistant tool call", "risk reason", "non_stream")
 
 	// Verify recovery is stored but not armed
-	pp.ensureRecoveryMutex()
-	pp.recoveryMu.Lock()
-	if pp.pendingRecovery == nil {
+	if pendingRecoveryForTest(t, pp, requestID) == nil {
 		t.Fatalf("expected pending recovery to be stored")
 	}
-	if pp.pendingRecoveryArmed {
+	if pendingRecoveryArmedForTest(t, pp, requestID) {
 		t.Fatalf("expected pending recovery NOT to be armed yet")
 	}
-	pp.recoveryMu.Unlock()
 
 	// Simulate arming (user confirmation would trigger this)
-	pp.recoveryMu.Lock()
-	pp.pendingRecoveryArmed = true
-	pp.recoveryMu.Unlock()
+	chainID := pp.chainIDForRequest(requestID)
+	pp.chainMu.Lock()
+	pp.chains[chainID].PendingRecoveryArmed = true
+	pp.chainMu.Unlock()
 
 	// Verify armed state
-	pp.recoveryMu.Lock()
-	armed := pp.pendingRecoveryArmed
-	pp.recoveryMu.Unlock()
+	armed := pendingRecoveryArmedForTest(t, pp, requestID)
 	if !armed {
 		t.Fatalf("expected pending recovery to be armed")
 	}
 
 	// Clear recovery (as onRequest would do when armed)
-	pp.clearPendingToolCallRecovery()
+	pp.clearPendingToolCallRecoveryForRequest(requestID)
 
-	pp.recoveryMu.Lock()
-	if pp.pendingRecovery != nil {
+	if pendingRecoveryForTest(t, pp, requestID) != nil {
 		t.Fatalf("expected pending recovery to be cleared")
 	}
-	if pp.pendingRecoveryArmed {
+	if pendingRecoveryArmedForTest(t, pp, requestID) {
 		t.Fatalf("expected armed flag to be cleared")
 	}
-	pp.recoveryMu.Unlock()
 }

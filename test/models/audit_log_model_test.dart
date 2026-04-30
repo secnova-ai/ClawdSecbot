@@ -1,10 +1,14 @@
-﻿import 'package:bot_sec_manager/models/audit_log_model.dart';
+import 'package:bot_sec_manager/models/audit_log_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('AuditMessage', () {
     test('serializes to and from JSON round-trip', () {
-      final original = AuditMessage(index: 0, role: 'user', content: 'Hello, world!');
+      final original = AuditMessage(
+        index: 0,
+        role: 'user',
+        content: 'Hello, world!',
+      );
       final json = original.toJson();
       final restored = AuditMessage.fromJson(json);
       expect(restored.index, 0);
@@ -44,7 +48,7 @@ void main() {
   });
 
   group('AuditLog', () {
-    AuditLog _buildLog({String action = 'ALLOW', String? riskLevel}) {
+    AuditLog buildLog({String action = 'ALLOW', String? riskLevel}) {
       return AuditLog(
         id: 'log-001',
         timestamp: DateTime(2026, 1, 15, 10, 30),
@@ -73,7 +77,7 @@ void main() {
     }
 
     test('serializes to and from JSON round-trip', () {
-      final original = _buildLog(riskLevel: 'DANGEROUS');
+      final original = buildLog(riskLevel: 'DANGEROUS');
       final json = original.toJson();
       final restored = AuditLog.fromJson(json);
 
@@ -101,25 +105,37 @@ void main() {
     });
 
     test('riskLevelColor maps correctly', () {
-      expect(_buildLog(riskLevel: 'CRITICAL').riskLevelColor, RiskLevelColor.critical);
-      expect(_buildLog(riskLevel: 'DANGEROUS').riskLevelColor, RiskLevelColor.dangerous);
-      expect(_buildLog(riskLevel: 'SUSPICIOUS').riskLevelColor, RiskLevelColor.suspicious);
-      expect(_buildLog(riskLevel: 'SAFE').riskLevelColor, RiskLevelColor.safe);
-      expect(_buildLog(riskLevel: null).riskLevelColor, RiskLevelColor.safe);
+      expect(
+        buildLog(riskLevel: 'CRITICAL').riskLevelColor,
+        RiskLevelColor.critical,
+      );
+      expect(
+        buildLog(riskLevel: 'DANGEROUS').riskLevelColor,
+        RiskLevelColor.dangerous,
+      );
+      expect(
+        buildLog(riskLevel: 'SUSPICIOUS').riskLevelColor,
+        RiskLevelColor.suspicious,
+      );
+      expect(buildLog(riskLevel: 'SAFE').riskLevelColor, RiskLevelColor.safe);
+      expect(buildLog(riskLevel: null).riskLevelColor, RiskLevelColor.safe);
     });
 
     test('actionDisplayText returns correct Chinese text', () {
-      expect(_buildLog(action: 'BLOCK').actionDisplayText, '已拦截');
-      expect(_buildLog(action: 'HARD_BLOCK').actionDisplayText, '强制拦截');
-      expect(_buildLog(action: 'WARN').actionDisplayText, '警告');
-      expect(_buildLog(action: 'ALLOW').actionDisplayText, '允许');
+      expect(buildLog(action: 'BLOCK').actionDisplayText, '已拦截');
+      expect(buildLog(action: 'HARD_BLOCK').actionDisplayText, '强制拦截');
+      expect(buildLog(action: 'WARN').actionDisplayText, '警告');
+      expect(buildLog(action: 'ALLOW').actionDisplayText, '允许');
     });
 
     test('handles missing optional fields gracefully', () {
       final json = {
-        'id': 'id1', 'timestamp': '2026-01-01T00:00:00Z',
-        'request_id': 'r1', 'request_content': 'text',
-        'action': 'ALLOW', 'duration_ms': 100,
+        'id': 'id1',
+        'timestamp': '2026-01-01T00:00:00Z',
+        'request_id': 'r1',
+        'request_content': 'text',
+        'action': 'ALLOW',
+        'duration_ms': 100,
       };
       final log = AuditLog.fromJson(json);
       expect(log.assetName, '');
@@ -131,9 +147,12 @@ void main() {
 
     test('_parseMessages handles JSON string input', () {
       final json = {
-        'id': 'id1', 'timestamp': '2026-01-01T00:00:00Z',
-        'request_id': 'r1', 'request_content': '',
-        'action': 'ALLOW', 'duration_ms': 0,
+        'id': 'id1',
+        'timestamp': '2026-01-01T00:00:00Z',
+        'request_id': 'r1',
+        'request_content': '',
+        'action': 'ALLOW',
+        'duration_ms': 0,
         'messages': '[{"index":0,"role":"user","content":"hi"}]',
       };
       final log = AuditLog.fromJson(json);
@@ -143,9 +162,12 @@ void main() {
 
     test('_parseMessages handles malformed string gracefully', () {
       final json = {
-        'id': 'id1', 'timestamp': '2026-01-01T00:00:00Z',
-        'request_id': 'r1', 'request_content': '',
-        'action': 'ALLOW', 'duration_ms': 0,
+        'id': 'id1',
+        'timestamp': '2026-01-01T00:00:00Z',
+        'request_id': 'r1',
+        'request_content': '',
+        'action': 'ALLOW',
+        'duration_ms': 0,
         'messages': 'not-json',
       };
       final log = AuditLog.fromJson(json);
@@ -158,9 +180,12 @@ void main() {
       final json = {
         'logs': [
           {
-            'id': 'id1', 'timestamp': '2026-01-01T00:00:00Z',
-            'request_id': 'r1', 'request_content': '',
-            'action': 'ALLOW', 'duration_ms': 0,
+            'id': 'id1',
+            'timestamp': '2026-01-01T00:00:00Z',
+            'request_id': 'r1',
+            'request_content': '',
+            'action': 'ALLOW',
+            'duration_ms': 0,
           },
         ],
         'total': 1,

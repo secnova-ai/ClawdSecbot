@@ -9,10 +9,10 @@ Load this skill when package managers or dependency files are involved (`npm`, `
 
 ## Tool usage policy
 Tool usage is optional, not mandatory. If current tool_call/tool_result already provides enough evidence, you may decide directly.
-Only call extra tools when context is insufficient.
+Only call extra tools when evidence is insufficient.
 
 ## Analysis workflow
-1. Extract package operations and file changes from `get_recent_tool_calls`.
+1. Extract package operations and file changes from current `tool_calls` and `tool_results`.
 2. Verify package names/sources/versions against user intent.
 3. Inspect dependency files for risky scripts and broad version drift.
 4. Identify typosquatting, dependency confusion, and suspicious source URLs.
@@ -45,4 +45,3 @@ Only call extra tools when context is insufficient.
 - If hooks execute shell commands, load `script_execution_guard`.
 - If dependency scripts access sensitive files, load `file_access_guard`.
 - If dependency behavior transmits data externally, load `data_exfiltration_guard`.
-

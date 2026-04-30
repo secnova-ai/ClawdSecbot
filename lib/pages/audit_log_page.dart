@@ -15,6 +15,7 @@ import '../utils/app_fonts.dart';
 import '../utils/app_logger.dart';
 import '../utils/audit_log_export_helper.dart';
 import '../utils/runtime_platform.dart';
+import '../utils/security_event_labels.dart';
 
 part 'audit_log_page_detail_ext.dart';
 
@@ -1199,8 +1200,13 @@ class _AuditLogPageState extends State<AuditLogPage>
 
   String _buildEventSectionText(List<SecurityEvent> events) => events
       .map((e) {
-        final parts = ['[${e.eventType}] ${e.actionDesc}'];
-        if (e.riskType.isNotEmpty) parts.add('Risk: ${e.riskType}');
+        final l10n = AppLocalizations.of(context)!;
+        final parts = [
+          '[${localizeSecurityEventType(e.eventType, l10n)}] ${localizeSecurityActionDesc(e.actionDesc, l10n)}',
+        ];
+        if (e.riskType.isNotEmpty) {
+          parts.add('Risk: ${localizeSecurityRiskType(e.riskType, l10n)}');
+        }
         if (e.detail.isNotEmpty) parts.add('Detail: ${e.detail}');
         parts.add(
           'Source: ${e.source}  Time: ${e.timestamp.toIso8601String()}',

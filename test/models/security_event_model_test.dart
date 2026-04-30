@@ -1,9 +1,9 @@
-﻿import 'package:bot_sec_manager/models/security_event_model.dart';
+import 'package:bot_sec_manager/models/security_event_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('SecurityEvent', () {
-    SecurityEvent _buildEvent({
+    SecurityEvent buildEvent({
       String eventType = 'tool_execution',
       String source = 'react_agent',
     }) {
@@ -22,7 +22,7 @@ void main() {
     }
 
     test('serializes to and from JSON round-trip', () {
-      final original = _buildEvent();
+      final original = buildEvent();
       final json = original.toJson();
       final restored = SecurityEvent.fromJson(json);
 
@@ -38,28 +38,31 @@ void main() {
     });
 
     test('isBlocked returns true for blocked event type', () {
-      expect(_buildEvent(eventType: 'blocked').isBlocked, true);
-      expect(_buildEvent(eventType: 'tool_execution').isBlocked, false);
+      expect(buildEvent(eventType: 'blocked').isBlocked, true);
+      expect(buildEvent(eventType: 'tool_execution').isBlocked, false);
     });
 
     test('isToolExecution returns true for tool_execution type', () {
-      expect(_buildEvent(eventType: 'tool_execution').isToolExecution, true);
-      expect(_buildEvent(eventType: 'blocked').isToolExecution, false);
+      expect(buildEvent(eventType: 'tool_execution').isToolExecution, true);
+      expect(buildEvent(eventType: 'blocked').isToolExecution, false);
     });
 
     test('isNeedsConfirmation returns true for needs_confirmation type', () {
-      expect(_buildEvent(eventType: 'needs_confirmation').isNeedsConfirmation, true);
-      expect(_buildEvent(eventType: 'blocked').isNeedsConfirmation, false);
+      expect(
+        buildEvent(eventType: 'needs_confirmation').isNeedsConfirmation,
+        true,
+      );
+      expect(buildEvent(eventType: 'blocked').isNeedsConfirmation, false);
     });
 
     test('isFromReactAgent returns true when source is react_agent', () {
-      expect(_buildEvent(source: 'react_agent').isFromReactAgent, true);
-      expect(_buildEvent(source: 'heuristic').isFromReactAgent, false);
+      expect(buildEvent(source: 'react_agent').isFromReactAgent, true);
+      expect(buildEvent(source: 'heuristic').isFromReactAgent, false);
     });
 
     test('isFromHeuristic returns true when source is heuristic', () {
-      expect(_buildEvent(source: 'heuristic').isFromHeuristic, true);
-      expect(_buildEvent(source: 'react_agent').isFromHeuristic, false);
+      expect(buildEvent(source: 'heuristic').isFromHeuristic, true);
+      expect(buildEvent(source: 'react_agent').isFromHeuristic, false);
     });
 
     test('handles missing fields with defaults', () {
@@ -83,7 +86,8 @@ void main() {
 
     test('_parseTimestamp parses valid ISO 8601 string', () {
       final restored = SecurityEvent.fromJson({
-        'id': 'test', 'timestamp': '2026-03-10T14:30:00Z',
+        'id': 'test',
+        'timestamp': '2026-03-10T14:30:00Z',
       });
       expect(restored.timestamp.year, 2026);
       expect(restored.timestamp.month, 3);

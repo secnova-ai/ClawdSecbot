@@ -35,22 +35,23 @@ type BotModelConfigData struct {
 // 注意：CustomSecurityPrompt 已废弃，不再使用
 // BotModelConfig 作为JSON字段嵌入，存储代理转发的目标LLM配置
 type ProtectionConfig struct {
-	AssetName               string              `json:"asset_name"`
-	AssetID                 string              `json:"asset_id"`
-	InheritsDefaultPolicy   bool                `json:"inherits_default_policy"`
-	Enabled                 bool                `json:"enabled"`
-	AuditOnly               bool                `json:"audit_only"`
-	SandboxEnabled          bool                `json:"sandbox_enabled"`
-	GatewayBinaryPath       string              `json:"gateway_binary_path,omitempty"`
-	GatewayConfigPath       string              `json:"gateway_config_path,omitempty"`
-	SingleSessionTokenLimit int                 `json:"single_session_token_limit"`
-	DailyTokenLimit         int                 `json:"daily_token_limit"`
-	PathPermission          string              `json:"path_permission,omitempty"`
-	NetworkPermission       string              `json:"network_permission,omitempty"`
-	ShellPermission         string              `json:"shell_permission,omitempty"`
-	BotModelConfig          *BotModelConfigData `json:"bot_model_config,omitempty"`
-	CreatedAt               string              `json:"created_at,omitempty"`
-	UpdatedAt               string              `json:"updated_at,omitempty"`
+	AssetName                 string              `json:"asset_name"`
+	AssetID                   string              `json:"asset_id"`
+	InheritsDefaultPolicy     bool                `json:"inherits_default_policy"`
+	Enabled                   bool                `json:"enabled"`
+	AuditOnly                 bool                `json:"audit_only"`
+	SandboxEnabled            bool                `json:"sandbox_enabled"`
+	UserInputDetectionEnabled bool                `json:"user_input_detection_enabled"`
+	GatewayBinaryPath         string              `json:"gateway_binary_path,omitempty"`
+	GatewayConfigPath         string              `json:"gateway_config_path,omitempty"`
+	SingleSessionTokenLimit   int                 `json:"single_session_token_limit"`
+	DailyTokenLimit           int                 `json:"daily_token_limit"`
+	PathPermission            string              `json:"path_permission,omitempty"`
+	NetworkPermission         string              `json:"network_permission,omitempty"`
+	ShellPermission           string              `json:"shell_permission,omitempty"`
+	BotModelConfig            *BotModelConfigData `json:"bot_model_config,omitempty"`
+	CreatedAt                 string              `json:"created_at,omitempty"`
+	UpdatedAt                 string              `json:"updated_at,omitempty"`
 }
 
 // ProtectionStatistics 保护统计记录
@@ -207,6 +208,10 @@ func (r *ProtectionRepository) SaveProtectionConfig(config *ProtectionConfig) er
 	if config.SandboxEnabled {
 		sandboxEnabled = 1
 	}
+	userInputDetectionEnabled := 0
+	if config.UserInputDetectionEnabled {
+		userInputDetectionEnabled = 1
+	}
 	inheritsDefaultPolicy := 0
 	if config.InheritsDefaultPolicy {
 		inheritsDefaultPolicy = 1
@@ -224,12 +229,12 @@ func (r *ProtectionRepository) SaveProtectionConfig(config *ProtectionConfig) er
 
 	_, err := r.db.Exec(`
 		INSERT OR REPLACE INTO protection_config 
-		(asset_name, asset_id, inherits_default_policy, enabled, audit_only, sandbox_enabled, gateway_binary_path, gateway_config_path,
+		(asset_name, asset_id, inherits_default_policy, enabled, audit_only, sandbox_enabled, user_input_detection_enabled, gateway_binary_path, gateway_config_path,
 		 custom_security_prompt, single_session_token_limit, daily_token_limit,
 		 path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, config.AssetName, config.AssetID, inheritsDefaultPolicy, enabled, auditOnly, sandboxEnabled,
-		config.GatewayBinaryPath, config.GatewayConfigPath,
+		userInputDetectionEnabled, config.GatewayBinaryPath, config.GatewayConfigPath,
 		"", config.SingleSessionTokenLimit, config.DailyTokenLimit,
 		config.PathPermission, config.NetworkPermission, config.ShellPermission,
 		botModelConfigJSON, config.CreatedAt, config.UpdatedAt)
@@ -251,7 +256,7 @@ func (r *ProtectionRepository) GetProtectionConfig(assetID string) (*ProtectionC
 		return nil, fmt.Errorf("asset_id is required")
 	}
 
-	row := r.db.QueryRow(`SELECT asset_name, asset_id, inherits_default_policy, enabled, audit_only, sandbox_enabled, 
+	row := r.db.QueryRow(`SELECT asset_name, asset_id, inherits_default_policy, enabled, audit_only, sandbox_enabled, user_input_detection_enabled,
 		gateway_binary_path, gateway_config_path, custom_security_prompt, 
 		single_session_token_limit, daily_token_limit, 
 		path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at
@@ -279,7 +284,7 @@ func (r *ProtectionRepository) GetEnabledProtectionConfigs() ([]*ProtectionConfi
 		return nil, fmt.Errorf("database not initialized")
 	}
 
-	rows, err := r.db.Query(`SELECT asset_name, asset_id, inherits_default_policy, enabled, audit_only, sandbox_enabled, 
+	rows, err := r.db.Query(`SELECT asset_name, asset_id, inherits_default_policy, enabled, audit_only, sandbox_enabled, user_input_detection_enabled,
 		gateway_binary_path, gateway_config_path, custom_security_prompt, 
 		single_session_token_limit, daily_token_limit, 
 		path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at
@@ -352,12 +357,13 @@ func buildProtectionConfigFingerprint(config *ProtectionConfig) string {
 	}
 
 	return fmt.Sprintf(
-		"%s|%s|%t|%t|%t|%s|%s|%d|%d|%s|%s|%s|%s|%s|%s",
+		"%s|%s|%t|%t|%t|%t|%s|%s|%d|%d|%s|%s|%s|%s|%s|%s",
 		config.AssetID,
 		config.AssetName,
 		config.Enabled,
 		config.AuditOnly,
 		config.SandboxEnabled,
+		config.UserInputDetectionEnabled,
 		config.GatewayBinaryPath,
 		config.GatewayConfigPath,
 		config.SingleSessionTokenLimit,
@@ -377,7 +383,7 @@ func (r *ProtectionRepository) GetAllProtectionConfigs() ([]*ProtectionConfig, e
 		return nil, fmt.Errorf("database not initialized")
 	}
 
-	rows, err := r.db.Query(`SELECT asset_name, asset_id, inherits_default_policy, enabled, audit_only, sandbox_enabled, 
+	rows, err := r.db.Query(`SELECT asset_name, asset_id, inherits_default_policy, enabled, audit_only, sandbox_enabled, user_input_detection_enabled,
 		gateway_binary_path, gateway_config_path, custom_security_prompt,
 		single_session_token_limit, daily_token_limit,
 		path_permission, network_permission, shell_permission, bot_model_config, created_at, updated_at
@@ -542,37 +548,30 @@ func (r *ProtectionRepository) ClearProtectionStatistics(assetID string) error {
 
 // --- Shepherd Rules ---
 
-// GetShepherdSensitiveActions 获取指定资产实例的Shepherd敏感操作列表
-func (r *ProtectionRepository) GetShepherdSensitiveActions(assetName string, assetID string) ([]string, bool, error) {
+// GetShepherdRulesRaw returns the stored Shepherd rules JSON for an asset.
+func (r *ProtectionRepository) GetShepherdRulesRaw(assetID string) (string, bool, error) {
 	if r.db == nil {
-		return nil, false, fmt.Errorf("database not initialized")
+		return "", false, fmt.Errorf("database not initialized")
 	}
-	_ = assetName
 	assetID = strings.TrimSpace(assetID)
 	if assetID == "" {
-		return nil, false, fmt.Errorf("asset_id is required")
+		return "", false, fmt.Errorf("asset_id is required")
 	}
-
 	row := r.db.QueryRow(`SELECT sensitive_actions FROM shepherd_rules WHERE asset_id = ?`, assetID)
-
 	var raw sql.NullString
 	err := row.Scan(&raw)
-	if err == sql.ErrNoRows || !raw.Valid || raw.String == "" {
-		return []string{}, false, nil
+	if err == sql.ErrNoRows || !raw.Valid || strings.TrimSpace(raw.String) == "" {
+		return "", false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to get shepherd rules: %w", err)
+		return "", false, fmt.Errorf("failed to get shepherd rules: %w", err)
 	}
-
-	var actions []string
-	if err := json.Unmarshal([]byte(raw.String), &actions); err != nil {
-		return []string{}, true, nil
-	}
-	return normalizeShepherdActions(actions), true, nil
+	return raw.String, true, nil
 }
 
-// SaveShepherdSensitiveActions 保存指定资产实例的Shepherd敏感操作列表
-func (r *ProtectionRepository) SaveShepherdSensitiveActions(assetName, assetID string, actions []string) error {
+// SaveShepherdRulesRaw saves a full Shepherd rules JSON object in the existing
+// shepherd_rules storage column.
+func (r *ProtectionRepository) SaveShepherdRulesRaw(assetName, assetID, rulesJSON string) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
@@ -580,26 +579,22 @@ func (r *ProtectionRepository) SaveShepherdSensitiveActions(assetName, assetID s
 	if assetID == "" {
 		return fmt.Errorf("asset_id is required")
 	}
-
-	jsonStr, err := json.Marshal(normalizeShepherdActions(actions))
-	if err != nil {
-		return fmt.Errorf("failed to marshal shepherd rules: %w", err)
+	if !json.Valid([]byte(rulesJSON)) {
+		return fmt.Errorf("shepherd rules json is invalid")
 	}
-
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = r.db.Exec(`
+	_, err := r.db.Exec(`
 		INSERT OR REPLACE INTO shepherd_rules (asset_id, asset_name, sensitive_actions, updated_at)
 		VALUES (?, ?, ?, ?)
-	`, assetID, assetName, string(jsonStr), now)
+	`, assetID, assetName, strings.TrimSpace(rulesJSON), now)
 	if err != nil {
 		return fmt.Errorf("failed to save shepherd rules: %w", err)
 	}
-
 	return nil
 }
 
-// DeleteShepherdSensitiveActions 删除指定资产实例的Shepherd敏感操作配置。
-func (r *ProtectionRepository) DeleteShepherdSensitiveActions(assetID string) error {
+// DeleteShepherdRules deletes Shepherd rules for the specified asset instance.
+func (r *ProtectionRepository) DeleteShepherdRules(assetID string) error {
 	if r.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
@@ -613,23 +608,6 @@ func (r *ProtectionRepository) DeleteShepherdSensitiveActions(assetID string) er
 		return fmt.Errorf("failed to delete shepherd rules: %w", err)
 	}
 	return nil
-}
-
-func normalizeShepherdActions(actions []string) []string {
-	seen := make(map[string]struct{}, len(actions))
-	normalized := make([]string, 0, len(actions))
-	for _, action := range actions {
-		trimmed := strings.TrimSpace(action)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		normalized = append(normalized, trimmed)
-	}
-	return normalized
 }
 
 // --- ClearAllData ---
@@ -694,13 +672,13 @@ func (r *ProtectionRepository) SaveHomeDirectoryPermission(authorized bool, auth
 // scanProtectionConfig 从单行查询结果扫描ProtectionConfig
 func scanProtectionConfig(row *sql.Row) (*ProtectionConfig, error) {
 	var config ProtectionConfig
-	var inheritsDefaultPolicy, enabled, auditOnly, sandboxEnabled int
+	var inheritsDefaultPolicy, enabled, auditOnly, sandboxEnabled, userInputDetectionEnabled int
 	var gatewayBinaryPath, gatewayConfigPath, customSecurityPrompt sql.NullString
 	var pathPermission, networkPermission, shellPermission sql.NullString
 	var botModelConfigJSON sql.NullString
 	var createdAt, updatedAt sql.NullString
 
-	err := row.Scan(&config.AssetName, &config.AssetID, &inheritsDefaultPolicy, &enabled, &auditOnly, &sandboxEnabled,
+	err := row.Scan(&config.AssetName, &config.AssetID, &inheritsDefaultPolicy, &enabled, &auditOnly, &sandboxEnabled, &userInputDetectionEnabled,
 		&gatewayBinaryPath, &gatewayConfigPath, &customSecurityPrompt,
 		&config.SingleSessionTokenLimit, &config.DailyTokenLimit,
 		&pathPermission, &networkPermission, &shellPermission,
@@ -713,6 +691,7 @@ func scanProtectionConfig(row *sql.Row) (*ProtectionConfig, error) {
 	config.Enabled = enabled == 1
 	config.AuditOnly = auditOnly == 1
 	config.SandboxEnabled = sandboxEnabled == 1
+	config.UserInputDetectionEnabled = userInputDetectionEnabled == 1
 	config.GatewayBinaryPath = gatewayBinaryPath.String
 	config.GatewayConfigPath = gatewayConfigPath.String
 	// customSecurityPrompt is deprecated and ignored
@@ -736,13 +715,13 @@ func scanProtectionConfig(row *sql.Row) (*ProtectionConfig, error) {
 // scanProtectionConfigFromRows 从多行查询结果扫描ProtectionConfig
 func scanProtectionConfigFromRows(rows *sql.Rows) (*ProtectionConfig, error) {
 	var config ProtectionConfig
-	var inheritsDefaultPolicy, enabled, auditOnly, sandboxEnabled int
+	var inheritsDefaultPolicy, enabled, auditOnly, sandboxEnabled, userInputDetectionEnabled int
 	var gatewayBinaryPath, gatewayConfigPath, customSecurityPrompt sql.NullString
 	var pathPermission, networkPermission, shellPermission sql.NullString
 	var botModelConfigJSON sql.NullString
 	var createdAt, updatedAt sql.NullString
 
-	err := rows.Scan(&config.AssetName, &config.AssetID, &inheritsDefaultPolicy, &enabled, &auditOnly, &sandboxEnabled,
+	err := rows.Scan(&config.AssetName, &config.AssetID, &inheritsDefaultPolicy, &enabled, &auditOnly, &sandboxEnabled, &userInputDetectionEnabled,
 		&gatewayBinaryPath, &gatewayConfigPath, &customSecurityPrompt,
 		&config.SingleSessionTokenLimit, &config.DailyTokenLimit,
 		&pathPermission, &networkPermission, &shellPermission,
@@ -755,6 +734,7 @@ func scanProtectionConfigFromRows(rows *sql.Rows) (*ProtectionConfig, error) {
 	config.Enabled = enabled == 1
 	config.AuditOnly = auditOnly == 1
 	config.SandboxEnabled = sandboxEnabled == 1
+	config.UserInputDetectionEnabled = userInputDetectionEnabled == 1
 	config.GatewayBinaryPath = gatewayBinaryPath.String
 	config.GatewayConfigPath = gatewayConfigPath.String
 	// customSecurityPrompt is deprecated and ignored

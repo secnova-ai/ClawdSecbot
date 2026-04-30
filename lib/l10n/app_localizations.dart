@@ -3362,6 +3362,18 @@ abstract class AppLocalizations {
   /// **'不进行风险研判，仅记录审计日志'**
   String get auditOnlyModeDesc;
 
+  /// No description provided for @userInputDetection.
+  ///
+  /// In zh, this message translates to:
+  /// **'用户输入检测'**
+  String get userInputDetection;
+
+  /// No description provided for @userInputDetectionDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'转发前分析用户消息。关闭后可减少安全模型 token 消耗。'**
+  String get userInputDetectionDesc;
+
   /// No description provided for @auditOnlyModeShort.
   ///
   /// In zh, this message translates to:

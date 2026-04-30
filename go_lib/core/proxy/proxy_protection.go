@@ -48,6 +48,7 @@ type ProxyProtection struct {
 	// targetProviderName is the provider used to update openclaw.json after listen.
 	targetProviderName string
 	shepherdGate       *shepherd.ShepherdGate // ShepherdGate security module
+	securityDetector   securityDetector       // Pluggable stage detector.
 	toolValidator      *ToolValidator         // Tool validation for pre-check
 
 	// Config fields protected by configMu
@@ -56,21 +57,19 @@ type ProxyProtection struct {
 	singleSessionTokenLimit int
 	dailyTokenLimit         int
 	initialDailyUsage       int
+	userInputDetection      bool
+	userInputDetectionSet   bool
 
-	// Stream buffer for accumulating chunks until tool call
-	streamBuffer *StreamBuffer
+	// ShepherdGate runtime chain isolation state.
+	chainMu          sync.Mutex
+	chains           map[string]*SecurityChainState
+	requestToChain   map[string]securityChainBinding
+	toolCallToChains map[string]map[string]securityChainBinding
+	requestStates    map[string]*RequestRuntimeState
 
-	// Context for ShepherdGate (last request messages)
-	lastContextMessages    []ConversationMessage
-	lastUserMessageContent string // 跨请求持久化的最后一条用户消息，防止上下文压缩丢失
-
-	// Tool call recovery state (when blocked tool_calls need restoration after user confirmation)
-	recoveryMu           *sync.Mutex
-	pendingRecovery      *pendingToolCallRecovery
-	pendingRecoveryArmed bool
-	sandboxBlockSeenMu   sync.Mutex
-	sandboxBlockSeen     map[string]struct{}
-	sandboxBlockOrder    []string
+	sandboxBlockSeenMu sync.Mutex
+	sandboxBlockSeen   map[string]struct{}
+	sandboxBlockOrder  []string
 
 	// Server management
 	listener net.Listener
@@ -113,6 +112,7 @@ type ProxyProtection struct {
 	auditTokens           int
 	auditPromptTokens     int
 	auditCompletionTokens int
+	baselineAuditTokens   int
 	totalToolCalls        int
 	requestCount          int
 	metricsMu             sync.Mutex
@@ -441,30 +441,43 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 
 	// ==================== Security Model Config (for ShepherdGate) ====================
 	// ShepherdGate uses the security model's config to create its own ChatModel for risk analysis.
-	if securityModel == nil {
+	detectionBackend := normalizedDetectionBackend(runtimeValue(runtime, "DetectionBackend", os.Getenv("BOTSEC_DETECTION_BACKEND")))
+	if securityModel == nil && detectionBackend == detectionBackendLLMAgent {
 		return nil, fmt.Errorf("security model config is required: ShepherdGate needs security model for risk analysis")
 	}
 	reactSkillCfg := buildReActSkillRuntimeConfig(runtime)
-	shepherdGate, err := shepherd.NewShepherdGateWithRuntime(securityModel, reactSkillCfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create shepherd gate: %w", err)
+	var shepherdGate *shepherd.ShepherdGate
+	var gateErr error
+	if detectionBackend == detectionBackendLLMAgent {
+		shepherdGate, gateErr = shepherd.NewShepherdGateWithRuntime(securityModel, reactSkillCfg)
+		if gateErr != nil {
+			return nil, fmt.Errorf("failed to create shepherd gate: %w", gateErr)
+		}
+	} else {
+		shepherdGate, gateErr = shepherd.NewShepherdGateWithoutModel()
+		if gateErr != nil {
+			return nil, fmt.Errorf("failed to create model-free shepherd gate: %w", gateErr)
+		}
 	}
 	shepherdGate.SetAssetContext(protectionConfig.AssetName, protectionConfig.AssetID)
-	if persistedActions, found, repoErr := repository.NewProtectionRepository(nil).GetShepherdSensitiveActions(protectionConfig.AssetName, protectionConfig.AssetID); repoErr != nil {
+	if persistedRulesJSON, found, repoErr := repository.NewProtectionRepository(nil).GetShepherdRulesRaw(protectionConfig.AssetID); repoErr != nil {
 		logging.Warning("[ProxyProtection] Failed to load persisted shepherd rules for asset_id=%s: %v", protectionConfig.AssetID, repoErr)
 	} else if found {
-		shepherdGate.UpdateUserRules(persistedActions)
-	}
-	logging.Info("[ProxyProtection] Security model: Provider=%s, Model=%s", securityModel.Provider, securityModel.Model)
-	if protectionConfig.AssetName != "" {
-		repo := repository.NewProtectionRepository(nil)
-		userRules, found, err := repo.GetShepherdSensitiveActions(protectionConfig.AssetName, protectionConfig.AssetID)
-		if err != nil {
-			logging.Warning("[ProxyProtection] Failed to load instance user rules: asset=%s id=%s err=%v",
-				protectionConfig.AssetName, protectionConfig.AssetID, err)
-		} else if found {
-			shepherdGate.UpdateUserRules(userRules)
+		if persistedRules, err := shepherd.DecodeUserRulesJSON([]byte(persistedRulesJSON)); err != nil {
+			logging.Warning("[ProxyProtection] Failed to decode persisted shepherd rules for asset_id=%s: %v", protectionConfig.AssetID, err)
+		} else {
+			shepherdGate.UpdateUserRulesConfig(persistedRules)
 		}
+	}
+	if securityModel != nil {
+		logging.Info("[ProxyProtection] Security detector: backend=%s, security_model_provider=%s, security_model=%s", detectionBackend, securityModel.Provider, securityModel.Model)
+	} else {
+		logging.Info("[ProxyProtection] Security detector: backend=%s, security_model=none", detectionBackend)
+	}
+
+	securityDetector, err := newSecurityDetector(runtime, shepherdGate, assetName, assetID)
+	if err != nil {
+		return nil, err
 	}
 
 	// ==================== Runtime Config ====================
@@ -472,11 +485,15 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 	singleSessionTokenLimit := 0
 	dailyTokenLimit := 0
 	initialDailyUsage := 0
+	userInputDetection := true
 	if runtime != nil {
 		auditOnly = runtime.AuditOnly
 		singleSessionTokenLimit = runtime.SingleSessionTokenLimit
 		dailyTokenLimit = runtime.DailyTokenLimit
 		initialDailyUsage = runtime.InitialDailyTokenUsage
+		if runtime.UserInputDetectionEnabled != nil {
+			userInputDetection = *runtime.UserInputDetectionEnabled
+		}
 	}
 
 	pp := &ProxyProtection{
@@ -488,16 +505,21 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 		assetID:                 strings.TrimSpace(protectionConfig.AssetID),
 		targetProviderName:      string(botProviderName),
 		shepherdGate:            shepherdGate,
+		securityDetector:        securityDetector,
 		toolValidator:           NewToolValidator(logChan),
 		auditOnly:               auditOnly,
 		singleSessionTokenLimit: singleSessionTokenLimit,
 		dailyTokenLimit:         dailyTokenLimit,
 		initialDailyUsage:       initialDailyUsage,
-		streamBuffer:            NewStreamBuffer(),
+		userInputDetection:      userInputDetection,
+		userInputDetectionSet:   true,
 		logChan:                 logChan,
 		records:                 NewRecordStore(),
 		auditTracker:            NewAuditChainTracker(),
-		recoveryMu:              &sync.Mutex{},
+		chains:                  make(map[string]*SecurityChainState),
+		requestToChain:          make(map[string]securityChainBinding),
+		toolCallToChains:        make(map[string]map[string]securityChainBinding),
+		requestStates:           make(map[string]*RequestRuntimeState),
 		requestCtxToID:          make(map[context.Context]requestContextBinding),
 	}
 
@@ -514,9 +536,10 @@ func NewProxyProtectionFromConfig(protectionConfig *ProtectionConfig, logChan ch
 	pp.auditTokens = protectionConfig.BaselineAuditTokens
 	pp.auditPromptTokens = protectionConfig.BaselineAuditPromptTokens
 	pp.auditCompletionTokens = protectionConfig.BaselineAuditCompletionTokens
+	pp.baselineAuditTokens = protectionConfig.BaselineAuditTokens
 
-	logging.Info("[ProxyProtection] Token limits: conversation=%d, daily=%d, initialDailyUsage=%d, auditOnly=%v",
-		pp.singleSessionTokenLimit, pp.dailyTokenLimit, pp.initialDailyUsage, pp.auditOnly)
+	logging.Info("[ProxyProtection] Token limits: conversation=%d, daily=%d, initialDailyUsage=%d, auditOnly=%v, userInputDetection=%v",
+		pp.singleSessionTokenLimit, pp.dailyTokenLimit, pp.initialDailyUsage, pp.auditOnly, pp.userInputDetection)
 
 	// Create filter with callbacks
 	filter := chatmodelrouting.NewCallbackFilter(
@@ -543,6 +566,10 @@ func (pp *ProxyProtection) UpdateProtectionConfig(runtime *ProtectionRuntimeConf
 		pp.singleSessionTokenLimit = runtime.SingleSessionTokenLimit
 		pp.dailyTokenLimit = runtime.DailyTokenLimit
 		pp.initialDailyUsage = runtime.InitialDailyTokenUsage
+		if runtime.UserInputDetectionEnabled != nil {
+			pp.userInputDetection = *runtime.UserInputDetectionEnabled
+			pp.userInputDetectionSet = true
+		}
 	}
 	pp.configMu.Unlock()
 
@@ -556,9 +583,18 @@ func (pp *ProxyProtection) UpdateProtectionConfig(runtime *ProtectionRuntimeConf
 				reactCfg.EnableBuiltinSkills)
 		}
 	}
+	if shouldUpdateSecurityDetector(runtime) {
+		if detector, err := newSecurityDetector(runtime, pp.shepherdGate, pp.assetName, pp.assetID); err != nil {
+			logging.Warning("[ProxyProtection] Failed to update security detector: %v", err)
+		} else {
+			pp.configMu.Lock()
+			pp.securityDetector = detector
+			pp.configMu.Unlock()
+		}
+	}
 
-	pp.sendTerminalLog(fmt.Sprintf("防护配置已更新 - 审计模式: %v, 连续对话限额: %d, 每日限额: %d, 已用: %d",
-		pp.auditOnly, pp.singleSessionTokenLimit, pp.dailyTokenLimit, pp.initialDailyUsage))
+	pp.sendTerminalLog(fmt.Sprintf("防护配置已更新 - 审计模式: %v, 用户输入检测: %v, 连续对话限额: %d, 每日限额: %d, 已用: %d",
+		pp.auditOnly, pp.userInputDetection, pp.singleSessionTokenLimit, pp.dailyTokenLimit, pp.initialDailyUsage))
 }
 
 // UpdateSecurityModelConfig 热更新安全模型（ShepherdGate）的 chat model 配置。
@@ -577,32 +613,36 @@ func (pp *ProxyProtection) UpdateSecurityModelConfig(config *repository.Security
 	return nil
 }
 
-// UpdateShepherdRules updates sensitive action rules for this proxy's ShepherdGate.
-func (pp *ProxyProtection) UpdateShepherdRules(sensitiveActions []string) error {
+// UpdateShepherdUserRules updates the full Shepherd user rule set for this proxy.
+func (pp *ProxyProtection) UpdateShepherdUserRules(rules *shepherd.UserRules) error {
 	if pp.shepherdGate == nil {
 		return fmt.Errorf("ShepherdGate not initialized")
 	}
-	pp.shepherdGate.UpdateUserRules(sensitiveActions)
+	pp.shepherdGate.UpdateUserRulesConfig(rules)
 	return nil
 }
 
 // GetShepherdRules returns current ShepherdGate user rules for this proxy.
 func (pp *ProxyProtection) GetShepherdRules() *shepherd.UserRules {
 	if pp.shepherdGate == nil {
-		return &shepherd.UserRules{SensitiveActions: []string{}}
+		return &shepherd.UserRules{SemanticRules: []shepherd.SemanticRule{}}
 	}
 	return pp.shepherdGate.GetUserRules()
 }
 
-// UpdateUserRules hot-updates instance-level Shepherd rules for the active proxy.
-func (pp *ProxyProtection) UpdateUserRules(sensitiveActions []string) {
+// UpdateUserRulesConfig hot-updates structured Shepherd rules for the active proxy.
+func (pp *ProxyProtection) UpdateUserRulesConfig(rules *shepherd.UserRules) {
 	if pp == nil || pp.shepherdGate == nil {
 		return
 	}
-	pp.shepherdGate.UpdateUserRules(sensitiveActions)
-	pp.sendTerminalLog(fmt.Sprintf("Shepherd user rules updated: %d rule(s)", len(sensitiveActions)))
+	pp.shepherdGate.UpdateUserRulesConfig(rules)
+	count := 0
+	if rules != nil {
+		count = len(rules.SemanticRules)
+	}
+	pp.sendTerminalLog(fmt.Sprintf("Shepherd user rules updated: %d rule(s)", count))
 	logging.Info("[ProxyProtection] Shepherd user rules updated: asset=%s id=%s count=%d",
-		pp.assetName, pp.assetID, len(sensitiveActions))
+		pp.assetName, pp.assetID, count)
 }
 
 // updateBotForwardingProvider hot-swaps the proxy's forwarding provider
@@ -794,21 +834,54 @@ func (pp *ProxyProtection) emitMonitorSecurityDecision(status, reason string, bl
 	})
 }
 
+func buildSecurityEventDetail(detail string, chainMeta securityChainMetadata) string {
+	detail = strings.TrimSpace(detail)
+	if chainMeta.ChainID == "" && chainMeta.Source == "" && !chainMeta.Degraded && chainMeta.DegradeReason == "" {
+		return detail
+	}
+
+	data := make(map[string]interface{})
+	if detail != "" {
+		if err := json.Unmarshal([]byte(detail), &data); err != nil {
+			data = map[string]interface{}{"message": detail}
+		}
+	}
+	if chainMeta.ChainID != "" {
+		data["instruction_chain_id"] = chainMeta.ChainID
+	}
+	if chainMeta.Source != "" {
+		data["chain_source"] = chainMeta.Source
+	}
+	data["chain_degraded"] = chainMeta.Degraded
+	if chainMeta.DegradeReason != "" {
+		data["chain_degrade_reason"] = chainMeta.DegradeReason
+	}
+
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return detail
+	}
+	return string(encoded)
+}
+
 // emitSecurityEvent persists a SecurityEvent for the protection monitor's event panel.
 // Must be co-located with any proxy-level interception (blockedCount++, quota/sandbox
 // block) so the "intercept count" and "event list" remain monotonically consistent.
 // Source is fixed to "react_agent" to align with the existing UI badge taxonomy.
 // Fail-open: persistence failures inside AddSecurityEvent must not block the proxy flow.
 func (pp *ProxyProtection) emitSecurityEvent(requestID, eventType, actionDesc, riskType, detail string) {
+	chainMeta := pp.chainMetadataForRequest(requestID)
+	eventDetail := buildSecurityEventDetail(detail, chainMeta)
 	shepherd.GetSecurityEventBuffer().AddSecurityEvent(shepherd.SecurityEvent{
-		EventType:  eventType,
-		ActionDesc: actionDesc,
-		RiskType:   riskType,
-		Detail:     detail,
-		Source:     "react_agent",
-		AssetName:  pp.assetName,
-		AssetID:    pp.assetID,
-		RequestID:  requestID,
+		EventType:          eventType,
+		ActionDesc:         actionDesc,
+		RiskType:           riskType,
+		Detail:             eventDetail,
+		Source:             "react_agent",
+		AssetName:          pp.assetName,
+		AssetID:            pp.assetID,
+		RequestID:          requestID,
+		InstructionChainID: chainMeta.ChainID,
 	})
 }
 
@@ -877,6 +950,9 @@ func (pp *ProxyProtection) updateTruthRecord(requestID string, update func(r *Tr
 		if r.AssetID == "" {
 			r.AssetID = pp.assetID
 		}
+		if r.InstructionChainID == "" {
+			r.InstructionChainID = pp.chainIDForRequest(requestID)
+		}
 		update(r)
 	})
 	if snapshot != nil {
@@ -897,14 +973,37 @@ func (pp *ProxyProtection) activeRequestID() string {
 	if pp == nil {
 		return ""
 	}
-	if pp.streamBuffer != nil {
-		if reqID := strings.TrimSpace(pp.streamBuffer.RequestID()); reqID != "" {
-			return reqID
-		}
-	}
 	pp.auditMu.Lock()
 	defer pp.auditMu.Unlock()
 	return strings.TrimSpace(pp.currentRequestID)
+}
+
+func (pp *ProxyProtection) createDegradedRequestContext(ctx context.Context, reason string) string {
+	if pp == nil {
+		return ""
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "missing_request_context"
+	}
+	requestID := fmt.Sprintf("req_degraded_%d", time.Now().UnixNano())
+	chain := pp.createSecurityChain(requestID, securityChainSourceTemp, reason)
+	chainID := ""
+	if chain != nil {
+		chainID = chain.ChainID
+	}
+	pp.createRequestRuntimeState(requestID, chainID, nil, nil)
+	if ctx != nil {
+		pp.bindRequestContext(ctx, requestID)
+	}
+	logSecurityFlowWarning(
+		securityFlowStageChain,
+		"request_context_degraded: request_id=%s instruction_chain_id=%s reason=%s",
+		requestID,
+		chainID,
+		reason,
+	)
+	return requestID
 }
 
 func (pp *ProxyProtection) bindRequestContext(ctx context.Context, requestID string) {
@@ -958,11 +1057,16 @@ func (pp *ProxyProtection) requestIDFromContext(ctx context.Context) string {
 		return ""
 	}
 	now := time.Now()
+	reason := "missing_request_context"
 	if ctx != nil {
 		pp.requestCtxMu.Lock()
 		if pp.requestCtxToID != nil {
+			expiredCurrent := false
 			for key, binding := range pp.requestCtxToID {
 				if now.After(binding.ExpiresAt) {
+					if key == ctx {
+						expiredCurrent = true
+					}
 					delete(pp.requestCtxToID, key)
 				}
 			}
@@ -974,16 +1078,16 @@ func (pp *ProxyProtection) requestIDFromContext(ctx context.Context) string {
 					return requestID
 				}
 			}
+			if expiredCurrent {
+				reason = "expired_request_context"
+			}
 		}
 		pp.requestCtxMu.Unlock()
-	}
-	fallbackID := pp.activeRequestID()
-	if fallbackID != "" {
-		logging.Info("[AuditChain] resolve request_id fallback: request_id=%s source=active_request", fallbackID)
 	} else {
-		logging.Info("[AuditChain] resolve request_id failed: source=context_and_active_empty")
+		reason = "nil_request_context"
 	}
-	return fallbackID
+	logging.Warning("[AuditChain] resolve request_id degraded: reason=%s", reason)
+	return pp.createDegradedRequestContext(ctx, reason)
 }
 
 func (pp *ProxyProtection) sendTerminalLog(message string) {
@@ -1038,13 +1142,14 @@ func (pp *ProxyProtection) markSandboxBlockedToolResultIfFirst(
 	return true
 }
 
-// finalizeTruthRecord 完成请求记录：设置输出内容、token、生成的工具调用，并标记为 completed。
-// 工具调用按 ID 去重，避免流式路径中 onStreamChunk 与 finalize 双重追加。
-func (pp *ProxyProtection) finalizeTruthRecord(requestID string, outputContent string, generatedToolCalls []openai.ChatCompletionMessageToolCall, promptTokens, completionTokens int) {
+// finalizeTruthRecord completes the request record with output, token usage, and generated tool calls.
+// Tool calls are deduplicated by ID to avoid double appends from stream chunks and finalization.
+func (pp *ProxyProtection) finalizeTruthRecord(requestID string, outputContent string, generatedToolCalls []openai.ChatCompletionMessageToolCall, promptTokens, completionTokens, totalTokens int) {
 	pp.updateTruthRecord(requestID, func(r *TruthRecord) {
 		r.OutputContent = truncateToBytes(outputContent, maxRecordOutputBytes)
 		r.PromptTokens = promptTokens
 		r.CompletionTokens = completionTokens
+		r.TotalTokens = totalTokens
 		r.CompletedAt = time.Now().Format(time.RFC3339Nano)
 		r.Phase = RecordPhaseCompleted
 
@@ -1096,14 +1201,17 @@ func (pp *ProxyProtection) ResetStatistics() {
 	pp.auditTokens = 0
 	pp.auditPromptTokens = 0
 	pp.auditCompletionTokens = 0
+	pp.baselineAuditTokens = 0
 	pp.totalToolCalls = 0
 	pp.requestCount = 0
 	pp.metricsMu.Unlock()
 
-	// Reset stream buffer if exists
-	if pp.streamBuffer != nil {
-		pp.streamBuffer.ClearAll()
-	}
+	pp.chainMu.Lock()
+	pp.chains = make(map[string]*SecurityChainState)
+	pp.requestToChain = make(map[string]securityChainBinding)
+	pp.toolCallToChains = make(map[string]map[string]securityChainBinding)
+	pp.requestStates = make(map[string]*RequestRuntimeState)
+	pp.chainMu.Unlock()
 
 	pp.sendTerminalLog("统计数据已重置")
 }
