@@ -271,6 +271,10 @@ func (pm *PluginManager) AssessAllRisks(scannedHashes map[string]bool) ([]Risk, 
 		singleAssetID := pm.getSingleAssetIDByPlugin(assetName)
 		logging.Info("Assessing risks with plugin: %s", assetName)
 		pluginAssets := pm.getAssetsByPlugin(assetName)
+		if len(pluginAssets) == 0 {
+			logging.Info("Skipping risk assessment for plugin %s: no scanned assets", assetName)
+			continue
+		}
 		risks, err := plugin.AssessRisks(scannedHashes, pluginAssets)
 		if err != nil {
 			logging.Warning("Plugin %s risk assessment failed: %v", assetName, err)

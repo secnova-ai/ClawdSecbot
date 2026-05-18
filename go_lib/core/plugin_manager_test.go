@@ -510,6 +510,45 @@ func TestPluginManager_AssessAllRisks_IncludesAssetNameAndAssetIDInArgs(t *testi
 	}
 }
 
+func TestPluginManager_AssessAllRisks_SkipsPluginWithoutScannedAssets(t *testing.T) {
+	pm := &PluginManager{
+		registeredPlugins: make(map[string]BotPlugin),
+		instances:         make(map[string]*AssetPluginInstance),
+	}
+	openclaw := &riskAssessPlugin{
+		testPlugin: *newTestPlugin("Openclaw"),
+		risks: []Risk{
+			{ID: "openclaw_risk", Title: "Openclaw Risk", Level: RiskLevelMedium},
+		},
+	}
+	openclaw.assets = []Asset{
+		{ID: "openclaw:abc123", Name: "Openclaw", SourcePlugin: "Openclaw"},
+	}
+	qclaw := &riskAssessPlugin{
+		testPlugin: *newTestPlugin("QClaw"),
+		risks: []Risk{
+			{ID: "qclaw_stale_risk", Title: "QClaw stale risk", Level: RiskLevelHigh},
+		},
+	}
+
+	pm.Register(openclaw)
+	pm.Register(qclaw)
+	if _, err := pm.ScanAllAssets(); err != nil {
+		t.Fatalf("ScanAllAssets failed: %v", err)
+	}
+
+	risks, err := pm.AssessAllRisks(nil)
+	if err != nil {
+		t.Fatalf("AssessAllRisks failed: %v", err)
+	}
+	if len(risks) != 1 {
+		t.Fatalf("expected only scanned plugin risks, got %d: %+v", len(risks), risks)
+	}
+	if got := risks[0].SourcePlugin; got != "Openclaw" {
+		t.Fatalf("expected only Openclaw risk, got source=%q risk=%+v", got, risks[0])
+	}
+}
+
 func TestPluginManager_AssessAllRisks_AppendsVersionMatchedVulnerabilities(t *testing.T) {
 	pm := &PluginManager{
 		registeredPlugins: make(map[string]BotPlugin),

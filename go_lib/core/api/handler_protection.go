@@ -45,9 +45,11 @@ type ProtectionPolicyRequest struct {
 	BotID      []string            `json:"botId"`
 	Protection string              `json:"protection"` // "enabled", "bypass", "disabled"
 	UserRules  *shepherd.UserRules `json:"userRules,omitempty"`
-	TokenLimit *TokenLimitConfig   `json:"tokenLimit,omitempty"`
-	Permission *PermissionConfig   `json:"permission,omitempty"`
-	BotModel   *BotModelConfig     `json:"botModel,omitempty"`
+	// LegacyUser 兼容 business 版旧字段 user，保留原始 JSON 避免数组反序列化失败。
+	LegacyUser json.RawMessage   `json:"user,omitempty"`
+	TokenLimit *TokenLimitConfig `json:"tokenLimit,omitempty"`
+	Permission *PermissionConfig `json:"permission,omitempty"`
+	BotModel   *BotModelConfig   `json:"botModel,omitempty"`
 }
 
 // TokenLimitConfig represents token limit settings.
@@ -233,8 +235,39 @@ func parseProtectionPolicyRequest(r *http.Request) (ProtectionPolicyRequest, err
 	if err := json.Unmarshal(body, &req); err != nil {
 		return req, errors.New("invalid JSON: " + err.Error())
 	}
+	if err := applyLegacyProtectionPolicyUserRules(body, &req); err != nil {
+		return req, errors.New("invalid JSON: " + err.Error())
+	}
 
 	return req, nil
+}
+
+// applyLegacyProtectionPolicyUserRules 兼容 business 版旧字段 user。
+//
+// 旧 business 客户端会把用户语义规则直接作为 user 数组提交；
+// 当前接口统一使用 userRules.semantic_rules。这里仅在新字段缺失时
+// 做一次解析映射，避免覆盖新版调用方显式传入的 userRules。
+func applyLegacyProtectionPolicyUserRules(body []byte, req *ProtectionPolicyRequest) error {
+	if req == nil || req.UserRules != nil {
+		return nil
+	}
+	userRaw := req.LegacyUser
+	if len(userRaw) == 0 || strings.TrimSpace(string(userRaw)) == "null" {
+		return nil
+	}
+
+	var rules []shepherd.SemanticRule
+	if err := json.Unmarshal(userRaw, &rules); err == nil {
+		req.UserRules = &shepherd.UserRules{SemanticRules: rules}
+		return nil
+	}
+
+	var ruleSet shepherd.UserRules
+	if err := json.Unmarshal(userRaw, &ruleSet); err != nil {
+		return err
+	}
+	req.UserRules = &ruleSet
+	return nil
 }
 
 func buildProtectionPolicyResponse(repo *repository.ProtectionRepository, botID string) (*ProtectionPolicyResponse, error) {

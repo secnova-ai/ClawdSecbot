@@ -15,6 +15,7 @@ import '../services/protection_database_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/runtime_platform.dart';
 import 'bot_model_config_form.dart';
+import 'keep_alive_tab.dart';
 import 'processing_notice_card.dart';
 import 'security_model_config_form.dart';
 import 'shepherd_rules_editor.dart';
@@ -868,14 +869,14 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
                           controller: _tabController,
                           children: [
                             // 智能规则、Token限制
-                            _buildSecurityPromptTab(l10n),
-                            _buildTokenLimitTab(l10n),
+                            KeepAliveTab(child: _buildSecurityPromptTab(l10n)),
+                            KeepAliveTab(child: _buildTokenLimitTab(l10n)),
                             // Personal版：权限设置
                             if (!BuildConfig.isAppStore)
-                              _buildPermissionTab(l10n),
+                              KeepAliveTab(child: _buildPermissionTab(l10n)),
                             // 按插件能力决定是否展示 Bot 模型
                             if (_requiresBotModelConfig)
-                              _buildBotModelTab(l10n),
+                              KeepAliveTab(child: _buildBotModelTab(l10n)),
                           ],
                         ),
                 ),

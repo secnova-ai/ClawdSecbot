@@ -2143,6 +2143,68 @@ func TestProtectionPolicyRequest_Parsing_OpenAndModelKey(t *testing.T) {
 	}
 }
 
+func TestProtectionPolicyRequest_Parsing_LegacyUserArray(t *testing.T) {
+	req := httptest.NewRequest(
+		"POST",
+		"/api/v1/protection/policy",
+		strings.NewReader(`{
+			"botId": ["test"],
+			"protection": "enabled",
+			"user": [
+				{
+					"id": "confirm-delete",
+					"enabled": true,
+					"description": "confirm delete",
+					"applies_to": ["tool_call"],
+					"action": "needs_confirmation",
+					"risk_type": "HIGH_RISK_OPERATION"
+				}
+			]
+		}`),
+	)
+
+	parsed, err := parseProtectionPolicyRequest(req)
+	if err != nil {
+		t.Fatalf("parseProtectionPolicyRequest failed: %v", err)
+	}
+	if parsed.UserRules == nil || len(parsed.UserRules.SemanticRules) != 1 {
+		t.Fatalf("legacy user array should be parsed as user rules, got %+v", parsed.UserRules)
+	}
+	if parsed.UserRules.SemanticRules[0].ID != "confirm-delete" {
+		t.Fatalf("unexpected rule ID: %+v", parsed.UserRules.SemanticRules[0])
+	}
+}
+
+func TestProtectionPolicyRequest_Parsing_UserRulesTakesPriorityOverLegacyUser(t *testing.T) {
+	req := httptest.NewRequest(
+		"POST",
+		"/api/v1/protection/policy",
+		strings.NewReader(`{
+			"botId": ["test"],
+			"protection": "enabled",
+			"userRules": {
+				"semantic_rules": [
+					{"id": "new-rule", "enabled": true}
+				]
+			},
+			"user": [
+				{"id": "legacy-rule", "enabled": true}
+			]
+		}`),
+	)
+
+	parsed, err := parseProtectionPolicyRequest(req)
+	if err != nil {
+		t.Fatalf("parseProtectionPolicyRequest failed: %v", err)
+	}
+	if parsed.UserRules == nil || len(parsed.UserRules.SemanticRules) != 1 {
+		t.Fatalf("userRules should be parsed, got %+v", parsed.UserRules)
+	}
+	if parsed.UserRules.SemanticRules[0].ID != "new-rule" {
+		t.Fatalf("userRules should take priority, got %+v", parsed.UserRules.SemanticRules[0])
+	}
+}
+
 func TestConvertToExternalPolicy_IncludesPermissionOpenAndBotModelKey(t *testing.T) {
 	cfg := &repository.ProtectionConfig{
 		AssetID:        "bot-1",
