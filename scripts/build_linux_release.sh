@@ -527,7 +527,7 @@ prepare_uos_rootfs_layout() {
 # 将 libappindicator3 打入 UOS 包内 lib 目录，避免商店包禁止 postinst 写 /usr/lib 时 tray 无法解析 SONAME。
 bundle_uos_libappindicator() {
     local lib_dir="$1"
-    local appind_path ayatana_path real_path
+    local appind_path ayatana_path real_path indicator_path indicator_real_path
 
     mkdir -p "$lib_dir"
     if [[ -e "$lib_dir/libappindicator3.so.1" ]]; then
@@ -535,22 +535,35 @@ bundle_uos_libappindicator() {
         return 0
     fi
 
-    appind_path=$(ldconfig -p 2>/dev/null | grep 'libappindicator3\.so\.1 ' | head -1 | sed 's/.*=> //' | tr -d ' ')
-    if [[ -n "$appind_path" && -e "$appind_path" ]]; then
-        real_path=$(readlink -f "$appind_path")
-        cp -a "$real_path" "$lib_dir/"
-        ln -sf "$(basename "$real_path")" "$lib_dir/libappindicator3.so.1"
-        ok "UOS bundle: shipped libappindicator3 from $real_path"
-        return 0
-    fi
-
+    # UOS 优先使用 ayatana 实现，避免打入 legacy libappindicator 后额外要求 libindicator3.so.7。
     ayatana_path=$(ldconfig -p 2>/dev/null | grep 'libayatana-appindicator3\.so\.1 ' | head -1 | sed 's/.*=> //' | tr -d ' ')
     if [[ -n "$ayatana_path" && -e "$ayatana_path" ]]; then
         real_path=$(readlink -f "$ayatana_path")
         cp -a "$real_path" "$lib_dir/"
         ln -sf "$(basename "$real_path")" "$lib_dir/libayatana-appindicator3.so.1"
         ln -sf libayatana-appindicator3.so.1 "$lib_dir/libappindicator3.so.1"
+
+        indicator_path=$(ldconfig -p 2>/dev/null | grep 'libayatana-indicator3\.so\.7 ' | head -1 | sed 's/.*=> //' | tr -d ' ')
+        if [[ -n "$indicator_path" && -e "$indicator_path" ]]; then
+            indicator_real_path=$(readlink -f "$indicator_path")
+            cp -a "$indicator_real_path" "$lib_dir/"
+            ln -sf "$(basename "$indicator_real_path")" "$lib_dir/libayatana-indicator3.so.7"
+            ok "UOS bundle: shipped libayatana-indicator3 from $indicator_real_path"
+        else
+            warn "UOS bundle: libayatana-indicator3.so.7 not found in ldconfig; tray may fail"
+        fi
+
         ok "UOS bundle: libappindicator3.so.1 -> libayatana-appindicator3 (from $real_path)"
+        return 0
+    fi
+
+    # 兼容 fallback：仅当 ayatana 不存在时才使用 legacy 实现，保持原有行为。
+    appind_path=$(ldconfig -p 2>/dev/null | grep 'libappindicator3\.so\.1 ' | head -1 | sed 's/.*=> //' | tr -d ' ')
+    if [[ -n "$appind_path" && -e "$appind_path" ]]; then
+        real_path=$(readlink -f "$appind_path")
+        cp -a "$real_path" "$lib_dir/"
+        ln -sf "$(basename "$real_path")" "$lib_dir/libappindicator3.so.1"
+        ok "UOS bundle: shipped libappindicator3 from $real_path"
         return 0
     fi
 
