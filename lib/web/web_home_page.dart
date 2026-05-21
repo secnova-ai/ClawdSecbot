@@ -54,6 +54,10 @@ const _defaultHomeDir = String.fromEnvironment(
   'BOTSEC_HOME_DIR',
   defaultValue: '/tmp',
 );
+const _defaultSandboxDir = String.fromEnvironment(
+  'BOTSEC_SANDBOX_DIR',
+  defaultValue: '/tmp/.botsec',
+);
 const _defaultCurrentVersion = String.fromEnvironment(
   'BOTSEC_CURRENT_VERSION',
   defaultValue: '1.0.3',
@@ -72,6 +76,7 @@ class _WebHomePageState extends State<WebHomePage> {
   late final TextEditingController _apiBaseCtrl;
   late final TextEditingController _workspacePrefixCtrl;
   late final TextEditingController _homeDirCtrl;
+  late final TextEditingController _sandboxDirCtrl;
   late final TextEditingController _currentVersionCtrl;
   late final ValueNotifier<Locale> _localeNotifier;
   late final String _webSessionClientID;
@@ -134,6 +139,9 @@ class _WebHomePageState extends State<WebHomePage> {
     _homeDirCtrl = TextEditingController(
       text: query['home_dir'] ?? _defaultHomeDir,
     );
+    _sandboxDirCtrl = TextEditingController(
+      text: query['sandbox_dir'] ?? _defaultSandboxDir,
+    );
     _currentVersionCtrl = TextEditingController(
       text: query['current_version'] ?? _defaultCurrentVersion,
     );
@@ -188,6 +196,7 @@ class _WebHomePageState extends State<WebHomePage> {
     _apiBaseCtrl.dispose();
     _workspacePrefixCtrl.dispose();
     _homeDirCtrl.dispose();
+    _sandboxDirCtrl.dispose();
     _currentVersionCtrl.dispose();
     _localeNotifier.dispose();
     super.dispose();
@@ -259,6 +268,7 @@ class _WebHomePageState extends State<WebHomePage> {
     final result = _transport!.bootstrapInit(
       workspaceDirPrefix: _workspacePrefixCtrl.text.trim(),
       homeDir: _homeDirCtrl.text.trim(),
+      sandboxDir: _sandboxDirCtrl.text.trim(),
       currentVersion: _currentVersionCtrl.text.trim(),
     );
 
@@ -1940,6 +1950,7 @@ class _WebHomePageState extends State<WebHomePage> {
       apiBaseController: _apiBaseCtrl,
       workspacePrefixController: _workspacePrefixCtrl,
       homeDirController: _homeDirCtrl,
+      sandboxDirController: _sandboxDirCtrl,
       currentVersionController: _currentVersionCtrl,
       onReconnect: _retryBootstrapNow,
       onApplyAndReconnect: () {

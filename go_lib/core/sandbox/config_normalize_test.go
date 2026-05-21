@@ -68,3 +68,24 @@ func TestNormalizeSandboxConfig_DeduplicateAndCleanEntries(t *testing.T) {
 		t.Fatalf("GatewayConfigPath = %q, want %q", got.GatewayConfigPath, wantGatewayConfigPath)
 	}
 }
+
+func TestAppendContainerWritablePaths(t *testing.T) {
+	paths := appendContainerWritablePaths([]string{"/work"})
+
+	if !containsAllStrings(paths, []string{"/work", "/tmp/botsecwebworkspace", "/tmp/.botsec"}) {
+		t.Fatalf("paths = %v, want container writable paths", paths)
+	}
+}
+
+func containsAllStrings(values []string, expected []string) bool {
+	valueSet := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		valueSet[value] = struct{}{}
+	}
+	for _, value := range expected {
+		if _, ok := valueSet[value]; !ok {
+			return false
+		}
+	}
+	return true
+}

@@ -94,8 +94,11 @@ class RiskInfo {
       descriptionEn: json['description_en'],
       level: parseLevel(json['level']),
       icon: IconData(
+        // ignore: non_const_argument_for_const_parameter
         json['icon_code_point'] as int? ?? Icons.warning.codePoint,
+        // ignore: non_const_argument_for_const_parameter
         fontFamily: json['icon_font_family'] as String?,
+        // ignore: non_const_argument_for_const_parameter
         fontPackage: json['icon_font_package'] as String?,
       ),
       mitigation: json['mitigation'] != null

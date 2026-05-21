@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"go_lib/chatmodel-routing/adapter"
+	"go_lib/core"
 )
 
 // configPathOverride holds the externally set config directory path
@@ -102,6 +103,9 @@ func findConfigPath() (string, error) {
 	configPathMutex.RUnlock()
 
 	if override != "" {
+		if isOpenclawConfigFile(override) {
+			return override, nil
+		}
 		// Check for config files within the override directory
 		configFiles := []string{
 			filepath.Join(override, "openclaw.json"),
@@ -129,25 +133,61 @@ func findConfigPath() (string, error) {
 		}
 	}
 
-	// Fall back to default paths
-	usr, err := user.Current()
-	if err != nil {
-		return "", err
-	}
+	homeDirs := defaultOpenclawHomeDirs()
 
-	paths := []string{
-		filepath.Join(usr.HomeDir, ".openclaw", "openclaw.json"),
-		filepath.Join(usr.HomeDir, ".moltbot", "moltbot.json"),
-		filepath.Join(usr.HomeDir, ".clawdbot", "clawdbot.json"),
-		filepath.Join(usr.HomeDir, ".clawdbot", "moltbot.json"),
-	}
-
-	for _, p := range paths {
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
+	for _, homeDir := range homeDirs {
+		paths := []string{
+			filepath.Join(homeDir, ".openclaw", "openclaw.json"),
+			filepath.Join(homeDir, ".moltbot", "moltbot.json"),
+			filepath.Join(homeDir, ".clawdbot", "clawdbot.json"),
+			filepath.Join(homeDir, ".clawdbot", "moltbot.json"),
+		}
+		for _, p := range paths {
+			if _, err := os.Stat(p); err == nil {
+				return p, nil
+			}
 		}
 	}
 	return "", fmt.Errorf("config not found")
+}
+
+// isOpenclawConfigFile 判断传入路径是否已经是 Openclaw 配置文件。
+func isOpenclawConfigFile(path string) bool {
+	name := strings.ToLower(filepath.Base(strings.TrimSpace(path)))
+	if name != "openclaw.json" && name != "moltbot.json" && name != "clawdbot.json" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+// defaultOpenclawHomeDirs 返回容器与桌面场景下可用于静态探测的 home 目录候选。
+func defaultOpenclawHomeDirs() []string {
+	dirs := make([]string, 0, 4)
+	appendDir := func(dir string) {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			return
+		}
+		for _, existing := range dirs {
+			if existing == dir {
+				return
+			}
+		}
+		dirs = append(dirs, dir)
+	}
+
+	pm := core.GetPathManager()
+	if pm.IsInitialized() {
+		appendDir(pm.GetHomeDir())
+	}
+	if usr, err := user.Current(); err == nil {
+		appendDir(usr.HomeDir)
+	}
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		appendDir(homeDir)
+	}
+	return dirs
 }
 
 // loadConfig reads and parses the configuration file

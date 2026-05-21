@@ -45,6 +45,7 @@ type rpcRequest struct {
 type bootstrapInitRequest struct {
 	WorkspaceDirPrefix string `json:"workspace_dir_prefix"`
 	HomeDir            string `json:"home_dir"`
+	SandboxDir         string `json:"sandbox_dir"`
 	CurrentVersion     string `json:"current_version"`
 }
 
@@ -436,22 +437,29 @@ func (s *Server) handleBootstrapInit(w http.ResponseWriter, r *http.Request) {
 	if pm.IsInitialized() {
 		existingWorkspace := pm.GetWorkspaceDir()
 		existingHome := pm.GetHomeDir()
-		if existingWorkspace != req.WorkspaceDirPrefix || existingHome != req.HomeDir {
+		existingSandbox := pm.GetSandboxDir()
+		requestedSandbox := strings.TrimSpace(req.SandboxDir)
+		if requestedSandbox == "" {
+			requestedSandbox = filepath.Join(req.HomeDir, ".botsec")
+		}
+		if existingWorkspace != req.WorkspaceDirPrefix || existingHome != req.HomeDir || existingSandbox != requestedSandbox {
 			writeJSON(w, http.StatusConflict, map[string]interface{}{
 				"success": false,
 				"error": fmt.Sprintf(
-					"path manager already initialized: workspace_dir=%s home_dir=%s, requested workspace_dir=%s home_dir=%s; restart web bridge to switch workspace",
+					"path manager already initialized: workspace_dir=%s home_dir=%s sandbox_dir=%s, requested workspace_dir=%s home_dir=%s sandbox_dir=%s; restart web bridge to switch workspace",
 					existingWorkspace,
 					existingHome,
+					existingSandbox,
 					req.WorkspaceDirPrefix,
 					req.HomeDir,
+					requestedSandbox,
 				),
 			})
 			return
 		}
 	}
 
-	initPathsResult, err := core.Initialize(req.WorkspaceDirPrefix, req.HomeDir, "")
+	initPathsResult, err := core.Initialize(req.WorkspaceDirPrefix, req.HomeDir, strings.TrimSpace(req.SandboxDir))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
 		return
@@ -601,7 +609,11 @@ func (s *Server) dispatch(method string, req rpcRequest) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		result, callErr := core.Initialize(workspaceDir, homeDir, "")
+		sandboxDir := ""
+		if len(req.Strings) > 2 {
+			sandboxDir = strings.TrimSpace(req.Strings[2])
+		}
+		result, callErr := core.Initialize(workspaceDir, homeDir, sandboxDir)
 		if callErr != nil {
 			return toJSON(map[string]interface{}{"success": false, "error": callErr.Error()}), nil
 		}

@@ -49,7 +49,7 @@ func buildPreloadConfig(config SandboxConfig) *PreloadConfig {
 	// 路径权限
 	if config.PathPermission.Mode == ModeWhitelist {
 		pc.FilePolicyType = "whitelist"
-		pc.AllowedPaths = config.PathPermission.Paths
+		pc.AllowedPaths = appendContainerWritablePaths(config.PathPermission.Paths)
 	} else {
 		pc.FilePolicyType = "blacklist"
 		pc.BlockedPaths = config.PathPermission.Paths

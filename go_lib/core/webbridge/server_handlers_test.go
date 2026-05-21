@@ -1,6 +1,7 @@
 package webbridge
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go_lib/core"
+	"go_lib/core/logging"
+	"go_lib/core/repository"
 )
 
 func TestServerHealthEndpointReturnsSuccessEnvelope(t *testing.T) {
@@ -54,4 +59,37 @@ func TestServerStaticServesIndexFallbackForSPARoutes(t *testing.T) {
 	if routeRR.Code != http.StatusOK || !strings.Contains(routeRR.Body.String(), "index page") {
 		t.Fatalf("expected SPA fallback, got status=%d body=%q", routeRR.Code, routeRR.Body.String())
 	}
+}
+
+func TestBootstrapInitUsesSandboxDir(t *testing.T) {
+	workspaceDir := filepath.Join(t.TempDir(), "workspace")
+	homeDir := filepath.Join(t.TempDir(), "home")
+	sandboxDir := filepath.Join(t.TempDir(), ".botsec")
+	t.Cleanup(func() {
+		_ = repository.CloseDB()
+		logging.Close()
+		logging.CloseHistory()
+		logging.CloseShepherdGate()
+		_ = core.GetPathManager().ResetForTest("", "")
+	})
+	_ = core.GetPathManager().ResetForTest("", "")
+
+	body := []byte(`{"workspace_dir_prefix":` + strconvQuote(workspaceDir) + `,"home_dir":` + strconvQuote(homeDir) + `,"sandbox_dir":` + strconvQuote(sandboxDir) + `,"current_version":"1.0.3"}`)
+	server := NewServer("")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/bootstrap/init", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := core.GetPathManager().GetSandboxDir(); got != sandboxDir {
+		t.Fatalf("sandbox dir = %q, want %q", got, sandboxDir)
+	}
+}
+
+func strconvQuote(value string) string {
+	b, _ := json.Marshal(value)
+	return string(b)
 }

@@ -98,5 +98,8 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Disable Flutter Swift Package Manager integration
+        run: flutter config --no-enable-swift-package-manager
+
       - name: Build macOS app
         run: flutter build macos --release --no-tree-shake-icons
