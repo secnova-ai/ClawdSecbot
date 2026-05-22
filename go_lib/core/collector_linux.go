@@ -17,8 +17,8 @@ func (c *platformCollector) getOpenPorts() ([]int, error) {
 	cmd := cmdutil.Command("ss", "-tlnp")
 	output, err := cmd.Output()
 	if err != nil {
-		logging.Error("执行 ss 命令失败: %v", err)
-		return nil, err
+		logging.Warning("ss command failed, fallback to /proc/net/tcp collection: %v", err)
+		return readProcNetTCPPorts()
 	}
 	logging.Debug("ss 命令执行成功,输出长度: %d 字节", len(output))
 
@@ -74,8 +74,8 @@ func (c *platformCollector) getRunningProcesses() ([]SystemProcess, error) {
 	cmd := cmdutil.Command("ps", "-eo", "pid,comm,args")
 	output, err := cmd.Output()
 	if err != nil {
-		logging.Error("执行 ps 命令失败: %v", err)
-		return nil, err
+		logging.Warning("ps command failed, fallback to /proc process collection: %v", err)
+		return readProcRunningProcesses("/proc")
 	}
 	logging.Debug("ps 命令执行成功,输出长度: %d 字节", len(output))
 

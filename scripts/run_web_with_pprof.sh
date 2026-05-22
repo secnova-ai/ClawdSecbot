@@ -10,6 +10,7 @@
 #   BOTSEC_WEB_API_HOST=0.0.0.0
 #   BOTSEC_WORKSPACE_DIR_PREFIX=/opt/botsec/workspace
 #   BOTSEC_HOME_DIR=/home/botsec
+#   BOTSEC_SANDBOX_DIR=/tmp/.botsec
 #   BOTSEC_CURRENT_VERSION=<override app version>
 set -euo pipefail
 
@@ -53,6 +54,7 @@ API_PORT="${BOTSEC_WEB_API_PORT:-18080}"
 API_HOST="${BOTSEC_WEB_API_HOST:-0.0.0.0}"
 WORKSPACE_DIR_PREFIX="${BOTSEC_WORKSPACE_DIR_PREFIX:-$(default_workspace_prefix)}"
 HOME_DIR="${BOTSEC_HOME_DIR:-$HOME}"
+SANDBOX_DIR="${BOTSEC_SANDBOX_DIR:-/tmp/.botsec}"
 CURRENT_VERSION="${BOTSEC_CURRENT_VERSION:-$(default_current_version)}"
 WEB_STATIC_DIR="${BOTSEC_WEB_STATIC_DIR:-$PROJECT_ROOT/build/web}"
 
@@ -145,6 +147,7 @@ flutter build web \
     --dart-define=BOTSEC_WEB_API_PORT="$API_PORT" \
     --dart-define=BOTSEC_WORKSPACE_DIR_PREFIX="$WORKSPACE_DIR_PREFIX" \
     --dart-define=BOTSEC_HOME_DIR="$HOME_DIR" \
+    --dart-define=BOTSEC_SANDBOX_DIR="$SANDBOX_DIR" \
     --dart-define=BOTSEC_CURRENT_VERSION="$CURRENT_VERSION"
 echo ""
 

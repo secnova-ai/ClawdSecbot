@@ -870,6 +870,7 @@ class _ProtectionMonitorLogPanelState extends State<ProtectionMonitorLogPanel> {
       controller: widget.logScrollController,
       padding: const EdgeInsets.all(12),
       itemCount: widget.logs.length,
+      // ignore: deprecated_member_use
       cacheExtent: 500.0,
       itemBuilder: (context, index) {
         final logEntry = widget.logs[index];

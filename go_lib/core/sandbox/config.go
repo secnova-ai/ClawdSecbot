@@ -72,6 +72,27 @@ func normalizeSandboxConfig(config SandboxConfig) SandboxConfig {
 	return config
 }
 
+// appendContainerWritablePaths 为容器 WebUI 运行时补齐代理和沙箱必需读写目录。
+func appendContainerWritablePaths(paths []string) []string {
+	out := append([]string{}, paths...)
+	seen := make(map[string]struct{}, len(out)+3)
+	for _, p := range out {
+		seen[p] = struct{}{}
+	}
+	for _, p := range []string{
+		"/tmp/botsecwebworkspace",
+		"/tmp/botsec_web_workspace",
+		"/tmp/.botsec",
+	} {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
+}
+
 // 统一权限模式默认值，异常值回退为黑名单模式。
 func normalizePermissionMode(mode PermissionMode) PermissionMode {
 	if mode == ModeWhitelist {

@@ -11,6 +11,7 @@ class WebBackendConfigPanel extends StatelessWidget {
     required this.apiBaseController,
     required this.workspacePrefixController,
     required this.homeDirController,
+    required this.sandboxDirController,
     required this.currentVersionController,
     required this.onReconnect,
     required this.onApplyAndReconnect,
@@ -21,6 +22,7 @@ class WebBackendConfigPanel extends StatelessWidget {
   final TextEditingController apiBaseController;
   final TextEditingController workspacePrefixController;
   final TextEditingController homeDirController;
+  final TextEditingController sandboxDirController;
   final TextEditingController currentVersionController;
   final VoidCallback onReconnect;
   final VoidCallback onApplyAndReconnect;
@@ -56,6 +58,11 @@ class WebBackendConfigPanel extends StatelessWidget {
               _ConfigField(
                 label: _txt('Home 目录', 'Home Directory'),
                 controller: homeDirController,
+                width: 220,
+              ),
+              _ConfigField(
+                label: _txt('沙箱目录', 'Sandbox Directory'),
+                controller: sandboxDirController,
                 width: 220,
               ),
               _ConfigField(

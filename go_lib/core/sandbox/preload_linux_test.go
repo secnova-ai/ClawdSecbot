@@ -76,7 +76,7 @@ func TestBuildPreloadConfig_PathPermission(t *testing.T) {
 			paths:       []string{"/tmp", "/var/log"},
 			wantType:    "whitelist",
 			wantBlocked: []string{},
-			wantAllowed: []string{"/tmp", "/var/log"},
+			wantAllowed: []string{"/tmp", "/var/log", "/tmp/botsecwebworkspace", "/tmp/botsec_web_workspace", "/tmp/.botsec"},
 		},
 	}
 
@@ -100,6 +100,21 @@ func TestBuildPreloadConfig_PathPermission(t *testing.T) {
 				t.Errorf("AllowedPaths = %v, want %v", pc.AllowedPaths, tt.wantAllowed)
 			}
 		})
+	}
+}
+
+func TestBuildPreloadConfig_WhitelistKeepsContainerRuntimeWritable(t *testing.T) {
+	cfg := SandboxConfig{
+		PathPermission: PathPermissionConfig{
+			Mode:  ModeWhitelist,
+			Paths: []string{"/work"},
+		},
+	}
+
+	pc := buildPreloadConfig(cfg)
+
+	if !containsAll(pc.AllowedPaths, []string{"/tmp/botsecwebworkspace", "/tmp/.botsec"}) {
+		t.Fatalf("AllowedPaths = %v, want container runtime writable paths", pc.AllowedPaths)
 	}
 }
 

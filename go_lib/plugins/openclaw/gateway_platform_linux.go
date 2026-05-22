@@ -69,10 +69,23 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 		logging.Warning("[GatewayManager] gateway install failed: %v", installErr)
 	}
 
+	policyDir := req.PolicyDir
+	if policyDir == "" {
+		policyDir = core.ResolvePolicyDir(homeDir)
+	}
+	_ = os.MkdirAll(policyDir, 0755)
+	logDir := core.ResolveSandboxLogDir(homeDir)
+	_ = os.MkdirAll(logDir, 0755)
+
 	if unitPath == "" {
-		// Security first: when sandbox is requested, never silently fall back to direct start.
 		if req.SandboxEnabled {
-			return nil, fmt.Errorf("sandbox enabled but no systemd unit found; refusing insecure fallback")
+			logging.Info("[GatewayManager] No unit file found, fallback to direct start with sandbox env")
+			startResult, startErr := startOpenclawGatewayDirectWithSandbox(req, binaryPath, configPath, homeDir, policyDir, logDir)
+			if startErr != nil {
+				return nil, startErr
+			}
+			startResult["install_output"] = installOutput
+			return startResult, nil
 		}
 		logging.Info("[GatewayManager] No unit file found, fallback to direct start (sandbox disabled)")
 		_, _ = runOpenclawGatewayCommand(binaryPath, []string{"start"}, homeDir)
@@ -87,13 +100,6 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 
 	// 4) 根据 sandboxEnabled 同步 systemd unit 中的 LD_PRELOAD 环境变量
 	logging.Info("[GatewayManager] Step 4: Syncing sandbox config, sandboxEnabled=%v, unit=%s", req.SandboxEnabled, unitPath)
-	policyDir := req.PolicyDir
-	if policyDir == "" {
-		policyDir = core.ResolvePolicyDir(homeDir)
-	}
-	_ = os.MkdirAll(policyDir, 0755)
-	logDir := core.ResolveSandboxLogDir(homeDir)
-	_ = os.MkdirAll(logDir, 0755)
 
 	var modified bool
 	if req.SandboxEnabled {
@@ -226,6 +232,92 @@ func runOpenclawGatewayCommand(binaryPath string, args []string, homeDir string)
 	}
 
 	return string(out), err
+}
+
+// runOpenclawGatewayCommandWithEnv 直接执行 openclaw gateway 命令并附加沙箱环境变量。
+func runOpenclawGatewayCommandWithEnv(binaryPath string, args []string, homeDir string, extraEnv []string) (string, error) {
+	if binaryPath == "" {
+		return "", fmt.Errorf("binary path is empty")
+	}
+
+	cmdArgs := append([]string{"gateway"}, args...)
+	env := append(os.Environ(), extraEnv...)
+	if homeDir != "" {
+		env = append(env, "HOME="+homeDir)
+	}
+	cmd := cmdutil.Command(binaryPath, cmdArgs...)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return string(out), nil
+	}
+
+	fullCmd := binaryPath
+	for _, a := range cmdArgs {
+		fullCmd += " " + a
+	}
+	bashCmd := cmdutil.Command("/bin/bash", "-l", "-c", fullCmd)
+	bashCmd.Env = env
+	bashOut, bashErr := bashCmd.CombinedOutput()
+	if bashErr == nil {
+		return string(bashOut), nil
+	}
+
+	return string(out), err
+}
+
+// startOpenclawGatewayDirectWithSandbox 在无 systemd 的容器内通过环境变量直启沙箱网关。
+func startOpenclawGatewayDirectWithSandbox(req *GatewayRestartRequest, binaryPath string, configPath string, homeDir string, policyDir string, logDir string) (map[string]interface{}, error) {
+	if err := ensureContainerRuntimeWritableDirs(); err != nil {
+		return nil, fmt.Errorf("ensure container writable dirs failed: %v", err)
+	}
+
+	instanceKey := buildGatewayInstanceKey(req.AssetName, req.AssetID)
+	logPath := filepath.Join(logDir, fmt.Sprintf("botsec_%s_hook.log", sandbox.SanitizeAssetNamePublic(instanceKey)))
+	policyPath, err := writeGatewayPolicyFile(policyDir, instanceKey, sandbox.SandboxConfig{
+		AssetName:         instanceKey,
+		GatewayBinaryPath: binaryPath,
+		GatewayConfigPath: configPath,
+		PathPermission:    req.PathPermission,
+		NetworkPermission: req.NetworkPermission,
+		ShellPermission:   req.ShellPermission,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("write policy failed: %v", err)
+	}
+
+	preloadLib := findPreloadLibrary(policyDir)
+	if preloadLib == "" {
+		return nil, fmt.Errorf("sandbox enabled but libsandbox_preload.so not found")
+	}
+
+	_, _ = runOpenclawGatewayCommand(binaryPath, []string{"stop"}, homeDir)
+	_, err = runOpenclawGatewayCommandWithEnv(binaryPath, []string{"start"}, homeDir, []string{
+		"LD_PRELOAD=" + preloadLib,
+		"SANDBOX_POLICY_FILE=" + policyPath,
+		"SANDBOX_LOG_FILE=" + logPath,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("direct sandbox gateway start failed: %v", err)
+	}
+
+	return map[string]interface{}{
+		"success":          true,
+		"modified":         true,
+		"unit":             "",
+		"sandbox_log_path": logPath,
+		"message":          "gateway started directly with sandbox protection",
+	}, nil
+}
+
+// ensureContainerRuntimeWritableDirs 创建容器代理运行所需的可写目录。
+func ensureContainerRuntimeWritableDirs() error {
+	for _, dir := range []string{"/tmp/botsecwebworkspace", "/tmp/botsec_web_workspace", "/tmp/.botsec"} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func installGatewayAndGetUnitPath(binaryPath string, homeDir string) (unitPath string, output string, err error) {

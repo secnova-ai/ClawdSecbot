@@ -85,11 +85,13 @@ class HttpTransportWeb extends BotsecTransport {
   Map<String, dynamic> bootstrapInit({
     required String workspaceDirPrefix,
     required String homeDir,
+    required String sandboxDir,
     required String currentVersion,
   }) {
     final body = jsonEncode({
       'workspace_dir_prefix': workspaceDirPrefix,
       'home_dir': homeDir,
+      'sandbox_dir': sandboxDir,
       'current_version': currentVersion,
     });
     final raw = _postRaw('/api/v1/bootstrap/init', body);

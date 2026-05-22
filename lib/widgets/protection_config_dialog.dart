@@ -1201,7 +1201,8 @@ class _ProtectionConfigDialogState extends State<ProtectionConfigDialog>
     final isSandboxSupported =
         (isRuntimeMacOS && BuildConfig.isPersonal) ||
         isRuntimeLinux ||
-        isRuntimeWindows;
+        isRuntimeWindows ||
+        isRuntimeWeb;
     final canBrowsePathPermission = !isRuntimeWeb;
 
     return SingleChildScrollView(
