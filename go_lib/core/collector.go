@@ -71,17 +71,24 @@ func (c *platformCollector) Collect() (SystemSnapshot, error) {
 					dirname = c.ConfigPath
 					logging.Info("使用授权路径进行扩展: %s", dirname)
 				} else {
-					// 优先使用PathManager，降级使用系统HOME
-					pm := GetPathManager()
-					if pm.IsInitialized() {
-						dirname = pm.GetHomeDir()
-						logging.Info("使用PathManager HOME进行扩展: %s", dirname)
+					if userHome, err := os.UserHomeDir(); err == nil && userHome != "" {
+						dirname = userHome
+						logging.Info("Resolved tilde HOME from system user home: %s", dirname)
 					} else {
-						dirname, _ = os.UserHomeDir()
-						logging.Warning("使用系统 HOME 进行扩展（沙箱环境可能不正确）: %s", dirname)
+						pm := GetPathManager()
+						if pm.IsInitialized() {
+							dirname = pm.GetHomeDir()
+							logging.Warning("Failed to resolve system user home, using PathManager HOME: %s", dirname)
+						} else {
+							logging.Warning("Failed to resolve HOME for tilde expansion")
+						}
 					}
 				}
 
+				if dirname == "" {
+					logging.Warning("Failed to expand path because HOME is empty: %s", originalPath)
+					return false
+				}
 				path = filepath.Join(dirname, strings.TrimPrefix(path, "~/"))
 				logging.Debug("路径扩展: %s -> %s", originalPath, path)
 			}

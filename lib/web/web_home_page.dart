@@ -1951,7 +1951,6 @@ class _WebHomePageState extends State<WebHomePage> {
       workspacePrefixController: _workspacePrefixCtrl,
       homeDirController: _homeDirCtrl,
       sandboxDirController: _sandboxDirCtrl,
-      currentVersionController: _currentVersionCtrl,
       onReconnect: _retryBootstrapNow,
       onApplyAndReconnect: () {
         setState(() {
