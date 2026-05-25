@@ -2,6 +2,8 @@ package core
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -231,5 +233,53 @@ func TestComputeAssetID_UniqueForDifferentConfigPath(t *testing.T) {
 
 	if id1 == id2 {
 		t.Fatalf("expected different ids for different config_path, got %s", id1)
+	}
+}
+
+func TestResolveStableConfigPathFingerprint_DirectoryAndFileEquivalent(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".openclaw")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	configFile := filepath.Join(configDir, "openclaw.json")
+	if err := os.WriteFile(configFile, []byte(`{}`), 0644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	dirFingerprint := ResolveStableConfigPathFingerprint(configDir)
+	fileFingerprint := ResolveStableConfigPathFingerprint(configFile)
+	if dirFingerprint != fileFingerprint {
+		t.Fatalf("expected same fingerprint path, dir=%s file=%s", dirFingerprint, fileFingerprint)
+	}
+	if dirFingerprint != configFile {
+		t.Fatalf("expected resolved config file path %s, got %s", configFile, dirFingerprint)
+	}
+
+	idFromDir := ComputeAssetID("Openclaw", dirFingerprint)
+	idFromFile := ComputeAssetID("Openclaw", fileFingerprint)
+	if idFromDir != idFromFile {
+		t.Fatalf("expected same asset id, dir=%s file=%s", idFromDir, idFromFile)
+	}
+}
+
+func TestResolveStableConfigPathFingerprint_UsesPathManagerHome(t *testing.T) {
+	tmpDir := t.TempDir()
+	pmHome := filepath.Join(tmpDir, "pm-home")
+	sysHome := filepath.Join(tmpDir, "sys-home")
+	configDir := filepath.Join(pmHome, ".openclaw")
+	configFile := filepath.Join(configDir, "openclaw.json")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	if err := os.WriteFile(configFile, []byte(`{}`), 0644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+	_ = GetPathManager().ResetForTest(tmpDir, pmHome)
+	t.Setenv("HOME", sysHome)
+
+	got := ResolveStableConfigPathFingerprint("~/.openclaw/openclaw.json")
+	if got != configFile {
+		t.Fatalf("expected PathManager-based path %s, got %s", configFile, got)
 	}
 }

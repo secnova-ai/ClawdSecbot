@@ -59,6 +59,9 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 
 	// 2) stop gateway via systemctl
 	logging.Info("[GatewayManager] Step 2: Stopping gateway via systemctl...")
+	if req.SandboxEnabled {
+		stopExistingGatewayListeners(resolveGatewayListenPort(configPath))
+	}
 	_ = runSystemctl("stop", systemdServiceName)
 	time.Sleep(800 * time.Millisecond)
 
@@ -291,6 +294,8 @@ func startOpenclawGatewayDirectWithSandbox(req *GatewayRestartRequest, binaryPat
 		return nil, fmt.Errorf("sandbox enabled but libsandbox_preload.so not found")
 	}
 
+	gatewayPort := resolveGatewayListenPort(configPath)
+	stopExistingGatewayListeners(gatewayPort)
 	_, _ = runOpenclawGatewayCommand(binaryPath, []string{"stop"}, homeDir)
 	_, err = runOpenclawGatewayCommandWithEnv(binaryPath, []string{"start"}, homeDir, []string{
 		"LD_PRELOAD=" + preloadLib,
@@ -300,6 +305,7 @@ func startOpenclawGatewayDirectWithSandbox(req *GatewayRestartRequest, binaryPat
 	if err != nil {
 		return nil, fmt.Errorf("direct sandbox gateway start failed: %v", err)
 	}
+	verifyGatewayListenerHasPreload(gatewayPort, preloadLib)
 
 	return map[string]interface{}{
 		"success":          true,
@@ -308,6 +314,19 @@ func startOpenclawGatewayDirectWithSandbox(req *GatewayRestartRequest, binaryPat
 		"sandbox_log_path": logPath,
 		"message":          "gateway started directly with sandbox protection",
 	}, nil
+}
+
+// resolveGatewayListenPort 从 Openclaw 配置解析网关监听端口，失败时回退默认 18789。
+func resolveGatewayListenPort(configPath string) int {
+	const defaultPort = 18789
+	if strings.TrimSpace(configPath) == "" {
+		return defaultPort
+	}
+	config, _, err := loadConfig(configPath)
+	if err != nil || config == nil || config.Gateway.Port <= 0 {
+		return defaultPort
+	}
+	return config.Gateway.Port
 }
 
 // ensureContainerRuntimeWritableDirs 创建容器代理运行所需的可写目录。

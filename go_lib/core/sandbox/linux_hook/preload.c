@@ -89,7 +89,7 @@ static void log_info(const char *fmt, ...) {
     char timestamp[32] = {0};
     char line[4608] = {0};
     format_timestamp(timestamp, sizeof(timestamp));
-    snprintf(line, sizeof(line), "[%s] [ClawdSecbot] %s\n", timestamp, message);
+    snprintf(line, sizeof(line), "[%s] [ClawdSecbot] [pid=%d] %s\n", timestamp, (int)getpid(), message);
 
     fprintf(stderr, "%s", line);
     fflush(stderr);
