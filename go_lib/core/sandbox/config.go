@@ -80,7 +80,6 @@ func appendContainerWritablePaths(paths []string) []string {
 		seen[p] = struct{}{}
 	}
 	for _, p := range []string{
-		"/tmp/botsecwebworkspace",
 		"/tmp/botsec_web_workspace",
 		"/tmp/.botsec",
 	} {

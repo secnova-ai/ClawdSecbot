@@ -312,7 +312,7 @@ func startOpenclawGatewayDirectWithSandbox(req *GatewayRestartRequest, binaryPat
 
 // ensureContainerRuntimeWritableDirs 创建容器代理运行所需的可写目录。
 func ensureContainerRuntimeWritableDirs() error {
-	for _, dir := range []string{"/tmp/botsecwebworkspace", "/tmp/botsec_web_workspace", "/tmp/.botsec"} {
+	for _, dir := range []string{"/tmp/botsec_web_workspace", "/tmp/.botsec"} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
 		}
