@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../utils/app_fonts.dart';
+import 'web_clipboard.dart';
 
 typedef WebLoginHandler =
     Future<String?> Function(String username, String password);
@@ -160,19 +160,63 @@ class _WebLoginPanelState extends State<WebLoginPanel> {
   }
 }
 
-class InitialPasswordDialog extends StatelessWidget {
+class InitialPasswordDialog extends StatefulWidget {
   const InitialPasswordDialog({
     super.key,
     required this.isZh,
     required this.username,
     required this.password,
+    this.copyText = copyTextForWeb,
   });
 
   final bool isZh;
   final String username;
   final String password;
+  final Future<bool> Function(String text) copyText;
 
-  String _txt(String zh, String en) => isZh ? zh : en;
+  @override
+  State<InitialPasswordDialog> createState() => _InitialPasswordDialogState();
+}
+
+class _InitialPasswordDialogState extends State<InitialPasswordDialog> {
+  bool _copying = false;
+
+  String _txt(String zh, String en) => widget.isZh ? zh : en;
+
+  // _copyAndContinue 复制初始凭据，仅在复制成功后关闭一次性密码弹窗。
+  Future<void> _copyAndContinue() async {
+    if (_copying) return;
+
+    setState(() {
+      _copying = true;
+    });
+
+    var copied = false;
+    try {
+      copied = await widget.copyText(
+        'username=${widget.username}\npassword=${widget.password}',
+      );
+    } catch (_) {
+      copied = false;
+    }
+    if (!mounted) return;
+
+    if (copied) {
+      Navigator.of(context).pop();
+      return;
+    }
+
+    setState(() {
+      _copying = false;
+    });
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        content: Text(
+          _txt('复制失败，请手动保存密码', 'Copy failed. Save the password manually.'),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -199,21 +243,26 @@ class InitialPasswordDialog extends StatelessWidget {
             style: AppFonts.inter(color: Colors.white70, fontSize: 13),
           ),
           const SizedBox(height: 14),
-          _CredentialBox(label: _txt('账号', 'Username'), value: username),
+          _CredentialBox(label: _txt('账号', 'Username'), value: widget.username),
           const SizedBox(height: 10),
-          _CredentialBox(label: _txt('密码', 'Password'), value: password),
+          _CredentialBox(label: _txt('密码', 'Password'), value: widget.password),
         ],
       ),
       actions: [
         TextButton.icon(
-          onPressed: () {
-            Clipboard.setData(
-              ClipboardData(text: 'username=$username\npassword=$password'),
-            );
-            Navigator.of(context).pop();
-          },
-          icon: const Icon(LucideIcons.copy, size: 16),
-          label: Text(_txt('复制并继续', 'Copy and Continue')),
+          onPressed: _copying ? null : _copyAndContinue,
+          icon: _copying
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(LucideIcons.copy, size: 16),
+          label: Text(
+            _copying
+                ? _txt('正在复制', 'Copying')
+                : _txt('复制并继续', 'Copy and Continue'),
+          ),
         ),
       ],
     );
