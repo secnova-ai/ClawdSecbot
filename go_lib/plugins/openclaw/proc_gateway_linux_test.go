@@ -1,3 +1,5 @@
+//go:build linux
+
 package openclaw
 
 import (
@@ -58,7 +60,37 @@ func TestMatchOpenclawGatewayCmdline(t *testing.T) {
 	if !matchOpenclawGatewayCmdline([]byte(cmdline)) {
 		t.Fatal("expected openclaw gateway cmdline match")
 	}
+	openclawOnly := strings.Join([]string{
+		"openclaw",
+	}, "\x00")
+	if !matchOpenclawGatewayCmdline([]byte(openclawOnly)) {
+		t.Fatal("expected openclaw cmdline match on gateway listener")
+	}
 	if matchOpenclawGatewayCmdline([]byte("nginx: worker process")) {
 		t.Fatal("did not expect unrelated process match")
+	}
+}
+
+// TestBuildGatewayEnvUsesProvidedHomeDir 验证 gateway 进程 HOME 使用传入的运行用户家目录。
+func TestBuildGatewayEnvUsesProvidedHomeDir(t *testing.T) {
+	t.Setenv("HOME", "/app")
+
+	env := buildGatewayEnv("/home/node", []string{"LD_PRELOAD=/tmp/libsandbox_preload.so"})
+	var homeValues []string
+	var hasPreload bool
+	for _, item := range env {
+		if strings.HasPrefix(item, "HOME=") {
+			homeValues = append(homeValues, item)
+		}
+		if item == "LD_PRELOAD=/tmp/libsandbox_preload.so" {
+			hasPreload = true
+		}
+	}
+
+	if len(homeValues) != 1 || homeValues[0] != "HOME=/home/node" {
+		t.Fatalf("HOME env = %v, want [HOME=/home/node]", homeValues)
+	}
+	if !hasPreload {
+		t.Fatal("expected LD_PRELOAD env to be preserved")
 	}
 }

@@ -1,6 +1,7 @@
 package openclaw
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -104,7 +105,7 @@ func findOpenclawGatewayListenPIDs(port int) []int {
 	}
 	if len(filtered) == 0 && len(allPIDs) > 0 {
 		logging.Warning(
-			"[GatewayManager] Port %d has %d listener(s) but none match openclaw gateway cmdline; skip SIGTERM to avoid killing unrelated processes",
+			"[GatewayManager] Port %d has %d listener(s) but none match openclaw gateway cmdline; skip kill to avoid killing unrelated processes",
 			port,
 			len(allPIDs),
 		)
@@ -115,9 +116,6 @@ func findOpenclawGatewayListenPIDs(port int) []int {
 // matchOpenclawGatewayCmdline 判断 cmdline 是否属于 Openclaw 网关进程。
 func matchOpenclawGatewayCmdline(cmdline []byte) bool {
 	cmd := strings.ToLower(strings.ReplaceAll(string(cmdline), "\x00", " "))
-	if !strings.Contains(cmd, "gateway") {
-		return false
-	}
 	for _, keyword := range openclawGatewayCmdKeywords {
 		if strings.Contains(cmd, keyword) {
 			return true
@@ -155,18 +153,11 @@ func processHasSocketInodes(pid int, inodeSet map[string]struct{}) bool {
 	return false
 }
 
-// stopExistingGatewayListeners 停止占用网关端口的 Openclaw 进程；SIGTERM 后若仍监听则 SIGKILL。
+// stopExistingGatewayListeners 停止占用网关端口的 Openclaw 进程(如 openclaw.mjs gateway), 直接 SIGKILL。
 func stopExistingGatewayListeners(port int) {
 	if port <= 0 {
 		return
 	}
-	signalGatewayListenersOnPort(port, syscall.SIGTERM)
-	time.Sleep(800 * time.Millisecond)
-	remaining := findOpenclawGatewayListenPIDs(port)
-	if len(remaining) == 0 {
-		return
-	}
-	logging.Warning("[GatewayManager] %d openclaw gateway listener(s) still on port %d after SIGTERM, sending SIGKILL", len(remaining), port)
 	signalGatewayListenersOnPort(port, syscall.SIGKILL)
 	time.Sleep(300 * time.Millisecond)
 }
@@ -181,18 +172,25 @@ func signalGatewayListenersOnPort(port int, sig syscall.Signal) {
 }
 
 // verifyGatewayListenerHasPreload 检查监听端口的 Openclaw 进程是否携带 LD_PRELOAD。
-func verifyGatewayListenerHasPreload(port int, preloadLib string) {
-	pids := findOpenclawGatewayListenPIDs(port)
+func verifyGatewayListenerHasPreload(port int, preloadLib string) error {
+	openclawPids := findOpenclawGatewayListenPIDs(port)
+	pids := openclawPids
 	if len(pids) == 0 {
-		logging.Warning("[GatewayManager] No openclaw gateway listener on port %d to verify LD_PRELOAD", port)
-		return
+		pids = findListenPIDsOnTCPPort(port)
+	}
+	if len(pids) == 0 {
+		return fmt.Errorf("no openclaw gateway listener on port %d to verify LD_PRELOAD", port)
+	}
+	if len(openclawPids) == 0 {
+		logging.Warning("[GatewayManager] Port %d listener cmdline not matched openclaw keywords, fallback verify on all listener pids=%v", port, pids)
 	}
 	preloadBase := filepath.Base(strings.TrimSpace(preloadLib))
+	var missing []string
 	for _, pid := range pids {
 		envPath := filepath.Join("/proc", strconv.Itoa(pid), "environ")
 		envData, err := os.ReadFile(envPath)
 		if err != nil {
-			logging.Warning("[GatewayManager] Cannot read environ for pid=%d: %v", pid, err)
+			missing = append(missing, fmt.Sprintf("pid=%d: read environ: %v", pid, err))
 			continue
 		}
 		env := strings.ReplaceAll(string(envData), "\x00", "\n")
@@ -200,9 +198,10 @@ func verifyGatewayListenerHasPreload(port int, preloadLib string) {
 			logging.Info("[GatewayManager] Verified LD_PRELOAD on gateway listener pid=%d", pid)
 			continue
 		}
-		logging.Warning(
-			"[GatewayManager] Gateway listener pid=%d on port %d missing expected LD_PRELOAD (%s); sandbox may not be active on this process",
-			pid, port, preloadLib,
-		)
+		missing = append(missing, fmt.Sprintf("pid=%d missing LD_PRELOAD %s", pid, preloadLib))
 	}
+	if len(missing) > 0 {
+		return fmt.Errorf("gateway listener sandbox verify failed on port %d: %s", port, strings.Join(missing, "; "))
+	}
+	return nil
 }

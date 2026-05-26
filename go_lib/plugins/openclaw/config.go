@@ -337,24 +337,26 @@ func stripTrailingCommas(input []byte) []byte {
 }
 
 // getPrimaryModelFromConfig extracts the primary model from config.
+// 对配置缺失 / 未配置主模型 / openclaw 新版本写出的非常规结构, 返回空字符串而非错误,
+// 让上层(如 startGatewayWithProxy)按"无主模型"继续覆盖写入,不致于一次性配置异常
+// 把整个防护启用流程卡住。
 func getPrimaryModelFromConfig(config *OpenclawConfig) (string, error) {
 	if config == nil {
-		return "", fmt.Errorf("config is nil")
+		return "", nil
 	}
 
 	switch model := config.Agents.Defaults.Model.(type) {
+	case nil:
+		return "", nil
 	case string:
-		if strings.TrimSpace(model) == "" {
-			return "", fmt.Errorf("primary model is empty")
-		}
-		return model, nil
+		return strings.TrimSpace(model), nil
 	case map[string]interface{}:
-		if primary, ok := model["primary"].(string); ok && strings.TrimSpace(primary) != "" {
-			return primary, nil
+		if primary, ok := model["primary"].(string); ok {
+			return strings.TrimSpace(primary), nil
 		}
-		return "", fmt.Errorf("primary model not found in config")
+		return "", nil
 	default:
-		return "", fmt.Errorf("unsupported model config type")
+		return "", nil
 	}
 }
 
