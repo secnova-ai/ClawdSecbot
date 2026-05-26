@@ -22,8 +22,8 @@
   /home/node/.openclaw              ← ./data/conf           (OpenClaw 配置)
   /home/node/.openclaw/workspace    ← ./data/workspace      (OpenClaw 工作区)
   /tmp/ClawdSecbot                  ← ./data/ClawdSecbot    (ClawdSecbot 安装路径)
-  /tmp/botsec_web_workspace         ← ./data/botsec-workspace (ClawdSecbot 数据路径)
-  /tmp/.botsec                      ← ./data/botsec-sandbox   (ClawdSecbot 防护路径)
+  /tmp/botsec_web_workspace         ← ./data/ClawdSecbot-workspace (ClawdSecbot 数据路径)
+  /tmp/.botsec                      ← ./data/ClawdSecbot-sandbox   (ClawdSecbot 防护路径)
 ```
 
 ### 2.2 启动链
@@ -32,8 +32,8 @@
 |------|------|------|
 | PID 1 | `init: true` | Docker回收子进程 |
 | 入口 | `scripts/entrypoint-botsec.sh` | 覆盖镜像默认 Cmd 不修改镜像内文件 |
-| OpenClaw | `/usr/local/bin/docker-entrypoint.sh` + `node openclaw.mjs gateway --allow-unconfigured` | 后台进程 |
-| WebUI | `/tmp/ClawdSecbot/bin/botsec_webd --addr 0.0.0.0:18080` | 前台同容器 |
+| OpenClaw | entrypoint 可选预启; 沙箱启用后由 WebUI `gateway run` + `LD_PRELOAD` 直启 | 与 botsec_webd 脱钩 |
+| WebUI | `/tmp/ClawdSecbot/bin/botsec_webd --addr 0.0.0.0:18080` | 容器主进程(前台 exec) |
 
 ---
 
@@ -41,7 +41,7 @@
 
 - 存在 docker compose 环境
 - 镜像例如 `1panel/openclaw:2026.5.4`
-- tar包例如 `ClawdSecbot-web-1.0.4-202605251353-x86_64-community.tar.gz`
+- tar包例如 `ClawdSecbot-web-1.0.5-202605271453-x86_64-community.tar.gz`
 - 宿主机 CPU 架构与镜像、tar包一致
   - `x86_64` 宿主机 → `*-x86_64-*.tar.gz` + `linux/amd64` 镜像
   - `aarch64` 宿主机 → `*-arm64-*.tar.gz` + `linux/arm64` 镜像
@@ -62,8 +62,8 @@ $APP_ROOT/
 │   │   ├── bin/botsec_webd
 │   │   ├── web/
 │   │   └── lib/libsandbox_preload.so
-│   ├── botsec-workspace/             # 持久化 → /tmp/botsec_web_workspace
-│   └── botsec-sandbox/               # 持久化 → /tmp/.botsec
+│   ├── ClawdSecbot-workspace/             # 持久化 → /tmp/botsec_web_workspace
+│   └── ClawdSecbot-sandbox/               # 持久化 → /tmp/.botsec
 ├── data.yml                          # 增加 BOTSEC_WEB_PORT
 ├── docker-compose.yml                # 修改
 └── scripts
@@ -94,7 +94,7 @@ ClawdSecbot-web-<version>-<build>-<arch>-<type>/
 
 ```bash
 mkdir -p data/ClawdSecbot
-tar -xzf ClawdSecbot-web-1.0.4-202605251353-x86_64-community.tar.gz -C /tmp
+tar -xzf ClawdSecbot-web-1.0.5-202605271453-x86_64-community.tar.gz -C /tmp
 cp -a /tmp/ClawdSecbot-web-*/{bin,web,lib} data/ClawdSecbot/
 chmod +x data/ClawdSecbot/bin/botsec_webd
 ```
@@ -110,17 +110,17 @@ file data/ClawdSecbot/bin/botsec_webd
 
 ### 5.2 创建持久化目录并设置权限
 
-容器内进程用户为镜像中的 **`node`**. 将宿主机映射目录设为 **0777** 可避免 uid 不一致导致的 `mkdir permission denied`(权限不足).
+容器内进程用户为镜像中的 `node`. 将宿主机映射目录设为 **0777** 可避免 uid 不一致导致的 `mkdir permission denied`(权限不足).
 
 ```bash
-mkdir -p data/botsec-sandbox/
-mkdir -p data/botsec-workspace/
-chmod -R 0777 data/botsec-sandbox data/botsec-workspace
+mkdir -p data/ClawdSecbot-sandbox/
+mkdir -p data/ClawdSecbot-workspace/
+chmod -R 0777 data/ClawdSecbot-sandbox data/ClawdSecbot-workspace
 ```
 
 ### 5.3 创建入口脚本
 
-创建 **`scripts/entrypoint-botsec.sh`**, > 使用 **`/bin/sh`** 作为脚本解释器:
+创建 **`scripts/entrypoint-botsec.sh`**, 使用 **`/bin/sh`** 作为脚本解释器:
 
 ```sh
 #!/bin/sh
@@ -130,6 +130,7 @@ BOTSEC_ROOT="/tmp/ClawdSecbot"
 BOTSEC_WEBD="$BOTSEC_ROOT/bin/botsec_webd"
 BOTSEC_WEB_ROOT="$BOTSEC_ROOT/web"
 OPENCLAW_ENTRYPOINT="/usr/local/bin/docker-entrypoint.sh"
+OPENCLAW_CONF_DIR="${HOME:-/home/node}/.openclaw"
 
 mkdir -p /tmp/botsec_web_workspace /tmp/.botsec
 mkdir -p /tmp/.botsec/backups /tmp/.botsec/policies /tmp/.botsec/logs
@@ -147,23 +148,35 @@ if [ ! -d "$BOTSEC_WEB_ROOT" ]; then
   exit 1
 fi
 
-echo "[entrypoint] starting OpenClaw gateway on :18789"
-"$OPENCLAW_ENTRYPOINT" node openclaw.mjs gateway --allow-unconfigured &
-OPENCLAW_PID=$!
+# 清理上一次运行残留的 pid / lock, 否则 `openclaw gateway run` 会拒绝启动
+rm -f "$OPENCLAW_CONF_DIR/.gateway.pid" \
+      "$OPENCLAW_CONF_DIR/gateway.pid" \
+      "$OPENCLAW_CONF_DIR/gateway.lock" 2>/dev/null || true
+
+# 预启 OpenClaw gateway: 用子 shell + setsid 双 fork 脱离当前会话,
+# 启动后该进程的 PPID 变为 1 (docker-init/tini), 后续 WebUI 发送 SIGKILL
+# 切换沙箱时, 该进程能被 PID 1 正确 reap, 不会变成 [openclaw] <defunct> 僵尸进程,
+# 也避免占用 18789 端口的 socket 释放不及时。
+echo "[entrypoint] pre-starting OpenClaw gateway on :18789 (detached to PID 1)"
+(
+  setsid "$OPENCLAW_ENTRYPOINT" node openclaw.mjs gateway --allow-unconfigured \
+    </dev/null >/tmp/openclaw-bootstrap.log 2>&1 &
+)
 
 echo "[entrypoint] starting botsec_webd on :18080"
 export BOTSEC_WEB_STATIC_DIR="$BOTSEC_WEB_ROOT"
-"$BOTSEC_WEBD" --addr 0.0.0.0:18080 --web-root "$BOTSEC_WEB_ROOT" &
-WEBD_PID=$!
-
-trap 'kill -TERM $WEBD_PID $OPENCLAW_PID 2>/dev/null; wait $WEBD_PID $OPENCLAW_PID 2>/dev/null; exit 0' INT TERM
-
-wait $OPENCLAW_PID $WEBD_PID 2>/dev/null || true
-EXIT_CODE=$?
-kill -TERM $WEBD_PID $OPENCLAW_PID 2>/dev/null || true
-wait $WEBD_PID $OPENCLAW_PID 2>/dev/null || true
-exit $EXIT_CODE
+exec "$BOTSEC_WEBD" --addr 0.0.0.0:18080 --web-root "$BOTSEC_WEB_ROOT"
 ```
+
+**为什么用子 shell + `setsid` 双 fork**:
+
+- `(... &)` 子 shell 启动后台命令再立刻退出, 该命令瞬间失去父进程被 PID 1 收养
+- `setsid` 让 OpenClaw 进入独立 session, 与 `botsec_webd` 的会话彻底解耦
+- 这样 WebUI 一键防护时, `restartOpenclawGateway` 通过 SIGKILL 杀掉旧 gateway, PID 1 的 tini 会及时 reap, 不会出现 `[openclaw] <defunct>`
+
+**严禁** 直接写成 `"$OPENCLAW_ENTRYPOINT" ... &`, 这种写法会让 OpenClaw 的 PPID 留在 `botsec_webd`, `botsec_webd` 不会 reap 它派生时未持有的子进程, 必然产生僵尸。
+
+**可选**: 若接受首次访问前需先点「一键防护」, 可省略 entrypoint 中的 OpenClaw 预启, 仅 `exec botsec_webd`.
 
 ```bash
 chmod +x scripts/entrypoint-botsec.sh
@@ -199,8 +212,8 @@ services:
             - ./data/ClawdSecbot:/tmp/ClawdSecbot
             - ./scripts/entrypoint-botsec.sh:/tmp/ClawdSecbot/scripts/entrypoint-botsec.sh
             - ./data/ClawdSecbot/lib/libsandbox_preload.so:/usr/lib/clawdsecbot/libsandbox_preload.so
-            - ./data/botsec-workspace:/tmp/botsec_web_workspace
-            - ./data/botsec-sandbox:/tmp/.botsec
+            - ./data/ClawdSecbot-workspace:/tmp/botsec_web_workspace
+            - ./data/ClawdSecbot-sandbox:/tmp/.botsec
             - /etc/localtime:/etc/localtime
         deploy:
             resources:
@@ -272,9 +285,6 @@ docker compose logs --tail=100
 [entrypoint] starting OpenClaw gateway on :18789
 [entrypoint] starting botsec_webd on :18080
 [webbridge] listening on http://0.0.0.0:18080
-[gateway] loading configuration…
-[gateway] resolving authentication…
-[gateway] starting...
 ```
 
 **进程与健康检查:**
@@ -309,7 +319,7 @@ chmod +x data/ClawdSecbot/bin/botsec_webd
 docker compose restart
 ```
 
-`data/botsec-workspace` 与 `data/botsec-sandbox` **通常保留**, 无需删除。
+`data/ClawdSecbot-workspace` 与 `data/ClawdSecbot-sandbox` **通常保留**, 无需删除。
 
 ### 6.2 升级 OpenClaw 镜像
 

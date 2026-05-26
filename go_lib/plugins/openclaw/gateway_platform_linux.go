@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -16,7 +18,10 @@ import (
 )
 
 const (
-	systemdServiceName = "openclaw-gateway.service"
+	systemdServiceName         = "openclaw-gateway.service"
+	containerBotsecWebdPath    = "/tmp/ClawdSecbot/bin/botsec_webd"
+	containerPreloadLibPath    = "/tmp/ClawdSecbot/lib/libsandbox_preload.so"
+	openclawGatewayRunAllowArg = "--allow-unconfigured"
 )
 
 var (
@@ -47,6 +52,11 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 	} else {
 		homeDir, _ = os.UserHomeDir()
 	}
+	if isContainerWebUIEnvironment() {
+		if runtimeHomeDir := currentUserHomeDir(); runtimeHomeDir != "" {
+			homeDir = runtimeHomeDir
+		}
+	}
 
 	// 1) 推导 openclaw 二进制路径
 	binaryPath := resolveOpenclawBinaryPath()
@@ -56,11 +66,32 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 	logging.Info("[GatewayManager] Resolved binary=%s", binaryPath)
 
 	configPath, _ := findConfigPath()
+	gatewayPort := resolveGatewayListenPort(configPath)
+
+	policyDir := req.PolicyDir
+	if policyDir == "" {
+		policyDir = core.ResolvePolicyDir(homeDir)
+	}
+	_ = os.MkdirAll(policyDir, 0755)
+	logDir := core.ResolveSandboxLogDir(homeDir)
+	_ = os.MkdirAll(logDir, 0755)
+
+	// 容器 WebUI / 无可用 systemd 时永远走直启 gateway 路径,
+	// 避免调用 `openclaw gateway install` 在卷挂载只读时把配置写到 /tmp/.openclaw,
+	// 也避免 systemctl 不可用引起的级联错误。
+	if shouldUseDirectSandboxGatewayRestart(homeDir) {
+		if req.SandboxEnabled {
+			logging.Info("[GatewayManager] Using direct gateway restart with sandbox env (container or no systemd)")
+			return startOpenclawGatewayDirectWithSandbox(req, binaryPath, configPath, homeDir, policyDir, logDir)
+		}
+		logging.Info("[GatewayManager] Using direct gateway restart without sandbox env (container or no systemd)")
+		return startOpenclawGatewayDirectNoSandbox(req, binaryPath, configPath, homeDir, logDir)
+	}
 
 	// 2) stop gateway via systemctl
 	logging.Info("[GatewayManager] Step 2: Stopping gateway via systemctl...")
 	if req.SandboxEnabled {
-		stopExistingGatewayListeners(resolveGatewayListenPort(configPath))
+		stopExistingGatewayListeners(gatewayPort)
 	}
 	_ = runSystemctl("stop", systemdServiceName)
 	time.Sleep(800 * time.Millisecond)
@@ -71,14 +102,6 @@ func restartOpenclawGateway(req *GatewayRestartRequest) (map[string]interface{},
 	if installErr != nil {
 		logging.Warning("[GatewayManager] gateway install failed: %v", installErr)
 	}
-
-	policyDir := req.PolicyDir
-	if policyDir == "" {
-		policyDir = core.ResolvePolicyDir(homeDir)
-	}
-	_ = os.MkdirAll(policyDir, 0755)
-	logDir := core.ResolveSandboxLogDir(homeDir)
-	_ = os.MkdirAll(logDir, 0755)
 
 	if unitPath == "" {
 		if req.SandboxEnabled {
@@ -237,38 +260,6 @@ func runOpenclawGatewayCommand(binaryPath string, args []string, homeDir string)
 	return string(out), err
 }
 
-// runOpenclawGatewayCommandWithEnv 直接执行 openclaw gateway 命令并附加沙箱环境变量。
-func runOpenclawGatewayCommandWithEnv(binaryPath string, args []string, homeDir string, extraEnv []string) (string, error) {
-	if binaryPath == "" {
-		return "", fmt.Errorf("binary path is empty")
-	}
-
-	cmdArgs := append([]string{"gateway"}, args...)
-	env := append(os.Environ(), extraEnv...)
-	if homeDir != "" {
-		env = append(env, "HOME="+homeDir)
-	}
-	cmd := cmdutil.Command(binaryPath, cmdArgs...)
-	cmd.Env = env
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		return string(out), nil
-	}
-
-	fullCmd := binaryPath
-	for _, a := range cmdArgs {
-		fullCmd += " " + a
-	}
-	bashCmd := cmdutil.Command("/bin/bash", "-l", "-c", fullCmd)
-	bashCmd.Env = env
-	bashOut, bashErr := bashCmd.CombinedOutput()
-	if bashErr == nil {
-		return string(bashOut), nil
-	}
-
-	return string(out), err
-}
-
 // startOpenclawGatewayDirectWithSandbox 在无 systemd 的容器内通过环境变量直启沙箱网关。
 func startOpenclawGatewayDirectWithSandbox(req *GatewayRestartRequest, binaryPath string, configPath string, homeDir string, policyDir string, logDir string) (map[string]interface{}, error) {
 	if err := ensureContainerRuntimeWritableDirs(); err != nil {
@@ -296,24 +287,286 @@ func startOpenclawGatewayDirectWithSandbox(req *GatewayRestartRequest, binaryPat
 
 	gatewayPort := resolveGatewayListenPort(configPath)
 	stopExistingGatewayListeners(gatewayPort)
-	_, _ = runOpenclawGatewayCommand(binaryPath, []string{"stop"}, homeDir)
-	_, err = runOpenclawGatewayCommandWithEnv(binaryPath, []string{"start"}, homeDir, []string{
+	waitGatewayPortReleased(gatewayPort, 3*time.Second)
+	cleanupOpenclawGatewayLockFiles(homeDir, configPath)
+
+	sandboxEnv := []string{
 		"LD_PRELOAD=" + preloadLib,
 		"SANDBOX_POLICY_FILE=" + policyPath,
 		"SANDBOX_LOG_FILE=" + logPath,
-	})
+	}
+	managedPID, err := launchDetachedOpenclawGatewayWithEnv(binaryPath, homeDir, sandboxEnv)
 	if err != nil {
 		return nil, fmt.Errorf("direct sandbox gateway start failed: %v", err)
 	}
-	verifyGatewayListenerHasPreload(gatewayPort, preloadLib)
+	logging.Info("[GatewayManager] Detached sandbox gateway started pid=%d (gateway run)", managedPID)
+
+	if err := waitForGatewayListenerHasPreload(gatewayPort, preloadLib, managedPID, 15*time.Second); err != nil {
+		return nil, err
+	}
 
 	return map[string]interface{}{
 		"success":          true,
 		"modified":         true,
 		"unit":             "",
+		"managed_pid":      managedPID,
 		"sandbox_log_path": logPath,
-		"message":          "gateway started directly with sandbox protection",
+		"message":          "gateway started directly with sandbox protection (gateway run)",
 	}, nil
+}
+
+// startOpenclawGatewayDirectNoSandbox 在容器 / 无 systemd 场景下,
+// 不带任何 LD_PRELOAD 沙箱环境变量直启 openclaw gateway run。
+// 用于关闭防护后恢复默认运行,严禁调用 `openclaw gateway install`,
+// 防止其在卷挂载只读时把新配置回退到 /tmp/.openclaw 造成路径漂移。
+func startOpenclawGatewayDirectNoSandbox(req *GatewayRestartRequest, binaryPath string, configPath string, homeDir string, logDir string) (map[string]interface{}, error) {
+	_ = req
+	if err := ensureContainerRuntimeWritableDirs(); err != nil {
+		return nil, fmt.Errorf("ensure container writable dirs failed: %v", err)
+	}
+
+	gatewayPort := resolveGatewayListenPort(configPath)
+	stopExistingGatewayListeners(gatewayPort)
+	waitGatewayPortReleased(gatewayPort, 3*time.Second)
+	cleanupOpenclawGatewayLockFiles(homeDir, configPath)
+
+	managedPID, err := launchDetachedOpenclawGatewayWithEnv(binaryPath, homeDir, nil)
+	if err != nil {
+		return nil, fmt.Errorf("direct gateway start failed: %v", err)
+	}
+	logging.Info("[GatewayManager] Detached gateway started pid=%d (gateway run, no sandbox)", managedPID)
+
+	if err := waitForGatewayListener(gatewayPort, managedPID, 15*time.Second); err != nil {
+		return nil, err
+	}
+
+	runLogPath := openclawGatewayRunLogPath(homeDir, logDir)
+	return map[string]interface{}{
+		"success":     true,
+		"modified":    true,
+		"unit":        "",
+		"managed_pid": managedPID,
+		"run_log":     runLogPath,
+		"message":     "gateway started directly without sandbox (gateway run)",
+	}, nil
+}
+
+// shouldUseDirectSandboxGatewayRestart 判断是否在容器 WebUI 或无可用 systemd user 单元时走直启沙箱路径。
+func shouldUseDirectSandboxGatewayRestart(homeDir string) bool {
+	if _, err := os.Stat(containerBotsecWebdPath); err == nil {
+		return true
+	}
+	return !isSystemdUserGatewayAvailable(homeDir)
+}
+
+// isSystemdUserGatewayAvailable 检查用户级 systemd 是否已加载 openclaw-gateway 单元。
+func isSystemdUserGatewayAvailable(homeDir string) bool {
+	if findSystemdUnitPath(homeDir) == "" {
+		return false
+	}
+	cmd := cmdutil.Command("systemctl", "--user", "show", "-p", "LoadState", systemdServiceName)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(out), "LoadState=loaded")
+}
+
+// launchDetachedOpenclawGatewayWithEnv 后台启动 openclaw gateway run, 与 botsec_webd 脱钩。
+// 容器 WebUI 场景也保持使用 openclaw gateway run, 避免重启路径和日志路径漂移。
+func launchDetachedOpenclawGatewayWithEnv(binaryPath string, homeDir string, extraEnv []string) (int, error) {
+	if binaryPath == "" {
+		return 0, fmt.Errorf("binary path is empty")
+	}
+
+	env := buildGatewayEnv(homeDir, extraEnv)
+
+	logging.Info("[GatewayManager] Using openclaw CLI command: %s gateway run %s", binaryPath, openclawGatewayRunAllowArg)
+	cmd := cmdutil.Command(binaryPath, "gateway", "run", openclawGatewayRunAllowArg)
+	cmd.Stdin = nil
+
+	runLogPath := openclawGatewayRunLogPath(homeDir, "")
+	attachGatewayRunLog(cmd, runLogPath)
+
+	cmd.Env = env
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	go func() {
+		_ = cmd.Wait()
+	}()
+	return cmd.Process.Pid, nil
+}
+
+// buildGatewayEnv 构建用于 gateway 进程的环境变量列表。
+// 容器环境下 HOME 使用当前运行用户的家目录, 最后追加 extraEnv (如 LD_PRELOAD 等沙箱变量)。
+func buildGatewayEnv(homeDir string, extraEnv []string) []string {
+	baseEnv := os.Environ()
+	homeDir = strings.TrimSpace(homeDir)
+	if homeDir == "" {
+		return append(baseEnv, extraEnv...)
+	}
+
+	env := make([]string, 0, len(baseEnv)+len(extraEnv)+1)
+	for _, e := range baseEnv {
+		if strings.HasPrefix(e, "HOME=") {
+			continue
+		}
+		env = append(env, e)
+	}
+	env = append(env, "HOME="+homeDir)
+	env = append(env, extraEnv...)
+	return env
+}
+
+// attachGatewayRunLog 将 gateway 进程的 stdout/stderr 重定向到日志文件。
+func attachGatewayRunLog(cmd *exec.Cmd, runLogPath string) {
+	if runLogPath == "" {
+		cmdutil.Silence(cmd)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(runLogPath), 0755); err != nil {
+		logging.Warning("[GatewayManager] mkdir gateway run log dir failed: %v", err)
+		cmdutil.Silence(cmd)
+		return
+	}
+	logFile, err := os.OpenFile(runLogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		logging.Warning("[GatewayManager] open gateway run log failed: %v", err)
+		cmdutil.Silence(cmd)
+		return
+	}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+}
+
+// isContainerWebUIEnvironment 检测是否在 ClawdSecbot 容器 WebUI 环境。
+func isContainerWebUIEnvironment() bool {
+	_, err := os.Stat(containerBotsecWebdPath)
+	return err == nil
+}
+
+// currentUserHomeDir 返回当前运行用户的家目录, 优先使用系统用户数据库而非 HOME 环境变量。
+func currentUserHomeDir() string {
+	if usr, err := user.Current(); err == nil && usr != nil {
+		if homeDir := strings.TrimSpace(usr.HomeDir); homeDir != "" {
+			return homeDir
+		}
+	}
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		return strings.TrimSpace(homeDir)
+	}
+	return ""
+}
+
+// openclawGatewayRunLogPath 推导 openclaw gateway run 的 stdout/stderr 日志文件路径。
+func openclawGatewayRunLogPath(homeDir string, logDir string) string {
+	dir := strings.TrimSpace(logDir)
+	if dir == "" {
+		dir = core.ResolveSandboxLogDir(homeDir)
+	}
+	if strings.TrimSpace(dir) == "" {
+		return ""
+	}
+	return filepath.Join(dir, "openclaw_gateway_run.log")
+}
+
+// waitGatewayPortReleased 等待网关端口真正释放, 避免 SIGKILL 后 300ms 还未来得及回收 socket。
+func waitGatewayPortReleased(port int, timeout time.Duration) {
+	if port <= 0 || timeout <= 0 {
+		return
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if len(findListenPIDsOnTCPPort(port)) == 0 {
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	logging.Warning("[GatewayManager] Port %d still has listeners after %s", port, timeout.String())
+}
+
+// cleanupOpenclawGatewayLockFiles 清理 openclaw 残留的 pid / lock 文件,
+// 防止 `openclaw gateway run` 检测到旧实例文件直接拒绝启动。
+func cleanupOpenclawGatewayLockFiles(homeDir string, configPath string) {
+	candidates := make([]string, 0, 4)
+	if cfgDir := strings.TrimSpace(filepath.Dir(configPath)); cfgDir != "" && cfgDir != "." {
+		candidates = append(candidates,
+			filepath.Join(cfgDir, ".gateway.pid"),
+			filepath.Join(cfgDir, "gateway.lock"),
+			filepath.Join(cfgDir, "gateway.pid"),
+		)
+	}
+	if hd := strings.TrimSpace(homeDir); hd != "" {
+		candidates = append(candidates,
+			filepath.Join(hd, ".openclaw", ".gateway.pid"),
+			filepath.Join(hd, ".openclaw", "gateway.lock"),
+			filepath.Join(hd, ".openclaw", "gateway.pid"),
+		)
+	}
+	for _, path := range candidates {
+		if path == "" {
+			continue
+		}
+		if err := os.Remove(path); err == nil {
+			logging.Info("[GatewayManager] Removed stale gateway lockfile: %s", path)
+		}
+	}
+}
+
+// waitForGatewayListener 轮询等待网关监听端口就绪, 不校验 LD_PRELOAD。
+func waitForGatewayListener(port int, managedPID int, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if len(findListenPIDsOnTCPPort(port)) > 0 {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	processState := "unknown"
+	if managedPID > 0 {
+		processState = "exited"
+		if _, err := os.Stat(filepath.Join("/proc", fmt.Sprintf("%d", managedPID))); err == nil {
+			processState = "alive"
+		}
+	}
+	return fmt.Errorf(
+		"no openclaw gateway listener on port %d after %s (managed_pid=%d,%s); see openclaw_gateway_run.log",
+		port, timeout.String(), managedPID, processState,
+	)
+}
+
+// waitForGatewayListenerHasPreload 轮询等待网关监听就绪并携带预期 LD_PRELOAD, 避免固定 sleep 误判。
+func waitForGatewayListenerHasPreload(port int, preloadLib string, managedPID int, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		if err := verifyGatewayListenerHasPreload(port, preloadLib); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	listeners := findListenPIDsOnTCPPort(port)
+	processState := "unknown"
+	if managedPID > 0 {
+		processState = "exited"
+		if _, err := os.Stat(filepath.Join("/proc", fmt.Sprintf("%d", managedPID))); err == nil {
+			processState = "alive"
+		}
+	}
+	return fmt.Errorf(
+		"gateway listener verify timeout after %s (managed_pid=%d,%s,listener_pids=%v): %w",
+		timeout.String(), managedPID, processState, listeners, lastErr,
+	)
 }
 
 // resolveGatewayListenPort 从 Openclaw 配置解析网关监听端口，失败时回退默认 18789。
@@ -417,6 +670,7 @@ func findSystemdUnitPath(homeDir string) string {
 // findPreloadLibrary 查找 LD_PRELOAD 沙箱库
 func findPreloadLibrary(policyDir string) string {
 	paths := []string{
+		containerPreloadLibPath,
 		"/usr/lib/clawdsecbot/libsandbox_preload.so",
 		"/usr/local/lib/libsandbox_preload.so",
 		"/usr/lib/libsandbox_preload.so",
