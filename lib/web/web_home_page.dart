@@ -2286,20 +2286,25 @@ class _WebHomePageState extends State<WebHomePage> {
       return const SizedBox.shrink();
     }
 
-    return ScanResultView(
-      result: result,
-      protectedAssets: _protectedAssetIDs,
-      isRestoringProtection: _isRestoringProtection,
-      stoppingProtectionAssets: _stoppingProtectionAssetIDs,
-      selectedRescanAction: _selectedRescanAction,
-      onRescanActionChanged: _handleRescanActionChanged,
-      onRescan: _resetScan,
-      onViewSkillScanResults: _showSkillScanResultsDialog,
-      onShowProtectionConfig: _showProtectionConfigDialog,
-      onShowProtectionMonitor: (asset) => _showProtectionMonitorResolved(asset),
-      onStopProtection: _stopProtectionForAsset,
-      onShowMitigation: _showMitigationDialog,
-      onDeleteRiskSkill: _deleteRiskSkill,
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1280),
+        child: ScanResultView(
+          result: result,
+          protectedAssets: _protectedAssetIDs,
+          isRestoringProtection: _isRestoringProtection,
+          stoppingProtectionAssets: _stoppingProtectionAssetIDs,
+          selectedRescanAction: _selectedRescanAction,
+          onRescanActionChanged: _handleRescanActionChanged,
+          onRescan: _resetScan,
+          onViewSkillScanResults: _showSkillScanResultsDialog,
+          onShowProtectionConfig: _showProtectionConfigDialog,
+          onShowProtectionMonitor: (asset) => _showProtectionMonitorResolved(asset),
+          onStopProtection: _stopProtectionForAsset,
+          onShowMitigation: _showMitigationDialog,
+          onDeleteRiskSkill: _deleteRiskSkill,
+        ),
+      ),
     );
   }
 }

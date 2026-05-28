@@ -102,9 +102,8 @@ class ScanResultView extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              Flexible(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
+              Expanded(
+                child: Align(
                   alignment: Alignment.centerRight,
                   child: _buildHeaderActions(l10n),
                 ),
