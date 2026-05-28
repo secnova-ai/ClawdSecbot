@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <dlfcn.h>
 #include <errno.h>
@@ -17,6 +18,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <dirent.h>
+#include <spawn.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -941,6 +943,11 @@ static void sandbox_init(void) {
             O_WRONLY | O_CREAT | O_APPEND,
             0600
         );
+        if (g_sandbox_log_fd < 0) {
+            fprintf(stderr, "[ClawdSecbot] [pid=%d] failed to open SANDBOX_LOG_FILE=%s err=%d\n",
+                    (int)getpid(), g_sandbox_log_file_path, errno);
+            fflush(stderr);
+        }
     }
 
     if (policy_path && policy_path[0] != '\0') {
@@ -992,6 +999,11 @@ static int (*real_open_fn)(const char *, int, ...) = NULL;
 static int (*real_openat_fn)(int, const char *, int, ...) = NULL;
 static int (*real_open64_fn)(const char *, int, ...) = NULL;
 static int (*real_openat64_fn)(int, const char *, int, ...) = NULL;
+static int (*real___open_2_fn)(const char *, int) = NULL;
+static int (*real___open64_2_fn)(const char *, int) = NULL;
+static int (*real___openat_2_fn)(int, const char *, int) = NULL;
+static int (*real___openat64_2_fn)(int, const char *, int) = NULL;
+static int (*real_openat2_fn)(int, const char *, const void *, size_t) = NULL;
 static int (*real_creat_fn)(const char *, mode_t) = NULL;
 static int (*real_creat64_fn)(const char *, mode_t) = NULL;
 static FILE *(*real_fopen_fn)(const char *, const char *) = NULL;
@@ -1014,6 +1026,8 @@ static int (*real_fstatat_fn)(int, const char *, struct stat *, int) = NULL;
 static int (*real_stat64_fn)(const char *, struct stat64 *) = NULL;
 static int (*real_lstat64_fn)(const char *, struct stat64 *) = NULL;
 static int (*real_fstatat64_fn)(int, const char *, struct stat64 *, int) = NULL;
+static ssize_t (*real_readlink_fn)(const char *, char *, size_t) = NULL;
+static ssize_t (*real_readlinkat_fn)(int, const char *, char *, size_t) = NULL;
 static ssize_t (*real_read_fn)(int, void *, size_t) = NULL;
 static ssize_t (*real_write_fn)(int, const void *, size_t) = NULL;
 static ssize_t (*real_pread_fn)(int, void *, size_t, off_t) = NULL;
@@ -1036,6 +1050,11 @@ static ssize_t (*real_sendto_fn)(int, const void *, size_t, int,
 static ssize_t (*real_sendmsg_fn)(int, const struct msghdr *, int) = NULL;
 static int (*real_system_fn)(const char *) = NULL;
 static int (*real_execve_fn)(const char *, char *const [], char *const []) = NULL;
+static int (*real_execveat_fn)(int, const char *, char *const [], char *const [], int) = NULL;
+static int (*real_posix_spawn_fn)(pid_t *, const char *, const posix_spawn_file_actions_t *,
+                                  const posix_spawnattr_t *, char *const [], char *const []) = NULL;
+static int (*real_posix_spawnp_fn)(pid_t *, const char *, const posix_spawn_file_actions_t *,
+                                   const posix_spawnattr_t *, char *const [], char *const []) = NULL;
 static int (*real_getaddrinfo_fn)(const char *, const char *,
                                   const struct addrinfo *, struct addrinfo **) = NULL;
 
@@ -1057,6 +1076,16 @@ static int check_sockaddr_blocked(const struct sockaddr *addr, socklen_t addrlen
         return 1;
     }
     return 0;
+}
+
+// 将 openat2 how.flags 映射为路径操作位图；若无法解析则按最保守读目录处理。
+static unsigned int build_openat2_op_mask(const void *how, size_t size) {
+    if (!how || size < sizeof(uint64_t)) {
+        return PATH_OP_DIR_OPEN | PATH_OP_READ;
+    }
+    const uint64_t *u64 = (const uint64_t *)how;
+    int flags = (int)(u64[0] & 0x7fffffffULL);
+    return build_open_op_mask(flags);
 }
 
 // 拦截 open() 系统调用，检查文件路径是否被策略禁止
@@ -1159,6 +1188,75 @@ int openat64(int dirfd, const char *pathname, int flags, ...) {
     }
     va_end(ap);
     return ret;
+}
+
+// 拦截 __open_2()，覆盖开启 FORTIFY_SOURCE 后 glibc 的内部 open 包装路径。
+int __open_2(const char *pathname, int flags) {
+    if (!real___open_2_fn) {
+        real___open_2_fn = (int (*)(const char *, int))dlsym(RTLD_NEXT, "__open_2");
+    }
+    char norm_path[PATH_MAX] = {0};
+    const char *path_for_check = normalize_path_for_policy(pathname, AT_FDCWD, norm_path, sizeof(norm_path));
+    if (pathname && enforce_path_policy_by_mask(path_for_check, build_open_op_mask(flags))) {
+        return -1;
+    }
+    return real___open_2_fn(pathname, flags);
+}
+
+// 拦截 __open64_2()，覆盖 64 位 FORTIFY open 包装路径。
+int __open64_2(const char *pathname, int flags) {
+    if (!real___open64_2_fn) {
+        real___open64_2_fn = (int (*)(const char *, int))dlsym(RTLD_NEXT, "__open64_2");
+    }
+    char norm_path[PATH_MAX] = {0};
+    const char *path_for_check = normalize_path_for_policy(pathname, AT_FDCWD, norm_path, sizeof(norm_path));
+    if (pathname && enforce_path_policy_by_mask(path_for_check, build_open_op_mask(flags))) {
+        return -1;
+    }
+    return real___open64_2_fn(pathname, flags);
+}
+
+// 拦截 __openat_2()，覆盖开启 FORTIFY_SOURCE 后 glibc 的内部 openat 包装路径。
+int __openat_2(int dirfd, const char *pathname, int flags) {
+    if (!real___openat_2_fn) {
+        real___openat_2_fn = (int (*)(int, const char *, int))dlsym(RTLD_NEXT, "__openat_2");
+    }
+    char norm_path[PATH_MAX] = {0};
+    const char *path_for_check = normalize_path_for_policy(pathname, dirfd, norm_path, sizeof(norm_path));
+    if (pathname && enforce_path_policy_by_mask(path_for_check, build_open_op_mask(flags))) {
+        return -1;
+    }
+    return real___openat_2_fn(dirfd, pathname, flags);
+}
+
+// 拦截 __openat64_2()，覆盖 64 位 FORTIFY openat 包装路径。
+int __openat64_2(int dirfd, const char *pathname, int flags) {
+    if (!real___openat64_2_fn) {
+        real___openat64_2_fn = (int (*)(int, const char *, int))dlsym(RTLD_NEXT, "__openat64_2");
+    }
+    char norm_path[PATH_MAX] = {0};
+    const char *path_for_check = normalize_path_for_policy(pathname, dirfd, norm_path, sizeof(norm_path));
+    if (pathname && enforce_path_policy_by_mask(path_for_check, build_open_op_mask(flags))) {
+        return -1;
+    }
+    return real___openat64_2_fn(dirfd, pathname, flags);
+}
+
+// 拦截 openat2()，覆盖新内核/新 libc 下路径访问走 openat2 的场景。
+int openat2(int dirfd, const char *pathname, const void *how, size_t size) {
+    if (!real_openat2_fn) {
+        real_openat2_fn = (int (*)(int, const char *, const void *, size_t))dlsym(RTLD_NEXT, "openat2");
+    }
+    char norm_path[PATH_MAX] = {0};
+    const char *path_for_check = normalize_path_for_policy(pathname, dirfd, norm_path, sizeof(norm_path));
+    if (pathname && enforce_path_policy_by_mask(path_for_check, build_openat2_op_mask(how, size))) {
+        return -1;
+    }
+    if (real_openat2_fn) {
+        return real_openat2_fn(dirfd, pathname, how, size);
+    }
+    errno = ENOSYS;
+    return -1;
 }
 
 int creat(const char *pathname, mode_t mode) {
@@ -1433,6 +1531,36 @@ int fstatat64(int dirfd, const char *pathname, struct stat64 *statbuf, int flags
     }
 
     return real_fstatat64_fn(dirfd, pathname, statbuf, flags);
+}
+
+// 拦截 readlink()，覆盖符号链接读取路径的只读访问检查。
+ssize_t readlink(const char *pathname, char *buf, size_t bufsiz) {
+    if (!real_readlink_fn) {
+        real_readlink_fn = (ssize_t (*)(const char *, char *, size_t))dlsym(RTLD_NEXT, "readlink");
+    }
+
+    char norm_path[PATH_MAX] = {0};
+    const char *path_for_check = normalize_path_for_policy(pathname, AT_FDCWD, norm_path, sizeof(norm_path));
+    if (pathname && enforce_path_policy_by_mask(path_for_check, PATH_OP_READ)) {
+        return -1;
+    }
+
+    return real_readlink_fn(pathname, buf, bufsiz);
+}
+
+// 拦截 readlinkat()，覆盖基于 dirfd 的符号链接读取路径检查。
+ssize_t readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
+    if (!real_readlinkat_fn) {
+        real_readlinkat_fn = (ssize_t (*)(int, const char *, char *, size_t))dlsym(RTLD_NEXT, "readlinkat");
+    }
+
+    char norm_path[PATH_MAX] = {0};
+    const char *path_for_check = normalize_path_for_policy(pathname, dirfd, norm_path, sizeof(norm_path));
+    if (pathname && enforce_path_policy_by_mask(path_for_check, PATH_OP_READ)) {
+        return -1;
+    }
+
+    return real_readlinkat_fn(dirfd, pathname, buf, bufsiz);
 }
 
 ssize_t read(int fd, void *buf, size_t count) {
@@ -1800,4 +1928,72 @@ int execve(const char *filename, char *const argv[], char *const envp[]) {
     }
 
     return real_execve_fn(filename, argv, envp);
+}
+
+// 拦截 execveat()，覆盖部分运行时通过 execveat 拉起子进程导致 execve 钩子失效的场景。
+int execveat(int dirfd, const char *pathname, char *const argv[], char *const envp[], int flags) {
+    if (!real_execveat_fn) {
+        real_execveat_fn = (int (*)(int, const char *, char *const [], char *const [], int))dlsym(RTLD_NEXT, "execveat");
+    }
+    const char *cmd = pathname;
+    if (argv && argv[0]) {
+        cmd = argv[0];
+    }
+    if (cmd && is_cmd_blocked(cmd)) {
+        log_event(g_policy.log_only ? "LOG_ONLY" : "BLOCK", "CMD", cmd,
+                  "execveat blocked by command policy");
+        if (!g_policy.log_only) {
+            errno = EPERM;
+            return -1;
+        }
+    }
+    if (real_execveat_fn) {
+        return real_execveat_fn(dirfd, pathname, argv, envp, flags);
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+// 拦截 posix_spawn()，覆盖现代运行时以 spawn 家族启动工具进程的命令策略通道。
+int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *file_actions,
+                const posix_spawnattr_t *attrp, char *const argv[], char *const envp[]) {
+    if (!real_posix_spawn_fn) {
+        real_posix_spawn_fn = (int (*)(pid_t *, const char *, const posix_spawn_file_actions_t *,
+                                       const posix_spawnattr_t *, char *const [], char *const []))
+                              dlsym(RTLD_NEXT, "posix_spawn");
+    }
+    const char *cmd = path;
+    if (argv && argv[0]) {
+        cmd = argv[0];
+    }
+    if (cmd && is_cmd_blocked(cmd)) {
+        log_event(g_policy.log_only ? "LOG_ONLY" : "BLOCK", "CMD", cmd,
+                  "posix_spawn blocked by command policy");
+        if (!g_policy.log_only) {
+            return EPERM;
+        }
+    }
+    return real_posix_spawn_fn(pid, path, file_actions, attrp, argv, envp);
+}
+
+// 拦截 posix_spawnp()，覆盖按 PATH 搜索可执行文件的 spawn 场景。
+int posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file_actions_t *file_actions,
+                 const posix_spawnattr_t *attrp, char *const argv[], char *const envp[]) {
+    if (!real_posix_spawnp_fn) {
+        real_posix_spawnp_fn = (int (*)(pid_t *, const char *, const posix_spawn_file_actions_t *,
+                                        const posix_spawnattr_t *, char *const [], char *const []))
+                               dlsym(RTLD_NEXT, "posix_spawnp");
+    }
+    const char *cmd = file;
+    if (argv && argv[0]) {
+        cmd = argv[0];
+    }
+    if (cmd && is_cmd_blocked(cmd)) {
+        log_event(g_policy.log_only ? "LOG_ONLY" : "BLOCK", "CMD", cmd,
+                  "posix_spawnp blocked by command policy");
+        if (!g_policy.log_only) {
+            return EPERM;
+        }
+    }
+    return real_posix_spawnp_fn(pid, file, file_actions, attrp, argv, envp);
 }
