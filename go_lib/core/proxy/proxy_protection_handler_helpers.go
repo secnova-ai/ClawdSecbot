@@ -34,11 +34,12 @@ func appendAssistantMessageToTruthRecord(r *TruthRecord, content string) {
 	})
 }
 
-// extractCurrentRoundRecordMessages keeps only the current round:
-//   - if tail role is tool, keep the contiguous tail tool block
-//   - otherwise keep messages from the last user to tail
+// extractCurrentRoundRecordMessages 仅保留当前轮消息：
+//   - 结尾是 tool 时，保留连续的结尾 tool 块
+//   - 结尾是 sender-only metadata 时，回退到前一条真实 user
+//   - 其他情况保留最后一条 user 到结尾的消息
 //
-// This avoids replaying full conversation history into each TruthRecord card.
+// 这样可以避免在每个 TruthRecord 卡片里重复展示完整历史。
 func extractCurrentRoundRecordMessages(messages []openai.ChatCompletionMessageParamUnion) []RecordMessage {
 	if len(messages) == 0 {
 		return nil
@@ -53,6 +54,12 @@ func extractCurrentRoundRecordMessages(messages []openai.ChatCompletionMessagePa
 			start--
 		}
 		start++
+	} else if strings.EqualFold(getMessageRole(messages[end]), "user") {
+		start = end
+		if shouldUsePreviousUserForSenderMetadata(messages, end) {
+			start = end - 1
+			end = start
+		}
 	} else {
 		lastUser := -1
 		for i := end; i >= 0; i-- {

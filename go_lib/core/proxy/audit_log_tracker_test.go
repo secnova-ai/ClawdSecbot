@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,53 @@ func TestAuditChainTracker_StartFromRequestCreatesLogOnlyWhenLastRoleUser(t *tes
 	}
 	if logs[0].RequestContent != "list files" {
 		t.Fatalf("expected request_content=list files, got %q", logs[0].RequestContent)
+	}
+}
+
+func TestAuditChainTracker_StartFromRequestUsesPreviousUserForSenderOnlyMetadata(t *testing.T) {
+	tracker := NewAuditChainTracker()
+
+	messages := buildMessagesFromRaw(t, `{
+	  "model":"gpt-test",
+	  "messages":[
+	    {"role":"system","content":"s"},
+	    {"role":"user","content":[{"type":"text","text":"[Thu 2026-05-28 11:27 GMT+8] What can you do?"}]},
+	    {"role":"user","content":[{"type":"text","text":"Sender (untrusted metadata):\n\u0060\u0060\u0060json\n{\"label\":\"openclaw-control-ui\"}\n\u0060\u0060\u0060"}]}
+	  ]
+	}`)
+	tracker.StartFromRequest("req_openclaw", "openclaw", "openclaw:a1", "gpt-test", messages)
+
+	logs := tracker.GetAuditLogs(10, 0, false)
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if !strings.Contains(logs[0].RequestContent, "What can you do?") {
+		t.Fatalf("expected request_content to include real user input, got %q", logs[0].RequestContent)
+	}
+	if strings.Contains(logs[0].RequestContent, "Sender (untrusted metadata)") {
+		t.Fatalf("expected request_content to exclude sender metadata, got %q", logs[0].RequestContent)
+	}
+}
+
+func TestAuditChainTracker_StartFromRequestUsesLastNormalConsecutiveUser(t *testing.T) {
+	tracker := NewAuditChainTracker()
+
+	messages := buildMessagesFromRaw(t, `{
+	  "model":"gpt-test",
+	  "messages":[
+	    {"role":"system","content":"s"},
+	    {"role":"user","content":"first user"},
+	    {"role":"user","content":"second user"}
+	  ]
+	}`)
+	tracker.StartFromRequest("req_normal_consecutive", "openclaw", "openclaw:a1", "gpt-test", messages)
+
+	logs := tracker.GetAuditLogs(10, 0, false)
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if logs[0].RequestContent != "second user" {
+		t.Fatalf("expected request_content=second user, got %q", logs[0].RequestContent)
 	}
 }
 

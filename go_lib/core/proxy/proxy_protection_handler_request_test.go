@@ -176,6 +176,66 @@ func TestExtractCurrentRoundRecordMessages_UsesLastUserAsRoundStart(t *testing.T
 	}
 }
 
+func TestExtractCurrentRoundRecordMessages_UsesLastNormalConsecutiveUser(t *testing.T) {
+	req, _ := mustParseChatRequest(t, `{
+	  "model":"gpt-test",
+	  "messages":[
+	    {"role":"system","content":"s"},
+	    {"role":"user","content":"first user"},
+	    {"role":"user","content":"second user"}
+	  ]
+	}`)
+
+	got := extractCurrentRoundRecordMessages(req.Messages)
+	if len(got) != 1 {
+		t.Fatalf("expected only last user message, got %d", len(got))
+	}
+	if got[0].Index != 2 || strings.TrimSpace(got[0].Content) != "second user" {
+		t.Fatalf("expected latest normal user content, got index=%d content=%q", got[0].Index, got[0].Content)
+	}
+}
+
+func TestExtractCurrentRoundRecordMessages_UsesPreviousUserForSenderOnlyMetadata(t *testing.T) {
+	req, _ := mustParseChatRequest(t, `{
+	  "model":"gpt-test",
+	  "messages":[
+	    {"role":"system","content":"s"},
+	    {"role":"user","content":[{"type":"text","text":"[Thu 2026-05-28 11:27 GMT+8] What can you do?"}]},
+	    {"role":"user","content":[{"type":"text","text":"Sender (untrusted metadata):\n\u0060\u0060\u0060json\n{\"label\":\"openclaw-control-ui\"}\n\u0060\u0060\u0060"}]}
+	  ]
+	}`)
+
+	got := extractCurrentRoundRecordMessages(req.Messages)
+	if len(got) != 1 {
+		t.Fatalf("expected only real user message, got %d", len(got))
+	}
+	if got[0].Index != 1 || !strings.EqualFold(got[0].Role, "user") {
+		t.Fatalf("expected first user message index=1 role=user, got index=%d role=%s", got[0].Index, got[0].Role)
+	}
+	if !strings.Contains(got[0].Content, "What can you do?") {
+		t.Fatalf("expected real user input in first message, got %q", got[0].Content)
+	}
+}
+
+func TestExtractCurrentRoundRecordMessages_UsesLastUserWhenSenderHasBody(t *testing.T) {
+	req, _ := mustParseChatRequest(t, `{
+	  "model":"gpt-test",
+	  "messages":[
+	    {"role":"system","content":"s"},
+	    {"role":"user","content":"previous"},
+	    {"role":"user","content":[{"type":"text","text":"Sender (untrusted metadata):\n\u0060\u0060\u0060json\n{\"label\":\"openclaw-control-ui\"}\n\u0060\u0060\u0060\nactual body"}]}
+	  ]
+	}`)
+
+	got := extractCurrentRoundRecordMessages(req.Messages)
+	if len(got) != 1 {
+		t.Fatalf("expected only last user message, got %d", len(got))
+	}
+	if got[0].Index != 2 || !strings.Contains(got[0].Content, "actual body") {
+		t.Fatalf("expected last user with body, got index=%d content=%q", got[0].Index, got[0].Content)
+	}
+}
+
 func TestOnRequest_QuotaBlockKeepsAuditRequestAndAssistantMessage(t *testing.T) {
 	// 构造会话延续场景：上一轮已累计 120 token（超过 100 限额），
 	// 且上一轮最近消息为 system 消息，当前请求在其后追加 user，
