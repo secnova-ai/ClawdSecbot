@@ -25,6 +25,8 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 
+extern char **environ;
+
 // 沙箱策略结构 - 支持黑名单/白名单模式、域名拦截
 typedef struct {
     int log_only;
@@ -61,6 +63,7 @@ static char g_policy_file_path[PATH_MAX] = {0};
 static char g_gateway_binary_path[PATH_MAX] = {0};
 static char g_gateway_config_path[PATH_MAX] = {0};
 static char g_sandbox_log_file_path[PATH_MAX] = {0};
+static char g_preload_lib_path[PATH_MAX] = {0};
 static int g_sandbox_log_fd = -1;
 
 // 本机网卡 IP 列表（网络白名单自动放行）
@@ -75,6 +78,10 @@ static void clean_path(char *buf, size_t buf_size, const char *path);
 static void collect_local_ips(void);
 static void format_timestamp(char *buf, size_t buf_size);
 static void write_sandbox_log_line(const char *line);
+static void cache_preload_lib_path(void);
+static char **inject_sandbox_envp(char *const envp[], int *owned);
+static void free_injected_envp(char **envp, int owned);
+static void sandbox_init(void);
 
 // ---------------- 日志输出 ----------------
 
@@ -926,6 +933,161 @@ static int is_cmd_blocked(const char *cmd) {
     return 0;
 }
 
+// ---------------- 子进程环境注入 ----------------
+
+#define SANDBOX_INJECT_ENV_COUNT 3
+
+static const char *sandbox_inject_env_keys[SANDBOX_INJECT_ENV_COUNT] = {
+    "LD_PRELOAD",
+    "SANDBOX_POLICY_FILE",
+    "SANDBOX_LOG_FILE",
+};
+
+// cache_preload_lib_path 缓存当前 preload 库路径, 供子进程注入使用
+static void cache_preload_lib_path(void) {
+    if (g_preload_lib_path[0] != '\0') {
+        return;
+    }
+
+    const char *ld_preload = getenv("LD_PRELOAD");
+    if (ld_preload && ld_preload[0] != '\0') {
+        snprintf(g_preload_lib_path, sizeof(g_preload_lib_path), "%s", ld_preload);
+        return;
+    }
+
+    Dl_info info;
+    if (dladdr((void *)&sandbox_init, &info) && info.dli_fname && info.dli_fname[0] != '\0') {
+        snprintf(g_preload_lib_path, sizeof(g_preload_lib_path), "%s", info.dli_fname);
+    }
+}
+
+// sandbox_inject_env_value 返回需要注入到子进程的环境变量值
+static const char *sandbox_inject_env_value(int index) {
+    switch (index) {
+        case 0:
+            return g_preload_lib_path[0] != '\0' ? g_preload_lib_path : getenv("LD_PRELOAD");
+        case 1:
+            return g_policy_file_path[0] != '\0' ? g_policy_file_path : getenv("SANDBOX_POLICY_FILE");
+        case 2:
+            return g_sandbox_log_file_path[0] != '\0' ? g_sandbox_log_file_path : getenv("SANDBOX_LOG_FILE");
+        default:
+            return NULL;
+    }
+}
+
+// env_key_matches 判断 env 条目是否以指定 key= 开头
+static int env_key_matches(const char *entry, const char *key) {
+    if (!entry || !key) {
+        return 0;
+    }
+    size_t key_len = strlen(key);
+    return strncmp(entry, key, key_len) == 0 && entry[key_len] == '=';
+}
+
+// count_envp 统计 envp 或 environ 中的变量数量
+static size_t count_envp(char *const envp[]) {
+    size_t count = 0;
+    if (envp) {
+        while (envp[count]) {
+            count++;
+        }
+        return count;
+    }
+    if (!environ) {
+        return 0;
+    }
+    while (environ[count]) {
+        count++;
+    }
+    return count;
+}
+
+// inject_sandbox_envp 在子进程 env 中补回沙箱变量, 覆盖 OpenClaw 清洗掉的 LD_*
+static char **inject_sandbox_envp(char *const envp[], int *owned) {
+    *owned = 0;
+    if (!g_policy_loaded) {
+        return (char **)envp;
+    }
+
+    cache_preload_lib_path();
+    const char *preload = sandbox_inject_env_value(0);
+    const char *policy = sandbox_inject_env_value(1);
+    if (!preload || preload[0] == '\0' || !policy || policy[0] == '\0') {
+        return (char **)envp;
+    }
+
+    size_t src_count = count_envp(envp);
+    char *const *src = envp ? envp : environ;
+    if (!src && src_count == 0) {
+        return (char **)envp;
+    }
+
+    size_t capacity = src_count + SANDBOX_INJECT_ENV_COUNT + 1;
+    char **result = (char **)calloc(capacity, sizeof(char *));
+    if (!result) {
+        return (char **)envp;
+    }
+
+    size_t out = 0;
+    for (size_t i = 0; i < src_count; ++i) {
+        if (!src[i]) {
+            continue;
+        }
+        int skip = 0;
+        for (int key_idx = 0; key_idx < SANDBOX_INJECT_ENV_COUNT; ++key_idx) {
+            if (env_key_matches(src[i], sandbox_inject_env_keys[key_idx])) {
+                skip = 1;
+                break;
+            }
+        }
+        if (skip) {
+            continue;
+        }
+        result[out] = strdup(src[i]);
+        if (!result[out]) {
+            goto inject_fail;
+        }
+        out++;
+    }
+
+    for (int key_idx = 0; key_idx < SANDBOX_INJECT_ENV_COUNT; ++key_idx) {
+        const char *value = sandbox_inject_env_value(key_idx);
+        if (!value || value[0] == '\0') {
+            continue;
+        }
+        size_t entry_size = strlen(sandbox_inject_env_keys[key_idx]) + strlen(value) + 2;
+        result[out] = (char *)malloc(entry_size);
+        if (!result[out]) {
+            goto inject_fail;
+        }
+        snprintf(result[out], entry_size, "%s=%s", sandbox_inject_env_keys[key_idx], value);
+        out++;
+    }
+    result[out] = NULL;
+
+    *owned = 1;
+    log_event("INJECT", "CHILD", preload, "restored sandbox env for child process");
+    return result;
+
+inject_fail:
+    for (size_t i = 0; i < out; ++i) {
+        free(result[i]);
+    }
+    free(result);
+    return (char **)envp;
+}
+
+// free_injected_envp 释放 inject_sandbox_envp 分配的 env 数组
+static void free_injected_envp(char **envp, int owned) {
+    if (!owned || !envp) {
+        return;
+    }
+    for (size_t i = 0; envp[i]; ++i) {
+        free(envp[i]);
+    }
+    free(envp);
+}
+
 // ---------------- 生命周期 ----------------
 
 // 库加载时自动执行: 读取策略文件路径 -> 推导日志 -> 加载策略 -> 枚举本机 IP
@@ -963,6 +1125,7 @@ static void sandbox_init(void) {
     load_policy_from_file(policy_path);
 
     if (g_policy_loaded) {
+        cache_preload_lib_path();
         log_info("sandbox policy loaded successfully");
         if (g_policy.network_policy_whitelist) {
             collect_local_ips();
@@ -1927,7 +2090,11 @@ int execve(const char *filename, char *const argv[], char *const envp[]) {
         }
     }
 
-    return real_execve_fn(filename, argv, envp);
+    int owned = 0;
+    char **injected_envp = inject_sandbox_envp(envp, &owned);
+    int rc = real_execve_fn(filename, argv, (char *const *)injected_envp);
+    free_injected_envp(injected_envp, owned);
+    return rc;
 }
 
 // 拦截 execveat()，覆盖部分运行时通过 execveat 拉起子进程导致 execve 钩子失效的场景。
@@ -1948,7 +2115,11 @@ int execveat(int dirfd, const char *pathname, char *const argv[], char *const en
         }
     }
     if (real_execveat_fn) {
-        return real_execveat_fn(dirfd, pathname, argv, envp, flags);
+        int owned = 0;
+        char **injected_envp = inject_sandbox_envp(envp, &owned);
+        int rc = real_execveat_fn(dirfd, pathname, argv, (char *const *)injected_envp, flags);
+        free_injected_envp(injected_envp, owned);
+        return rc;
     }
     errno = ENOSYS;
     return -1;
@@ -1973,7 +2144,11 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
             return EPERM;
         }
     }
-    return real_posix_spawn_fn(pid, path, file_actions, attrp, argv, envp);
+    int owned = 0;
+    char **injected_envp = inject_sandbox_envp(envp, &owned);
+    int rc = real_posix_spawn_fn(pid, path, file_actions, attrp, argv, (char *const *)injected_envp);
+    free_injected_envp(injected_envp, owned);
+    return rc;
 }
 
 // 拦截 posix_spawnp()，覆盖按 PATH 搜索可执行文件的 spawn 场景。
@@ -1995,5 +2170,9 @@ int posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file_actions_t 
             return EPERM;
         }
     }
-    return real_posix_spawnp_fn(pid, file, file_actions, attrp, argv, envp);
+    int owned = 0;
+    char **injected_envp = inject_sandbox_envp(envp, &owned);
+    int rc = real_posix_spawnp_fn(pid, file, file_actions, attrp, argv, (char *const *)injected_envp);
+    free_injected_envp(injected_envp, owned);
+    return rc;
 }
