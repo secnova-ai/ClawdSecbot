@@ -222,15 +222,22 @@ func summarizeAuditToolResultProgress(toolCalls []AuditToolCall) (int, int) {
 	return withResult, len(toolCalls)
 }
 
+// extractLastUserInstruction 提取结尾 user 轮次中的用户指令文本。
 func extractLastUserInstruction(messages []openai.ChatCompletionMessageParamUnion) (string, bool) {
 	if len(messages) == 0 {
 		return "", false
 	}
-	last := messages[len(messages)-1]
-	if !strings.EqualFold(getMessageRole(last), "user") {
+	end := len(messages) - 1
+	if !strings.EqualFold(getMessageRole(messages[end]), "user") {
 		return "", false
 	}
-	return strings.TrimSpace(extractMessageContent(last)), true
+
+	// OpenClaw WebUI 可能把人工输入和 sender metadata 拆成相邻 user 消息。
+	// 仅当最后一条是无正文 metadata 时回退，避免影响普通连续 user 场景。
+	if shouldUsePreviousUserForSenderMetadata(messages, end) {
+		end--
+	}
+	return strings.TrimSpace(extractMessageContent(messages[end])), true
 }
 
 func cloneAuditLog(log AuditLog) AuditLog {

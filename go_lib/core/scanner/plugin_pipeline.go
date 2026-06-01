@@ -90,14 +90,17 @@ func ScanSingleMergedAsset(opts PluginAssetScanOptions) ([]core.Asset, error) {
 		mergedAsset.Metadata = make(map[string]string)
 	}
 	mergedAsset.SourcePlugin = assetName
-	configPathFingerprint := strings.TrimSpace(mergedAsset.Metadata["config_path"])
+	configPathFingerprint := core.ResolveStableConfigPathFingerprint(mergedAsset.Metadata["config_path"])
 	if configPathFingerprint == "" {
-		configPathFingerprint = strings.TrimSpace(opts.ConfigPath)
+		configPathFingerprint = core.ResolveStableConfigPathFingerprint(opts.ConfigPath)
 	}
 	// asset_id is intentionally derived from name + config_path only so the ID stays
 	// stable across bot start/stop; ports/process_paths are retained on the asset for
 	// display and risk evaluation but must not participate in the fingerprint.
 	mergedAsset.ID = core.ComputeAssetID(assetName, configPathFingerprint)
+	if configPathFingerprint != "" {
+		mergedAsset.Metadata["config_path"] = configPathFingerprint
+	}
 
 	logging.Info("%s asset scan completed, id=%s, ports=%v, processes=%v",
 		assetName, mergedAsset.ID, mergedAsset.Ports, mergedAsset.ProcessPaths)

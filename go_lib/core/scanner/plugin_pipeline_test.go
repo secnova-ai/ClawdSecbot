@@ -2,6 +2,8 @@ package scanner
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"go_lib/core"
@@ -108,8 +110,63 @@ func TestScanSingleMergedAsset(t *testing.T) {
 	if assets[0].ID == "" {
 		t.Fatal("expected non-empty asset ID")
 	}
-	if assets[0].Metadata["config_path"] != "~/.nullclaw/config.json" {
-		t.Fatalf("expected config_path metadata, got %s", assets[0].Metadata["config_path"])
+	wantConfigPath := core.ResolveStableConfigPathFingerprint("~/.nullclaw/config.json")
+	if assets[0].Metadata["config_path"] != wantConfigPath {
+		t.Fatalf("expected normalized config_path metadata %q, got %s", wantConfigPath, assets[0].Metadata["config_path"])
+	}
+}
+
+func TestScanSingleMergedAsset_ConfigPathFingerprintStableAcrossRuleAndEnrich(t *testing.T) {
+	tmpDir := t.TempDir()
+	homeDir := filepath.Join(tmpDir, "home")
+	configDir := filepath.Join(homeDir, ".openclaw")
+	configFile := filepath.Join(configDir, "openclaw.json")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	if err := os.WriteFile(configFile, []byte(`{}`), 0644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+	_ = core.GetPathManager().ResetForTest(tmpDir, homeDir)
+
+	collector := &mockCollector{
+		snapshot: core.SystemSnapshot{
+			OpenPorts:        []int{18789},
+			RunningProcesses: []core.SystemProcess{{Pid: 1, Name: "openclaw", Cmd: "openclaw gateway", Path: "/usr/bin/node"}},
+			FileExists: func(path string) bool {
+				return path == "~/.openclaw" || path == filepath.Join(homeDir, ".openclaw")
+			},
+		},
+	}
+	rulesJSON := []byte(`[
+		{"code":"port","name":"Port","life_cycle":1,"desc":"d","expression":{"lang":"json_match","expr":"{\"ports\":[18789],\"process_keywords\":[\"openclaw\"]}"}},
+		{"code":"cfg","name":"Config","life_cycle":2,"desc":"d","expression":{"lang":"json_match","expr":"{\"file_paths\":[\"~/.openclaw\"]}"}}
+	]`)
+
+	assets, err := ScanSingleMergedAsset(PluginAssetScanOptions{
+		AssetName: "Openclaw",
+		Collector: collector,
+		RulesJSON: rulesJSON,
+		Enrich: func(asset *core.Asset) {
+			asset.Metadata["config_path"] = configFile
+		},
+	})
+	if err != nil {
+		t.Fatalf("ScanSingleMergedAsset failed: %v", err)
+	}
+	if len(assets) != 1 {
+		t.Fatalf("expected 1 asset, got %d", len(assets))
+	}
+	resolvedConfigFile, err := filepath.EvalSymlinks(configFile)
+	if err != nil {
+		resolvedConfigFile = configFile
+	}
+	if assets[0].Metadata["config_path"] != resolvedConfigFile {
+		t.Fatalf("expected metadata config_path %s, got %s", resolvedConfigFile, assets[0].Metadata["config_path"])
+	}
+	wantID := core.ComputeAssetID("Openclaw", resolvedConfigFile)
+	if assets[0].ID != wantID {
+		t.Fatalf("expected asset id %s, got %s", wantID, assets[0].ID)
 	}
 }
 

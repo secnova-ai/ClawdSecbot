@@ -72,7 +72,7 @@ func TestNormalizeSandboxConfig_DeduplicateAndCleanEntries(t *testing.T) {
 func TestAppendContainerWritablePaths(t *testing.T) {
 	paths := appendContainerWritablePaths([]string{"/work"})
 
-	if !containsAllStrings(paths, []string{"/work", "/tmp/botsecwebworkspace", "/tmp/.botsec"}) {
+	if !containsAllStrings(paths, []string{"/work", "/tmp/botsec_web_workspace", "/tmp/.botsec"}) {
 		t.Fatalf("paths = %v, want container writable paths", paths)
 	}
 }

@@ -1,6 +1,7 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+#include <EGL/egl.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
@@ -175,6 +176,50 @@ static void register_plugins_for_sub_window(FlPluginRegistry* registry) {
   }
 }
 
+// 运行时探测 OpenGL 是否可用：尝试初始化 EGL 并查询 OpenGL ES 2.0 配置
+// 如果成功则清理临时资源，返回 true；任何步骤失败则返回 false
+static bool is_opengl_available() {
+  EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+  if (display == EGL_NO_DISPLAY) {
+    g_message("EGL: no display available");
+    return false;
+  }
+
+  EGLint major, minor;
+  if (!eglInitialize(display, &major, &minor)) {
+    g_message("EGL: eglInitialize failed");
+    return false;
+  }
+
+  // 查询是否支持 OpenGL ES 2.0（Flutter Linux 的最低要求）
+  EGLint config_attribs[] = {
+      EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+      EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+      EGL_NONE};
+  EGLConfig config;
+  EGLint num_configs;
+  bool has_config =
+      eglChooseConfig(display, config_attribs, &config, 1, &num_configs);
+
+  eglTerminate(display);
+  return has_config && num_configs > 0;
+}
+
+// 设置渲染后端：尊重用户显式选择，否则运行时探测 OpenGL 可用性
+static void setup_rendering_backend() {
+  const char* flutter_renderer = g_getenv("FLUTTER_LINUX_RENDERER");
+  if (flutter_renderer != nullptr) {
+    g_message("Using user-specified renderer: %s", flutter_renderer);
+    return;
+  }
+
+  if (!is_opengl_available()) {
+    g_message("OpenGL not available, falling back to software rendering");
+    g_message("To override, set FLUTTER_LINUX_RENDERER=opengl");
+    g_setenv("FLUTTER_LINUX_RENDERER", "software", TRUE);
+  }
+}
+
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
@@ -279,6 +324,10 @@ static gboolean my_application_local_command_line(GApplication* application,
 
 // Implements GApplication::startup.
 static void my_application_startup(GApplication* application) {
+  // 在 Flutter 引擎初始化之前设置渲染后端
+  // 这样可以避免 OpenGL 上下文创建失败的问题
+  setup_rendering_backend();
+
   G_APPLICATION_CLASS(my_application_parent_class)->startup(application);
 }
 

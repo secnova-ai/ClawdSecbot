@@ -114,7 +114,9 @@ func getMessageRole(msg openai.ChatCompletionMessageParamUnion) string {
 	}
 }
 
-// extractMessageContent extracts text content from a ChatCompletionMessageParamUnion
+const senderUntrustedMetadataPrefix = "Sender (untrusted metadata):"
+
+// extractMessageContent 从 ChatCompletionMessageParamUnion 中提取文本内容。
 func extractMessageContent(msg openai.ChatCompletionMessageParamUnion) string {
 	switch {
 	case msg.OfSystem != nil:
@@ -171,6 +173,47 @@ func extractMessageContent(msg openai.ChatCompletionMessageParamUnion) string {
 		}
 	}
 	return ""
+}
+
+// isSenderOnlyMetadataMessage 判断消息是否仅包含 OpenClaw sender metadata。
+func isSenderOnlyMetadataMessage(msg openai.ChatCompletionMessageParamUnion) bool {
+	return isSenderOnlyMetadataContent(extractMessageContent(msg))
+}
+
+// isSenderOnlyMetadataContent 判断文本是否是没有正文的 sender metadata 块。
+func isSenderOnlyMetadataContent(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, senderUntrustedMetadataPrefix) {
+		return false
+	}
+
+	metadataBlock := strings.TrimSpace(strings.TrimPrefix(trimmed, senderUntrustedMetadataPrefix))
+	fenceStart := strings.Index(metadataBlock, "```")
+	if fenceStart < 0 {
+		return false
+	}
+	fenceBody := metadataBlock[fenceStart+3:]
+	fenceEnd := strings.Index(fenceBody, "```")
+	if fenceEnd < 0 {
+		return false
+	}
+	afterFence := strings.TrimSpace(fenceBody[fenceEnd+3:])
+	return afterFence == ""
+}
+
+// shouldUsePreviousUserForSenderMetadata 判断是否应使用 sender metadata 前一条 user 作为当前输入。
+func shouldUsePreviousUserForSenderMetadata(messages []openai.ChatCompletionMessageParamUnion, lastUserIndex int) bool {
+	if lastUserIndex <= 0 || lastUserIndex >= len(messages) {
+		return false
+	}
+	if !isSenderOnlyMetadataMessage(messages[lastUserIndex]) {
+		return false
+	}
+	previous := messages[lastUserIndex-1]
+	if !strings.EqualFold(getMessageRole(previous), "user") {
+		return false
+	}
+	return !isSenderOnlyMetadataMessage(previous)
 }
 
 // extractConversationMessage converts a ChatCompletionMessageParamUnion to a ConversationMessage

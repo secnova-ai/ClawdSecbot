@@ -3,9 +3,21 @@ package core
 import (
 	"crypto/sha256"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+// stableBotConfigFileNames 是各 Bot 插件常见配置文件名，用于目录级 config_path 指纹归一。
+var stableBotConfigFileNames = []string{
+	"openclaw.json",
+	"moltbot.json",
+	"clawdbot.json",
+	"config.json",
+	"config.yaml",
+	"config.yml",
+}
 
 // Asset 定义检测到的资产结构
 type Asset struct {
@@ -74,6 +86,58 @@ func ComputeAssetID(name string, configPath string) string {
 	shortHash := fmt.Sprintf("%x", hash[:6]) // 12 hex chars
 
 	return nameLower + ":" + shortHash
+}
+
+// ResolveStableConfigPathFingerprint 将规则命中或富化得到的 config_path 规范为稳定指纹输入。
+// 例如 ~/.openclaw 与 /home/node/.openclaw/openclaw.json 在存在配置文件时应映射为同一路径。
+func ResolveStableConfigPathFingerprint(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(path, "~/") {
+		if homeDir := resolveConfigPathHomeDir(); homeDir != "" {
+			path = filepath.Join(homeDir, strings.TrimPrefix(path, "~/"))
+		}
+	}
+	path = filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil && resolved != "" {
+		path = resolved
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return path
+	}
+	if !info.IsDir() {
+		return filepath.Clean(path)
+	}
+
+	for _, name := range stableBotConfigFileNames {
+		candidate := filepath.Join(path, name)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			if resolved, err := filepath.EvalSymlinks(candidate); err == nil && resolved != "" {
+				return filepath.Clean(resolved)
+			}
+			return filepath.Clean(candidate)
+		}
+	}
+	return filepath.Clean(path)
+}
+
+// resolveConfigPathHomeDir 解析用于 ~/.botsec 风格路径展开的 HOME，优先 PathManager。
+func resolveConfigPathHomeDir() string {
+	pm := GetPathManager()
+	if pm.IsInitialized() {
+		if homeDir := strings.TrimSpace(pm.GetHomeDir()); homeDir != "" {
+			return homeDir
+		}
+	}
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		return strings.TrimSpace(homeDir)
+	}
+	return ""
 }
 
 // AttachAssetMainProcessPID records a plugin-resolved main process PID on the

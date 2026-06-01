@@ -115,16 +115,37 @@ class MessageBridgeService {
     try {
       final baseUrl = _resolveApiBaseUrl();
       _eventSource = html.EventSource(_eventsUrl(baseUrl));
+      final opened = Completer<bool>();
 
       _eventSource!.onOpen.listen((_) {
         appLogger.info('[MessageBridgeWeb] SSE connected');
+        _isRunning = true;
+        if (!opened.isCompleted) {
+          opened.complete(true);
+        }
       });
       _eventSource!.onMessage.listen((event) {
         _onEventData(event.data);
       });
       _eventSource!.onError.listen((_) {
         appLogger.warning('[MessageBridgeWeb] SSE disconnected');
+        if (!opened.isCompleted) {
+          opened.complete(false);
+        }
       });
+
+      final connected = await opened.future.timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => false,
+      );
+      if (!connected) {
+        _eventSource?.close();
+        _eventSource = null;
+        _isRunning = false;
+        _isInitialized = false;
+        _subscriberCount = 0;
+        return false;
+      }
 
       _isRunning = true;
       _isInitialized = true;
@@ -135,6 +156,8 @@ class MessageBridgeService {
       _isRunning = false;
       _isInitialized = false;
       _subscriberCount = 0;
+      _eventSource?.close();
+      _eventSource = null;
       return false;
     }
   }
