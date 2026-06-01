@@ -1,9 +1,7 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
-#include <fstream>
-#include <map>
-#include <string>
+#include <EGL/egl.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
@@ -178,142 +176,36 @@ static void register_plugins_for_sub_window(FlPluginRegistry* registry) {
   }
 }
 
-// 从 os-release 行中提取 key 和 value，处理带引号的值
-// 例如: ID="uos" -> key="ID", value="uos"
-static void parse_os_release_line(const std::string& line,
-                                  std::string* key,
-                                  std::string* value) {
-  auto eq_pos = line.find('=');
-  if (eq_pos == std::string::npos) {
-    key->clear();
-    value->clear();
-    return;
-  }
-  *key = line.substr(0, eq_pos);
-  *value = line.substr(eq_pos + 1);
-  // 去除首尾匹配的引号
-  if (value->size() >= 2 &&
-      ((*value)[0] == '"' || (*value)[0] == '\'') &&
-      (*value)[0] == (*value)[value->size() - 1]) {
-    *value = value->substr(1, value->size() - 2);
-  }
-}
-
-// 解析并缓存 /etc/os-release 的所有 key-value 对，仅首次调用读取文件
-static const std::map<std::string, std::string>& get_os_release() {
-  static const auto cache = []() {
-    std::map<std::string, std::string> entries;
-    std::ifstream file("/etc/os-release");
-    if (file.is_open()) {
-      std::string line;
-      while (std::getline(file, line)) {
-        std::string key, value;
-        parse_os_release_line(line, &key, &value);
-        if (!key.empty()) {
-          entries[key] = value;
-        }
-      }
-    }
-    return entries;
-  }();
-  return cache;
-}
-
-// 读取文件第一行（用于 DMI 信息检测）
-static std::string read_first_line(const char* path) {
-  std::ifstream file(path);
-  std::string line;
-  if (file.is_open()) {
-    std::getline(file, line);
-  }
-  return line;
-}
-
-// 检测是否为 UOS/Deepin 系统（结果缓存，仅首次调用执行检测）
-static bool is_uos_or_deepin() {
-  static const bool result = []() {
-    // 方法 A：检查 os-release 缓存
-    const auto& os = get_os_release();
-    auto it = os.find("ID");
-    if (it != os.end() && (it->second == "uos" || it->second == "deepin")) {
-      return true;
-    }
-    it = os.find("DISTRIB_ID");
-    if (it != os.end() && (it->second == "UOS" || it->second == "Deepin")) {
-      return true;
-    }
-
-    // 方法 B：检查桌面环境变量
-    const char* desktop = g_getenv("XDG_CURRENT_DESKTOP");
-    if (desktop != nullptr &&
-        (g_str_has_prefix(desktop, "Deepin") ||
-         g_str_has_prefix(desktop, "UOS"))) {
-      return true;
-    }
-
-    // 方法 C：检查 Deepin 特有的环境变量
-    return g_getenv("DEEPIN_SESSION") != nullptr;
-  }();
-  return result;
-}
-
-// 检测是否在虚拟机中运行（结果缓存，仅首次调用执行检测）
-static bool is_running_in_vm() {
-  static const bool result = []() {
-    // 检查 DMI 信息中的虚拟机厂商标识
-    std::string vendor = read_first_line("/sys/class/dmi/id/sys_vendor");
-    if (vendor.find("QEMU") != std::string::npos ||
-        vendor.find("VMware") != std::string::npos ||
-        vendor.find("VirtualBox") != std::string::npos ||
-        vendor.find("KVM") != std::string::npos ||
-        vendor.find("Xen") != std::string::npos) {
-      return true;
-    }
-
-    // sys_vendor="Microsoft Corporation" 同时出现在 Hyper-V 虚拟机和 Surface
-    // 物理设备上，需要额外检查 product_name 是否为 "Virtual Machine"
-    if (vendor.find("Microsoft") != std::string::npos) {
-      std::string product = read_first_line("/sys/class/dmi/id/product_name");
-      if (product.find("Virtual Machine") != std::string::npos) {
-        return true;
-      }
-    }
-
-    // 检查 /proc/cpuinfo 中的 hypervisor 标志
-    std::ifstream cpuinfo("/proc/cpuinfo");
-    if (cpuinfo.is_open()) {
-      std::string line;
-      while (std::getline(cpuinfo, line)) {
-        if (line.find("hypervisor") != std::string::npos) {
-          return true;
-        }
-      }
-    }
-
+// 运行时探测 OpenGL 是否可用：尝试初始化 EGL 并查询 OpenGL ES 2.0 配置
+// 如果成功则清理临时资源，返回 true；任何步骤失败则返回 false
+static bool is_opengl_available() {
+  EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+  if (display == EGL_NO_DISPLAY) {
+    g_message("EGL: no display available");
     return false;
-  }();
-  return result;
+  }
+
+  EGLint major, minor;
+  if (!eglInitialize(display, &major, &minor)) {
+    g_message("EGL: eglInitialize failed");
+    return false;
+  }
+
+  // 查询是否支持 OpenGL ES 2.0（Flutter Linux 的最低要求）
+  EGLint config_attribs[] = {
+      EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+      EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+      EGL_NONE};
+  EGLConfig config;
+  EGLint num_configs;
+  bool has_config =
+      eglChooseConfig(display, config_attribs, &config, 1, &num_configs);
+
+  eglTerminate(display);
+  return has_config && num_configs > 0;
 }
 
-// 检测 Mesa 是否已在使用软件渲染（结果缓存，仅首次调用执行检测）
-static bool is_mesa_software_rendering() {
-  static const bool result = []() {
-    const char* libgl = g_getenv("LIBGL_ALWAYS_SOFTWARE");
-    if (libgl != nullptr && g_strcmp0(libgl, "1") == 0) {
-      return true;
-    }
-    const char* gallium = g_getenv("GALLIUM_DRIVER");
-    return gallium != nullptr && g_strcmp0(gallium, "llvmpipe") == 0;
-  }();
-  return result;
-}
-
-// 检测是否需要使用软件渲染（纯环境检测，不检查用户显式设置）
-static bool should_use_software_rendering() {
-  return is_uos_or_deepin() || is_running_in_vm() || is_mesa_software_rendering();
-}
-
-// 设置渲染后端：尊重用户显式选择，否则自动检测并回退
+// 设置渲染后端：尊重用户显式选择，否则运行时探测 OpenGL 可用性
 static void setup_rendering_backend() {
   const char* flutter_renderer = g_getenv("FLUTTER_LINUX_RENDERER");
   if (flutter_renderer != nullptr) {
@@ -321,13 +213,8 @@ static void setup_rendering_backend() {
     return;
   }
 
-  if (should_use_software_rendering()) {
-    // 所有检测函数均返回缓存结果，不会重复读取文件
-    const char* reason = "problematic environment";
-    if (is_uos_or_deepin()) reason = "UOS/Deepin environment";
-    else if (is_running_in_vm()) reason = "virtual machine";
-    else if (is_mesa_software_rendering()) reason = "Mesa software rendering";
-    g_message("Detected %s, enabling software rendering", reason);
+  if (!is_opengl_available()) {
+    g_message("OpenGL not available, falling back to software rendering");
     g_message("To override, set FLUTTER_LINUX_RENDERER=opengl");
     g_setenv("FLUTTER_LINUX_RENDERER", "software", TRUE);
   }
