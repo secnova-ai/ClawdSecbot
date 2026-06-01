@@ -252,8 +252,12 @@ func TestResolveStableConfigPathFingerprint_DirectoryAndFileEquivalent(t *testin
 	if dirFingerprint != fileFingerprint {
 		t.Fatalf("expected same fingerprint path, dir=%s file=%s", dirFingerprint, fileFingerprint)
 	}
-	if dirFingerprint != configFile {
-		t.Fatalf("expected resolved config file path %s, got %s", configFile, dirFingerprint)
+	resolvedConfigFile, err := filepath.EvalSymlinks(configFile)
+	if err != nil {
+		resolvedConfigFile = configFile
+	}
+	if dirFingerprint != resolvedConfigFile {
+		t.Fatalf("expected resolved config file path %s, got %s", resolvedConfigFile, dirFingerprint)
 	}
 
 	idFromDir := ComputeAssetID("Openclaw", dirFingerprint)
@@ -279,7 +283,11 @@ func TestResolveStableConfigPathFingerprint_UsesPathManagerHome(t *testing.T) {
 	t.Setenv("HOME", sysHome)
 
 	got := ResolveStableConfigPathFingerprint("~/.openclaw/openclaw.json")
-	if got != configFile {
-		t.Fatalf("expected PathManager-based path %s, got %s", configFile, got)
+	resolvedConfigFile, err := filepath.EvalSymlinks(configFile)
+	if err != nil {
+		resolvedConfigFile = configFile
+	}
+	if got != resolvedConfigFile {
+		t.Fatalf("expected PathManager-based path %s, got %s", resolvedConfigFile, got)
 	}
 }

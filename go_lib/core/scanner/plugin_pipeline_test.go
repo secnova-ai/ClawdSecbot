@@ -157,10 +157,14 @@ func TestScanSingleMergedAsset_ConfigPathFingerprintStableAcrossRuleAndEnrich(t 
 	if len(assets) != 1 {
 		t.Fatalf("expected 1 asset, got %d", len(assets))
 	}
-	if assets[0].Metadata["config_path"] != configFile {
-		t.Fatalf("expected metadata config_path %s, got %s", configFile, assets[0].Metadata["config_path"])
+	resolvedConfigFile, err := filepath.EvalSymlinks(configFile)
+	if err != nil {
+		resolvedConfigFile = configFile
 	}
-	wantID := core.ComputeAssetID("Openclaw", configFile)
+	if assets[0].Metadata["config_path"] != resolvedConfigFile {
+		t.Fatalf("expected metadata config_path %s, got %s", resolvedConfigFile, assets[0].Metadata["config_path"])
+	}
+	wantID := core.ComputeAssetID("Openclaw", resolvedConfigFile)
 	if assets[0].ID != wantID {
 		t.Fatalf("expected asset id %s, got %s", wantID, assets[0].ID)
 	}
