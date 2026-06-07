@@ -71,6 +71,7 @@ import (
 	"go_lib/core/shepherd"
 
 	// Import all plugins to trigger init() registration
+	_ "go_lib/plugins/coclaw"
 	_ "go_lib/plugins/dintalclaw"
 	_ "go_lib/plugins/hermes"
 	_ "go_lib/plugins/nullclaw"
@@ -851,6 +852,7 @@ func GetSupportedProviders(scopeC *C.char) *C.char {
 }
 
 // GetProviderModels 拉取指定供应商可用模型列表（JSON 入参/出参，供 Flutter 配置页使用）。
+//
 //export GetProviderModels
 func GetProviderModels(payloadC *C.char) *C.char {
 	payload := C.GoString(payloadC)

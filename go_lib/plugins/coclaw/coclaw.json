@@ -1,0 +1,24 @@
+[
+  {
+    "code": "coclaw_gateway_active",
+    "name": "Port and Process Detection",
+    "life_cycle": 1,
+    "os": ["darwin", "linux", "windows"],
+    "desc": "Detects active CoClaw gateway via port and process",
+    "expression": {
+      "lang": "json_match",
+      "expr": "{\"ports\": [18790], \"process_keywords\": [\"coclaw\"]}"
+    }
+  },
+  {
+    "code": "coclaw_config_exist",
+    "name": "Config File Detection",
+    "life_cycle": 2,
+    "os": ["darwin", "linux", "windows"],
+    "desc": "Detects CoClaw presence via config directory",
+    "expression": {
+      "lang": "json_match",
+      "expr": "{\"file_paths\": [\"~/.coclaw\"]}"
+    }
+  }
+]

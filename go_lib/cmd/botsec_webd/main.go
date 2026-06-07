@@ -14,6 +14,7 @@ import (
 	"go_lib/core/webbridge"
 
 	// Import all plugins to trigger init() registration.
+	_ "go_lib/plugins/coclaw"
 	_ "go_lib/plugins/dintalclaw"
 	_ "go_lib/plugins/hermes"
 	_ "go_lib/plugins/nullclaw"
