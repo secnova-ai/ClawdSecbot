@@ -1,9 +1,43 @@
 package coclaw
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
+
+func TestFindConfigPathPrefersProgramDataRuntimeConfig(t *testing.T) {
+	previousOverride := configPathOverride
+	previousUserHomeDir := userHomeDir
+	t.Cleanup(func() {
+		configPathOverride = previousOverride
+		userHomeDir = previousUserHomeDir
+	})
+
+	homeDir := t.TempDir()
+	programData := t.TempDir()
+	userHomeDir = func() (string, error) {
+		return homeDir, nil
+	}
+	t.Setenv("ProgramData", programData)
+
+	configPath := filepath.Join(programData, "CoClaw", "config", "openclaw.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"gateway":{"port":18790}}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, err := findConfigPath()
+	if err != nil {
+		t.Fatalf("findConfigPath returned error: %v", err)
+	}
+	if got != configPath {
+		t.Fatalf("expected ProgramData config %q, got %q", configPath, got)
+	}
+}
 
 func TestHijackProviderAliasPreservesSecretRefProvider(t *testing.T) {
 	secretRef := map[string]interface{}{

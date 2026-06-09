@@ -19,6 +19,9 @@ var (
 	userHomeDir        = func() (string, error) {
 		return os.UserHomeDir()
 	}
+	programDataDir = func() string {
+		return os.Getenv("ProgramData")
+	}
 )
 
 type coclawConfig struct {
@@ -46,10 +49,20 @@ func findConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	candidates := []string{
+	candidates := make([]string, 0, 10)
+	if programData := strings.TrimSpace(programDataDir()); programData != "" {
+		candidates = append(candidates,
+			filepath.Join(programData, "CoClaw", "config", "openclaw.json"),
+			filepath.Join(programData, "CoClaw", "config", "coclaw.json"),
+			filepath.Join(programData, "Coclaw", "config", "openclaw.json"),
+			filepath.Join(programData, "Coclaw", "config", "coclaw.json"),
+			filepath.Join(programData, "OpenClaw", "config", "openclaw.json"),
+		)
+	}
+	candidates = append(candidates,
 		filepath.Join(homeDir, ".coclaw", "openclaw.json"),
 		filepath.Join(homeDir, ".coclaw", "coclaw.json"),
-	}
+	)
 	if appData := coclawAppDataDir(homeDir); appData != "" {
 		candidates = append(candidates,
 			filepath.Join(appData, "openclaw.json"),
