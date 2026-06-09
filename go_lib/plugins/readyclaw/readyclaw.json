@@ -1,0 +1,24 @@
+[
+  {
+    "code": "readyclaw_gateway_active",
+    "name": "ReadyClaw Gateway Runtime Detection",
+    "life_cycle": 1,
+    "os": ["darwin", "linux", "windows"],
+    "desc": "Detects active ReadyClaw/NanoClaw gateway via service, process, and ports",
+    "expression": {
+      "lang": "json_match",
+      "expr": "{\"ports\": [29555, 3456], \"process_keywords\": [\"readyclaw\", \"nanoclaw\", \"nano-claw\", \"windows-service-runner.mjs\", \"dist\\\\index.js\", \"dist/index.js\"], \"service_names\": [\"nanoclaw\", \"nanoclaw-server\", \"readyclaw\"]}"
+    }
+  },
+  {
+    "code": "readyclaw_config_exist",
+    "name": "ReadyClaw Config File Detection",
+    "life_cycle": 2,
+    "os": ["darwin", "linux", "windows"],
+    "desc": "Detects ReadyClaw/NanoClaw presence via service or user config files",
+    "expression": {
+      "lang": "json_match",
+      "expr": "{\"file_paths\": [\"%ProgramData%\\\\NanoClaw\\\\config\\\\nanoclaw\\\\config.json\", \"%ProgramData%\\\\readyclaw\\\\config.json\", \"%ProgramData%\\\\nanoclaw\\\\config.json\", \"~/.config/readyclaw/config.json\", \"~/.config/nanoclaw/config.json\", \"~/Library/Application Support/ReadyClaw/config.json\"]}"
+    }
+  }
+]
