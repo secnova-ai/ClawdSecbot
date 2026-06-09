@@ -37,7 +37,7 @@ func TestAssetScannerDetectsCoClawConfig(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	assets, err := newAssetScanner(configDir).withCollector(&testCollector{
+	assets, err := newAssetScanner(dir).withCollector(&testCollector{
 		snapshot: core.SystemSnapshot{
 			FileExists: func(path string) bool {
 				return path == "~/.coclaw"
@@ -53,8 +53,9 @@ func TestAssetScannerDetectsCoClawConfig(t *testing.T) {
 	if assets[0].SourcePlugin != coclawAssetName {
 		t.Fatalf("source plugin = %q", assets[0].SourcePlugin)
 	}
-	if assets[0].Metadata["config_path"] != configPath {
-		t.Fatalf("config_path = %q", assets[0].Metadata["config_path"])
+	expectedConfigPath := core.ResolveStableConfigPathFingerprint(configPath)
+	if assets[0].Metadata["config_path"] != expectedConfigPath {
+		t.Fatalf("config_path = %q, want %q", assets[0].Metadata["config_path"], expectedConfigPath)
 	}
 	if assets[0].Metadata["gateway_port"] != "18790" {
 		t.Fatalf("gateway_port = %q", assets[0].Metadata["gateway_port"])
