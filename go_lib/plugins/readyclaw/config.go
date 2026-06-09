@@ -47,14 +47,12 @@ func findConfigPath() (string, error) {
 func readyclawConfigCandidates() []string {
 	candidates := make([]string, 0, 4)
 
-	if runtime.GOOS == "windows" {
-		if programData := strings.TrimSpace(readyclawProgramDataDir()); programData != "" {
-			candidates = append(candidates,
-				filepath.Join(programData, "NanoClaw", "config", "nanoclaw", "config.json"),
-				filepath.Join(programData, "readyclaw", "config.json"),
-				filepath.Join(programData, "nanoclaw", "config.json"),
-			)
-		}
+	if programData := strings.TrimSpace(readyclawProgramDataDir()); programData != "" {
+		candidates = append(candidates,
+			filepath.Join(programData, "NanoClaw", "config", "nanoclaw", "config.json"),
+			filepath.Join(programData, "readyclaw", "config.json"),
+			filepath.Join(programData, "nanoclaw", "config.json"),
+		)
 	}
 
 	if homeDir, err := readyclawUserHomeDir(); err == nil && strings.TrimSpace(homeDir) != "" {
