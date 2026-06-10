@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"go_lib/core/repository"
@@ -150,5 +151,111 @@ func TestPendingToolRecoveryArming(t *testing.T) {
 	}
 	if pendingRecoveryArmedForTest(t, pp, requestID) {
 		t.Fatalf("expected armed flag to be cleared")
+	}
+}
+
+func TestRiskTypeFromRecoveryPrompt_RoundTripsFormattedRiskTypes(t *testing.T) {
+	cases := []struct {
+		name     string
+		riskType string
+		lang     string
+	}{
+		{name: "direct prompt injection zh", riskType: riskPromptInjectionDirect, lang: "zh"},
+		{name: "indirect prompt injection en", riskType: riskPromptInjectionIndirect, lang: "en"},
+		{name: "sensitive data zh", riskType: riskSensitiveDataExfil, lang: "zh"},
+		{name: "high risk en", riskType: riskHighRiskOperation, lang: "en"},
+		{name: "privilege abuse zh", riskType: riskPrivilegeAbuse, lang: "zh"},
+		{name: "unexpected code execution en", riskType: riskUnexpectedCodeExecution, lang: "en"},
+		{name: "context poisoning zh", riskType: riskContextPoisoning, lang: "zh"},
+		{name: "supply chain en", riskType: riskSupplyChain, lang: "en"},
+		{name: "human trust zh", riskType: riskHumanTrustExploitation, lang: "zh"},
+		{name: "cascading failure en", riskType: riskCascadingFailure, lang: "en"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sg := shepherd.NewShepherdGateForTesting(nil, tc.lang, nil)
+			msg := sg.FormatSecurityMockReply(&shepherd.ShepherdDecision{
+				Status:   "NEEDS_CONFIRMATION",
+				Reason:   "risk requires confirmation",
+				RiskType: tc.riskType,
+			})
+
+			if got := riskTypeFromRecoveryPrompt(msg); got != tc.riskType {
+				t.Fatalf("riskTypeFromRecoveryPrompt() = %q, want %q; msg=%q", got, tc.riskType, msg)
+			}
+		})
+	}
+}
+
+func TestRiskTypeFromRecoveryPrompt_RequiresStructuredRiskTypeForAliases(t *testing.T) {
+	negativePrompts := []string{
+		"[ShepherdGate] :\n该操作存在风险，需要你先确认后才能继续执行。\n\n状态: 需要确认 | 原因: 这个脚本执行效率很高",
+		"[ShepherdGate] :\n该操作存在风险，需要你先确认后才能继续执行。\n\n状态: 需要确认 | 原因: 代码执行速度测试",
+		"[ShepherdGate] :\nThis action is risky and requires your confirmation before continuing.\n\nStatus: Needs Confirmation | Reason: script execution is fast",
+	}
+	for _, prompt := range negativePrompts {
+		if got := riskTypeFromRecoveryPrompt(prompt); got != "" {
+			t.Fatalf("expected no risk type for incidental phrase, got %q; prompt=%q", got, prompt)
+		}
+	}
+
+	aliasPrompts := map[string]string{
+		"[ShepherdGate] :\n状态: 需要确认 | 原因: 执行 Python 脚本需要确认\n风险类型: 脚本执行风险":                                     riskUnexpectedCodeExecution,
+		"[ShepherdGate] :\nStatus: Needs Confirmation | Reason: run script\nRisk Type: Script Execution Risk": riskUnexpectedCodeExecution,
+	}
+	for prompt, want := range aliasPrompts {
+		if got := riskTypeFromRecoveryPrompt(prompt); got != want {
+			t.Fatalf("riskTypeFromRecoveryPrompt() = %q, want %q; prompt=%q", got, want, prompt)
+		}
+	}
+}
+
+func TestArmPendingRecoveryFromContext_FormattedRiskTypeGrantsMatchingToolCallOnce(t *testing.T) {
+	riskTypes := []string{
+		riskPromptInjectionDirect,
+		riskPromptInjectionIndirect,
+		riskSensitiveDataExfil,
+		riskHighRiskOperation,
+		riskPrivilegeAbuse,
+		riskUnexpectedCodeExecution,
+		riskContextPoisoning,
+		riskSupplyChain,
+		riskHumanTrustExploitation,
+		riskCascadingFailure,
+	}
+
+	for _, riskType := range riskTypes {
+		t.Run(riskType, func(t *testing.T) {
+			requestID := "req_" + strings.ToLower(riskType)
+			sg := shepherd.NewShepherdGateForTesting(nil, "zh", nil)
+			prompt := sg.FormatSecurityMockReply(&shepherd.ShepherdDecision{
+				Status:   "NEEDS_CONFIRMATION",
+				Reason:   "risk requires confirmation",
+				RiskType: riskType,
+			})
+			pp := &ProxyProtection{shepherdGate: sg}
+			prepareTestSecurityChain(t, pp, requestID)
+			pp.storePendingToolCallRecoveryWithRiskForRequest(requestID, nil, nil, prompt, "risk requires confirmation", "user_input", "")
+
+			if !pp.armPendingRecoveryFromContext(context.Background(), requestID, []ConversationMessage{
+				{Role: "assistant", Content: prompt},
+				{Role: "user", Content: "继续"},
+			}) {
+				t.Fatalf("expected formatted risk prompt to arm recovery")
+			}
+			if !pp.consumeConfirmedToolCallGrantForRequest(requestID, securityPolicyDecision{
+				Action:   decisionActionNeedsConfirm,
+				RiskType: riskType,
+			}) {
+				t.Fatalf("expected matching risk type %s to consume confirmation grant", riskType)
+			}
+			if pp.consumeConfirmedToolCallGrantForRequest(requestID, securityPolicyDecision{
+				Action:   decisionActionNeedsConfirm,
+				RiskType: riskType,
+			}) {
+				t.Fatalf("expected confirmation grant for %s to be one-shot", riskType)
+			}
+		})
 	}
 }

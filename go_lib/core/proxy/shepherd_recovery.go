@@ -184,15 +184,15 @@ func normalizeRecoveryRiskType(riskType string) string {
 }
 
 func riskTypeFromRecoveryPrompt(content string) string {
-	text := strings.ToLower(strings.TrimSpace(content))
+	text := strings.ToLower(strings.TrimSpace(recoveryPromptRiskTypeText(content)))
 	if text == "" {
 		return ""
 	}
 	switch {
-	case strings.Contains(text, "prompt_injection_direct") || strings.Contains(text, "直接提示词注入") || strings.Contains(text, "direct prompt injection"):
-		return riskPromptInjectionDirect
 	case strings.Contains(text, "prompt_injection_indirect") || strings.Contains(text, "间接提示词注入") || strings.Contains(text, "indirect prompt injection"):
 		return riskPromptInjectionIndirect
+	case strings.Contains(text, "prompt_injection_direct") || strings.Contains(text, "直接提示词注入") || strings.Contains(text, "direct prompt injection"):
+		return riskPromptInjectionDirect
 	case strings.Contains(text, "sensitive_data_exfiltration") ||
 		strings.Contains(text, "敏感数据外泄") ||
 		strings.Contains(text, "敏感凭证") ||
@@ -212,9 +212,40 @@ func riskTypeFromRecoveryPrompt(content string) string {
 		strings.Contains(text, "script execution risk") ||
 		strings.Contains(text, "script execution"):
 		return riskUnexpectedCodeExecution
+	case strings.Contains(text, "context_poisoning") || strings.Contains(text, "上下文污染") || strings.Contains(text, "context poisoning"):
+		return riskContextPoisoning
+	case strings.Contains(text, "supply_chain_risk") || strings.Contains(text, "供应链风险") || strings.Contains(text, "supply chain risk"):
+		return riskSupplyChain
+	case strings.Contains(text, "human_trust_exploitation") || strings.Contains(text, "人类信任利用") || strings.Contains(text, "human trust exploitation"):
+		return riskHumanTrustExploitation
+	case strings.Contains(text, "cascading_failure") || strings.Contains(text, "级联故障风险") || strings.Contains(text, "cascading failure risk"):
+		return riskCascadingFailure
 	default:
 		return ""
 	}
+}
+
+func recoveryPromptRiskTypeText(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		for _, label := range []string{"风险类型:", "风险类型：", "risk type:"} {
+			if idx := strings.Index(lower, strings.ToLower(label)); idx >= 0 {
+				return strings.TrimSpace(line[idx+len(label):])
+			}
+		}
+	}
+	if strings.Contains(content, "_") {
+		return content
+	}
+	return ""
 }
 
 func latestRecoveryPromptBeforeLatestUser(messages []openai.ChatCompletionMessageParamUnion) (int, string) {

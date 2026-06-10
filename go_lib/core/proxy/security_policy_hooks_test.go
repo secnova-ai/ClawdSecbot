@@ -473,13 +473,23 @@ func TestOnResponse_UserConfirmationAllowsScriptExecutionRiskLabelOnce(t *testin
 		assetID:      "asset-script-confirm",
 		shepherdGate: shepherd.NewShepherdGateForTesting(securityModel, "zh", nil),
 	}
+	mockContent := pp.shepherdGate.FormatSecurityMockReply(&shepherd.ShepherdDecision{
+		Status:     "NEEDS_CONFIRMATION",
+		Reason:     "执行 Python 脚本需要确认",
+		ActionDesc: "确认 Python 脚本执行",
+		RiskType:   riskUnexpectedCodeExecution,
+	})
+	mockContentJSON, err := json.Marshal(mockContent)
+	if err != nil {
+		t.Fatalf("failed to marshal mock content: %v", err)
+	}
 
 	req, rawBody := mustParseChatRequest(t, `{
 	  "model":"gpt-test",
 	  "stream":false,
 	  "messages":[
 	    {"role":"user","content":"生成 Word 文档"},
-	    {"role":"assistant","content":"[ShepherdGate] :\n该操作存在风险，需要你先确认后才能继续执行。\n\n状态: 需要确认 | 原因: 执行 Python 脚本需要确认\n动作: 确认 Python 脚本执行\n风险类型: 脚本执行风险\n\n继续可回复：好的、继续、OK、没问题、确认、可以\n取消可回复：取消、停止、不要执行、不继续"},
+	    {"role":"assistant","content":`+string(mockContentJSON)+`},
 	    {"role":"user","content":"确认"}
 	  ]
 	}`)
