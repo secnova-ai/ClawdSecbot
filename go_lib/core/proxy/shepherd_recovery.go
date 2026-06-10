@@ -203,7 +203,14 @@ func riskTypeFromRecoveryPrompt(content string) string {
 		return riskHighRiskOperation
 	case strings.Contains(text, "privilege_abuse") || strings.Contains(text, "权限滥用") || strings.Contains(text, "privilege abuse"):
 		return riskPrivilegeAbuse
-	case strings.Contains(text, "unexpected_code_execution") || strings.Contains(text, "非预期代码执行") || strings.Contains(text, "unexpected code execution"):
+	case strings.Contains(text, "unexpected_code_execution") ||
+		strings.Contains(text, "非预期代码执行") ||
+		strings.Contains(text, "脚本执行风险") ||
+		strings.Contains(text, "脚本执行") ||
+		strings.Contains(text, "代码执行") ||
+		strings.Contains(text, "unexpected code execution") ||
+		strings.Contains(text, "script execution risk") ||
+		strings.Contains(text, "script execution"):
 		return riskUnexpectedCodeExecution
 	default:
 		return ""

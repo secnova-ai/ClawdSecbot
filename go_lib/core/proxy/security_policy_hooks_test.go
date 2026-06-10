@@ -458,6 +458,63 @@ func TestOnResponse_UserInputConfirmationAllowsNextMatchingSensitiveToolCallOnce
 	}
 }
 
+func TestOnResponse_UserConfirmationAllowsScriptExecutionRiskLabelOnce(t *testing.T) {
+	_ = drainSecurityEvents()
+	ctx := context.WithValue(context.Background(), securityPolicyTestContextKey("request"), "script-confirm")
+	securityModel := &stubChatModelForProxy{
+		generateResp: &schema.Message{
+			Content: `{"allowed":false,"reason":"工具调用会执行 Python 脚本，需要用户确认。","risk_level":"high","confidence":95,"action_desc":"确认 Python 脚本执行","risk_type":"UNEXPECTED_CODE_EXECUTION"}`,
+		},
+	}
+	pp := &ProxyProtection{
+		ctx:          context.Background(),
+		records:      NewRecordStore(),
+		assetName:    "openclaw",
+		assetID:      "asset-script-confirm",
+		shepherdGate: shepherd.NewShepherdGateForTesting(securityModel, "zh", nil),
+	}
+
+	req, rawBody := mustParseChatRequest(t, `{
+	  "model":"gpt-test",
+	  "stream":false,
+	  "messages":[
+	    {"role":"user","content":"生成 Word 文档"},
+	    {"role":"assistant","content":"[ShepherdGate] :\n该操作存在风险，需要你先确认后才能继续执行。\n\n状态: 需要确认 | 原因: 执行 Python 脚本需要确认\n动作: 确认 Python 脚本执行\n风险类型: 脚本执行风险\n\n继续可回复：好的、继续、OK、没问题、确认、可以\n取消可回复：取消、停止、不要执行、不继续"},
+	    {"role":"user","content":"确认"}
+	  ]
+	}`)
+	result, passed := pp.onRequest(ctx, req, rawBody)
+	if !passed {
+		t.Fatalf("expected script execution confirmation request to pass, result=%+v", result)
+	}
+	if result != nil {
+		t.Fatalf("expected no mock response after confirmation, got %+v", result)
+	}
+
+	resp := &openai.ChatCompletion{
+		Model: "gpt-test",
+		Choices: []openai.ChatCompletionChoice{
+			{
+				Message: openai.ChatCompletionMessage{
+					ToolCalls: []openai.ChatCompletionMessageToolCall{
+						{
+							ID: "call_python_word",
+							Function: openai.ChatCompletionMessageToolCallFunction{
+								Name:      "shell",
+								Arguments: `{"command":"python generated_word.py"}`,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if !pp.onResponse(ctx, resp) {
+		t.Fatalf("expected confirmed script execution tool_call to pass once")
+	}
+}
+
 func TestOnResponse_UserInputConfirmationDoesNotAllowMismatchedToolCallRisk(t *testing.T) {
 	pp, ctx := prepareConfirmedOpenClawCredentialRequest(t)
 	pp.shepherdGate = shepherd.NewShepherdGateForTesting(&stubChatModelForProxy{
