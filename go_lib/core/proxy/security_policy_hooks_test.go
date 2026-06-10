@@ -458,6 +458,73 @@ func TestOnResponse_UserInputConfirmationAllowsNextMatchingSensitiveToolCallOnce
 	}
 }
 
+func TestOnResponse_UserConfirmationAllowsScriptExecutionRiskLabelOnce(t *testing.T) {
+	_ = drainSecurityEvents()
+	ctx := context.WithValue(context.Background(), securityPolicyTestContextKey("request"), "script-confirm")
+	securityModel := &stubChatModelForProxy{
+		generateResp: &schema.Message{
+			Content: `{"allowed":false,"reason":"工具调用会执行 Python 脚本，需要用户确认。","risk_level":"high","confidence":95,"action_desc":"确认 Python 脚本执行","risk_type":"UNEXPECTED_CODE_EXECUTION"}`,
+		},
+	}
+	pp := &ProxyProtection{
+		ctx:          context.Background(),
+		records:      NewRecordStore(),
+		assetName:    "openclaw",
+		assetID:      "asset-script-confirm",
+		shepherdGate: shepherd.NewShepherdGateForTesting(securityModel, "zh", nil),
+	}
+	mockContent := pp.shepherdGate.FormatSecurityMockReply(&shepherd.ShepherdDecision{
+		Status:     "NEEDS_CONFIRMATION",
+		Reason:     "执行 Python 脚本需要确认",
+		ActionDesc: "确认 Python 脚本执行",
+		RiskType:   riskUnexpectedCodeExecution,
+	})
+	mockContentJSON, err := json.Marshal(mockContent)
+	if err != nil {
+		t.Fatalf("failed to marshal mock content: %v", err)
+	}
+
+	req, rawBody := mustParseChatRequest(t, `{
+	  "model":"gpt-test",
+	  "stream":false,
+	  "messages":[
+	    {"role":"user","content":"生成 Word 文档"},
+	    {"role":"assistant","content":`+string(mockContentJSON)+`},
+	    {"role":"user","content":"确认"}
+	  ]
+	}`)
+	result, passed := pp.onRequest(ctx, req, rawBody)
+	if !passed {
+		t.Fatalf("expected script execution confirmation request to pass, result=%+v", result)
+	}
+	if result != nil {
+		t.Fatalf("expected no mock response after confirmation, got %+v", result)
+	}
+
+	resp := &openai.ChatCompletion{
+		Model: "gpt-test",
+		Choices: []openai.ChatCompletionChoice{
+			{
+				Message: openai.ChatCompletionMessage{
+					ToolCalls: []openai.ChatCompletionMessageToolCall{
+						{
+							ID: "call_python_word",
+							Function: openai.ChatCompletionMessageToolCallFunction{
+								Name:      "shell",
+								Arguments: `{"command":"python generated_word.py"}`,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if !pp.onResponse(ctx, resp) {
+		t.Fatalf("expected confirmed script execution tool_call to pass once")
+	}
+}
+
 func TestOnResponse_UserInputConfirmationDoesNotAllowMismatchedToolCallRisk(t *testing.T) {
 	pp, ctx := prepareConfirmedOpenClawCredentialRequest(t)
 	pp.shepherdGate = shepherd.NewShepherdGateForTesting(&stubChatModelForProxy{
