@@ -77,6 +77,7 @@ import (
 	_ "go_lib/plugins/nullclaw"
 	_ "go_lib/plugins/openclaw"
 	_ "go_lib/plugins/qclaw"
+	_ "go_lib/plugins/readyclaw"
 )
 
 func init() {
