@@ -91,7 +91,7 @@ type OpenclawConfig struct {
 // OpenclawProvider represents a model provider configuration
 type OpenclawProvider struct {
 	BaseURL string `json:"baseUrl"`
-	APIKey  string `json:"apiKey"`
+	APIKey  any    `json:"apiKey"`
 	API     string `json:"api"`
 }
 
