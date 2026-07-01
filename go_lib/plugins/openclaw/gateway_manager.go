@@ -208,7 +208,7 @@ func startGatewayWithProxy(proxyPort int, botModelConfig *BotModelConfig, backup
 	logging.Info("[GatewayManager] Step 4 agents.defaults.model.fallbacks old=%v, new=%v", previousFallbacks, updatedFallbacks)
 
 	// Step 5: agents.defaults.models
-	previousModels, updatedModels, err := updateAgentsDefaultsModels(rawConfig, newModel)
+	previousModels, updatedModels, err := updateAgentsDefaultsModels(rawConfig, newModel, baseModel)
 	if err != nil {
 		return restoreOnError(fmt.Errorf("update models whitelist failed: %w", err))
 	}
