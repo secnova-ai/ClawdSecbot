@@ -24,17 +24,19 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/DaveGamble/cJSON.git
     GIT_TAG        v1.7.18
 )
-# Avoid MSVC /Za from cJSON custom flags; it conflicts with /std:c11.
-set(ENABLE_CUSTOM_COMPILER_FLAGS OFF CACHE BOOL "" FORCE)
-set(ENABLE_CJSON_TEST OFF CACHE BOOL "" FORCE)
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(BUILD_SHARED_AND_STATIC_LIBS OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(cjson)
+# cJSON's released CMakeLists still declares an old minimum CMake version.
+# Populate sources only and compile cJSON.c directly so newer CMake runners do
+# not configure the cJSON subproject.
+FetchContent_GetProperties(cjson)
+if(NOT cjson_POPULATED)
+    FetchContent_Populate(cjson)
+endif()
 
 add_library(sandbox_hook SHARED
     sandbox_hook.c
     hooks.c
     policy.c
+    ${cjson_SOURCE_DIR}/cJSON.c
     ${minhook_SOURCE_DIR}/src/buffer.c
     ${minhook_SOURCE_DIR}/src/hook.c
     ${minhook_SOURCE_DIR}/src/trampoline.c
@@ -51,7 +53,6 @@ target_include_directories(sandbox_hook PRIVATE
 )
 
 target_link_libraries(sandbox_hook PRIVATE
-    cjson
     ws2_32
     shlwapi
     iphlpapi
