@@ -18,7 +18,7 @@
     "desc": "Detects ReadyClaw/NanoClaw presence via service or user config files",
     "expression": {
       "lang": "json_match",
-      "expr": "{\"file_paths\": [\"%ProgramData%\\\\NanoClaw\\\\config\\\\nanoclaw\\\\config.json\", \"%ProgramData%\\\\readyclaw\\\\config.json\", \"%ProgramData%\\\\nanoclaw\\\\config.json\", \"~/.config/readyclaw/config.json\", \"~/.config/nanoclaw/config.json\", \"~/Library/Application Support/ReadyClaw/config.json\"]}"
+      "expr": "{\"file_paths\": [\"%ProgramData%\\\\ReadyClaw\\\\config\\\\readyclaw\\\\config.json\", \"%ProgramData%\\\\ReadyClaw\\\\config.json\", \"%ProgramData%\\\\NanoClaw\\\\config\\\\nanoclaw\\\\config.json\", \"%ProgramData%\\\\readyclaw\\\\config.json\", \"%ProgramData%\\\\nanoclaw\\\\config.json\", \"%ProgramFiles%\\\\ReadyClaw\\\\ReadyClaw.exe\", \"~/.config/readyclaw/config.json\", \"~/.config/nanoclaw/config.json\", \"~/Library/Application Support/ReadyClaw/config.json\"]}"
     }
   }
 ]

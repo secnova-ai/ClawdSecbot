@@ -41,6 +41,38 @@ func TestFindConfigPathPrefersProgramDataRuntimeConfig(t *testing.T) {
 	}
 }
 
+func TestFindConfigPathPrefersReadyClawProgramDataOverNanoClawFallback(t *testing.T) {
+	prevProgramData := readyclawProgramDataDir
+	prevHomeDir := readyclawUserHomeDir
+	prevConfigOverride := readyclawConfigPathOverride
+	t.Cleanup(func() {
+		readyclawProgramDataDir = prevProgramData
+		readyclawUserHomeDir = prevHomeDir
+		readyclawConfigPathOverride = prevConfigOverride
+	})
+
+	dir := t.TempDir()
+	programData := filepath.Join(dir, "ProgramData")
+	homeDir := filepath.Join(dir, "Users", "tester")
+	readyClawConfig := filepath.Join(programData, "ReadyClaw", "config", "readyclaw", "config.json")
+	nanoClawConfig := filepath.Join(programData, "NanoClaw", "config", "nanoclaw", "config.json")
+
+	writeReadyClawTestConfig(t, readyClawConfig, "https://readyclaw.example.com/v1/chat/completions")
+	writeReadyClawTestConfig(t, nanoClawConfig, "https://nanoclaw.example.com/v1/chat/completions")
+
+	readyclawProgramDataDir = func() string { return programData }
+	readyclawUserHomeDir = func() (string, error) { return homeDir, nil }
+	readyclawConfigPathOverride = ""
+
+	got, err := findConfigPath()
+	if err != nil {
+		t.Fatalf("findConfigPath returned error: %v", err)
+	}
+	if got != readyClawConfig {
+		t.Fatalf("expected ReadyClaw ProgramData config %q, got %q", readyClawConfig, got)
+	}
+}
+
 func TestApplyProxyConfigUpdatesBaseURLAndPreservesValues(t *testing.T) {
 	prevConfigOverride := readyclawConfigPathOverride
 	t.Cleanup(func() { readyclawConfigPathOverride = prevConfigOverride })

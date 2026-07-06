@@ -49,6 +49,8 @@ func readyclawConfigCandidates() []string {
 
 	if programData := strings.TrimSpace(readyclawProgramDataDir()); programData != "" {
 		candidates = append(candidates,
+			filepath.Join(programData, "ReadyClaw", "config", "readyclaw", "config.json"),
+			filepath.Join(programData, "ReadyClaw", "config.json"),
 			filepath.Join(programData, "NanoClaw", "config", "nanoclaw", "config.json"),
 			filepath.Join(programData, "readyclaw", "config.json"),
 			filepath.Join(programData, "nanoclaw", "config.json"),

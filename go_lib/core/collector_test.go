@@ -38,3 +38,27 @@ func TestCollectorFileExistsExpandsTildeToUserHome(t *testing.T) {
 		t.Fatalf("FileExists should expand ~ to user home %q", userHomeDir)
 	}
 }
+
+// TestCollectorFileExistsExpandsPercentEnvironmentVariables 验证 Windows 风格 %VAR% 路径可用于资产规则。
+func TestCollectorFileExistsExpandsPercentEnvironmentVariables(t *testing.T) {
+	rootDir := t.TempDir()
+	configPath := filepath.Join(rootDir, "ReadyClaw", "config", "readyclaw", "config.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("{}"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	t.Setenv("BOTSEC_TEST_PROGRAMDATA", rootDir)
+
+	snapshot, err := NewCollector("").Collect()
+	if err != nil {
+		t.Fatalf("Collect failed: %v", err)
+	}
+
+	candidate := "%BOTSEC_TEST_PROGRAMDATA%" + string(os.PathSeparator) +
+		filepath.Join("ReadyClaw", "config", "readyclaw", "config.json")
+	if !snapshot.FileExists(candidate) {
+		t.Fatalf("FileExists should expand %%BOTSEC_TEST_PROGRAMDATA%% to %q", rootDir)
+	}
+}

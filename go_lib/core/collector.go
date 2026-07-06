@@ -92,6 +92,7 @@ func (c *platformCollector) Collect() (SystemSnapshot, error) {
 				path = filepath.Join(dirname, strings.TrimPrefix(path, "~/"))
 				logging.Debug("路径扩展: %s -> %s", originalPath, path)
 			}
+			path = expandPathEnvironmentVariables(path)
 
 			_, err := os.Stat(path)
 			exists := err == nil || !os.IsNotExist(err)
@@ -105,4 +106,25 @@ func (c *platformCollector) Collect() (SystemSnapshot, error) {
 			return exists
 		},
 	}, nil
+}
+
+func expandPathEnvironmentVariables(path string) string {
+	path = os.ExpandEnv(path)
+	if !strings.Contains(path, "%") {
+		return path
+	}
+
+	parts := strings.Split(path, "%")
+	for i := 1; i < len(parts); i += 2 {
+		if parts[i] == "" {
+			continue
+		}
+		if value, ok := os.LookupEnv(parts[i]); ok {
+			parts[i] = value
+		} else {
+			parts[i-1] += "%"
+			parts[i] += "%"
+		}
+	}
+	return strings.Join(parts, "")
 }

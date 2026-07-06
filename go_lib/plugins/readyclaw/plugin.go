@@ -99,11 +99,11 @@ func (p *Plugin) GetMainProcessPID(asset core.Asset) (int, bool) {
 	return 0, false
 }
 
-// AssessRisks 第一阶段只接入保护闭环，深度风险评估后续复用 OpenClaw 模板扩展。
+// AssessRisks 只检查 ReadyClaw 自身配置接管必需条件，避免套用 OpenClaw 网关风险模型。
 func (p *Plugin) AssessRisks(scannedHashes map[string]bool, assets []core.Asset) ([]core.Risk, error) {
 	_ = scannedHashes
 	_ = assets
-	return []core.Risk{}, nil
+	return assessReadyClawConfigRisks(), nil
 }
 
 // MitigateRisk 第一阶段不实现单项修复动作。
