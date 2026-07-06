@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../config/build_config.dart';
@@ -71,6 +72,7 @@ class BotScanner {
     await Future.delayed(const Duration(milliseconds: 150));
 
     final pluginOrder = [
+      'readyclaw',
       'openclaw',
       'dintalclaw',
       'nullclaw',
@@ -189,7 +191,12 @@ class BotScanner {
   Future<ScanResult> _runPluginPipeline({
     void Function(String assetName, bool detected)? onPluginScanned,
   }) async {
+    if (kIsWeb) {
+      return _runWebPluginPipeline(onPluginScanned: onPluginScanned);
+    }
+
     final pluginOrder = [
+      'readyclaw',
       'openclaw',
       'dintalclaw',
       'nullclaw',
@@ -241,6 +248,44 @@ class BotScanner {
       configPath: configPath.toString().isEmpty ? null : configPath.toString(),
       assets: allAssets,
     );
+  }
+
+  Future<ScanResult> _runWebPluginPipeline({
+    void Function(String assetName, bool detected)? onPluginScanned,
+  }) async {
+    final result = await _pluginService.scan();
+    final assetCountsByPlugin = <String, int>{};
+    for (final asset in result.assets) {
+      final pluginName = (asset.sourcePlugin.isNotEmpty
+          ? asset.sourcePlugin
+          : asset.name);
+      final normalized = pluginName.trim().toLowerCase();
+      if (normalized.isEmpty) {
+        continue;
+      }
+      assetCountsByPlugin[normalized] =
+          (assetCountsByPlugin[normalized] ?? 0) + 1;
+    }
+
+    final registeredPlugins = await _pluginService.getRegisteredPlugins();
+    for (final item in registeredPlugins) {
+      final assetName = (item['asset_name'] as String? ?? '').trim();
+      if (assetName.isEmpty) {
+        continue;
+      }
+      final normalized = assetName.toLowerCase();
+      final count = assetCountsByPlugin[normalized] ?? 0;
+      _log('Plugin $normalized found $count assets.');
+      onPluginScanned?.call(normalized, count > 0);
+    }
+
+    if (result.riskInfo.isEmpty) {
+      _log('Found 0 potential issues.');
+    } else {
+      _log('Found ${result.riskInfo.length} potential issues.');
+    }
+
+    return result;
   }
 
   void _checkSystemRisks(List<RiskInfo> risks) {

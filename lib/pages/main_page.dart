@@ -80,6 +80,7 @@ class _MainPageState extends State<MainPage>
   StreamSubscription<String>? _logSubscription;
   RescanAction _selectedRescanAction = RescanAction.securityDiscovery;
   final List<_ScanProbe> _scanProbes = const [
+    _ScanProbe(key: 'readyclaw', label: 'ReadyClaw'),
     _ScanProbe(key: 'openclaw', label: 'OpenClaw'),
     _ScanProbe(key: 'dintalclaw', label: 'DinTalClaw'),
     _ScanProbe(key: 'nullclaw', label: 'NullClaw'),
@@ -3588,6 +3589,7 @@ class _MainPageState extends State<MainPage>
   String _formatDiscoveryAssetTitle(Asset asset) {
     const friendlyNames = {
       'openclaw': 'OpenClaw',
+      'readyclaw': 'ReadyClaw',
       'dintalclaw': 'DinTalClaw',
       'nullclaw': 'NullClaw',
       'qclaw': 'QClaw',

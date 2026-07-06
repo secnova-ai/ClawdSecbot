@@ -208,9 +208,17 @@ class _WebHomePageState extends State<WebHomePage> {
       return configured;
     }
 
-    final scheme = Uri.base.scheme == 'https' ? 'https' : 'http';
-    final host = Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1';
-    return '$scheme://$host:$_defaultApiPort';
+    final current = Uri.base;
+    if ((current.scheme == 'http' || current.scheme == 'https') &&
+        current.host.isNotEmpty) {
+      return Uri(
+        scheme: current.scheme,
+        host: current.host,
+        port: current.hasPort ? current.port : null,
+      ).toString();
+    }
+
+    return 'http://127.0.0.1:$_defaultApiPort';
   }
 
   String _resolveWebSessionClientID() {
@@ -2299,7 +2307,8 @@ class _WebHomePageState extends State<WebHomePage> {
           onRescan: _resetScan,
           onViewSkillScanResults: _showSkillScanResultsDialog,
           onShowProtectionConfig: _showProtectionConfigDialog,
-          onShowProtectionMonitor: (asset) => _showProtectionMonitorResolved(asset),
+          onShowProtectionMonitor: (asset) =>
+              _showProtectionMonitorResolved(asset),
           onStopProtection: _stopProtectionForAsset,
           onShowMitigation: _showMitigationDialog,
           onDeleteRiskSkill: _deleteRiskSkill,

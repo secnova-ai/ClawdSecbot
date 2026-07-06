@@ -557,7 +557,7 @@ class ScanResultView extends StatelessWidget {
   }
 
   String _getAssetDisplayName(String name) {
-    const displayNames = {'dintalclaw': '政务龙虾'};
+    const displayNames = {'dintalclaw': '政务龙虾', 'readyclaw': 'ReadyClaw'};
     return displayNames[name] ?? name;
   }
 }
@@ -816,7 +816,7 @@ class _AssetCardState extends State<_AssetCard> {
 
   /// 将资产内部名称映射为用户友好的展示名称
   String _getAssetDisplayName(String name) {
-    const displayNames = {'dintalclaw': '政务龙虾'};
+    const displayNames = {'dintalclaw': '政务龙虾', 'readyclaw': 'ReadyClaw'};
     return displayNames[name] ?? name;
   }
 
