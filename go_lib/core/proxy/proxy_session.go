@@ -28,10 +28,23 @@ type ProxyStartResponse struct {
 // ProxyStatusResponse represents the proxy status
 type ProxyStatusResponse struct {
 	Running         bool   `json:"running"`
+	SessionID       string `json:"session_id,omitempty"`
+	AuditOnly       bool   `json:"audit_only"`
 	Port            int    `json:"port,omitempty"`
 	ProxyURL        string `json:"proxy_url,omitempty"`
 	ProviderName    string `json:"provider_name,omitempty"`
 	OriginalBaseURL string `json:"original_base_url,omitempty"`
+}
+
+func getSessionIDForProxy(pp *ProxyProtection) string {
+	proxySessionsMu.RLock()
+	defer proxySessionsMu.RUnlock()
+	for id, session := range proxySessions {
+		if session != nil && session.Proxy == pp {
+			return id
+		}
+	}
+	return ""
 }
 
 // ProxySession manages the proxy with log streaming
@@ -468,6 +481,12 @@ func StartProtectionProxyInternal(protectionConfigJSON string) string {
 			Error:   fmt.Sprintf("invalid protection config: %v", err),
 		})
 	}
+	if strings.TrimSpace(protectionConfig.AssetName) == "" && strings.TrimSpace(protectionConfig.AssetID) != "" {
+		protectionConfig.AssetName, _ = core.GetPluginManager().ResolveAssetNameByAssetID(protectionConfig.AssetID)
+	}
+	if strings.TrimSpace(protectionConfig.AssetName) == "" {
+		return toJSONString(ProxyStartResponse{Success: false, Error: "asset instance binding not found"})
+	}
 
 	assetKey := buildAssetKey(protectionConfig.AssetID)
 	meta := assetRuntimeMeta{
@@ -607,6 +626,8 @@ func GetProtectionProxyStatusInternal() string {
 
 	return toJSONString(ProxyStatusResponse{
 		Running:         pp.IsRunning(),
+		SessionID:       getSessionIDForProxy(pp),
+		AuditOnly:       pp.IsAuditOnly(),
 		Port:            pp.GetPort(),
 		ProxyURL:        pp.GetProxyURL(),
 		ProviderName:    pp.providerName,
@@ -626,6 +647,8 @@ func GetProtectionProxyStatusByAssetInternal(assetID string) string {
 
 	return toJSONString(ProxyStatusResponse{
 		Running:         pp.IsRunning(),
+		SessionID:       getSessionIDForProxy(pp),
+		AuditOnly:       pp.IsAuditOnly(),
 		Port:            pp.GetPort(),
 		ProxyURL:        pp.GetProxyURL(),
 		ProviderName:    pp.providerName,

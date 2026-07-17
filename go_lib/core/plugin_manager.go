@@ -104,6 +104,35 @@ func (pm *PluginManager) GetPluginByAssetID(assetID string) BotPlugin {
 	return inst.plugin
 }
 
+// GetAssetNameByAssetID returns the asset type bound to a concrete asset instance.
+func (pm *PluginManager) GetAssetNameByAssetID(assetID string) string {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	inst := pm.instances[strings.TrimSpace(assetID)]
+	if inst == nil {
+		return ""
+	}
+	return strings.TrimSpace(inst.AssetName)
+}
+
+// ResolveAssetNameByAssetID refreshes instance bindings when necessary and resolves the asset type.
+func (pm *PluginManager) ResolveAssetNameByAssetID(assetID string) (string, error) {
+	assetID = strings.TrimSpace(assetID)
+	if assetID == "" {
+		return "", fmt.Errorf("asset_id is required")
+	}
+	if name := pm.GetAssetNameByAssetID(assetID); name != "" {
+		return name, nil
+	}
+	if _, err := pm.ScanAllAssets(); err != nil {
+		return "", err
+	}
+	if name := pm.GetAssetNameByAssetID(assetID); name != "" {
+		return name, nil
+	}
+	return "", fmt.Errorf("asset instance binding not found: %s", assetID)
+}
+
 // GetPluginCount returns count of registered plugin capabilities (asset types).
 func (pm *PluginManager) GetPluginCount() int {
 	pm.mu.RLock()

@@ -131,6 +131,31 @@ func newTestPlugin(assetName string) *testPlugin {
 	}
 }
 
+func TestPluginManager_GetAssetNameByAssetID(t *testing.T) {
+	pm := &PluginManager{registeredPlugins: make(map[string]BotPlugin), instances: make(map[string]*AssetPluginInstance)}
+	plugin := newTestPlugin("Openclaw")
+	pm.bindAssetInstance(plugin, Asset{ID: "openclaw:instance-1", SourcePlugin: "Openclaw"})
+
+	if got := pm.GetAssetNameByAssetID("openclaw:instance-1"); got != "Openclaw" {
+		t.Fatalf("expected bound asset name Openclaw, got %q", got)
+	}
+	if got := pm.GetAssetNameByAssetID("missing"); got != "" {
+		t.Fatalf("expected empty asset name for missing binding, got %q", got)
+	}
+}
+
+func TestPluginManager_ResolveAssetNameByAssetIDRefreshesBindings(t *testing.T) {
+	pm := &PluginManager{registeredPlugins: make(map[string]BotPlugin), instances: make(map[string]*AssetPluginInstance)}
+	plugin := newTestPlugin("Hermes")
+	plugin.assets = []Asset{{ID: "hermes:instance-1", SourcePlugin: "Hermes"}}
+	pm.Register(plugin)
+
+	got, err := pm.ResolveAssetNameByAssetID("hermes:instance-1")
+	if err != nil || got != "Hermes" {
+		t.Fatalf("expected refreshed binding Hermes, got %q, err=%v", got, err)
+	}
+}
+
 func TestPluginManager_GetPluginByAssetName_CaseInsensitive(t *testing.T) {
 	pm := &PluginManager{
 		registeredPlugins: make(map[string]BotPlugin),

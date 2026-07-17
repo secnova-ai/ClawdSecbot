@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"go_lib/core"
 	"go_lib/core/logging"
 	"go_lib/core/proxy"
 	"go_lib/core/repository"
@@ -66,6 +67,12 @@ func SaveProtectionConfig(jsonStr string) map[string]interface{} {
 	if err := json.Unmarshal([]byte(jsonStr), &config); err != nil {
 		logging.Error("Failed to parse protection config JSON: %v", err)
 		return errorMessageResult("invalid JSON: " + err.Error())
+	}
+	if strings.TrimSpace(config.AssetName) == "" && strings.TrimSpace(config.AssetID) != "" {
+		config.AssetName, _ = core.GetPluginManager().ResolveAssetNameByAssetID(config.AssetID)
+	}
+	if strings.TrimSpace(config.AssetName) == "" {
+		return errorMessageResult("asset instance binding not found")
 	}
 	// 此处对原始 JSON 再做一次浅层 Unmarshal 以判断 inherits_default_policy
 	// 字段是否被显式携带：Go 的零值 false 无法区分“未传”和“显式传 false”，
@@ -394,6 +401,12 @@ func SaveShepherdRules(jsonStr string) map[string]interface{} {
 
 	if strings.TrimSpace(input.AssetID) == "" {
 		return errorResult(fmt.Errorf("asset_id is required"))
+	}
+	if strings.TrimSpace(input.AssetName) == "" {
+		input.AssetName, _ = core.GetPluginManager().ResolveAssetNameByAssetID(input.AssetID)
+	}
+	if strings.TrimSpace(input.AssetName) == "" {
+		return errorMessageResult("asset instance binding not found")
 	}
 
 	rules := &shepherd.UserRules{

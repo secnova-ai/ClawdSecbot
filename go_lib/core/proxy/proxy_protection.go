@@ -703,6 +703,13 @@ func (pp *ProxyProtection) SetAuditOnly(auditOnly bool) {
 	logging.Info("[ProxyProtection] SetAuditOnly: %v → %v", oldValue, auditOnly)
 }
 
+// IsAuditOnly returns the current runtime audit-only mode.
+func (pp *ProxyProtection) IsAuditOnly() bool {
+	pp.configMu.RLock()
+	defer pp.configMu.RUnlock()
+	return pp.auditOnly
+}
+
 func (pp *ProxyProtection) sendLog(key string, params map[string]interface{}) {
 	pp.sendLogForRequest("", key, params)
 }
