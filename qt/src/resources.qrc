@@ -1,0 +1,14 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="themes/light.qss">ui/themes/light.qss</file>
+        <file alias="fonts/Inter-Regular.ttf">../../assets/fonts/Inter-Regular.ttf</file>
+        <file alias="fonts/Inter-Medium.ttf">../../assets/fonts/Inter-Medium.ttf</file>
+        <file alias="fonts/Inter-SemiBold.ttf">../../assets/fonts/Inter-SemiBold.ttf</file>
+        <file alias="fonts/Inter-Bold.ttf">../../assets/fonts/Inter-Bold.ttf</file>
+        <file alias="fonts/NotoSansSC-Regular.ttf">../../assets/fonts/NotoSansSC-Regular.ttf</file>
+        <file alias="fonts/NotoSansSC-Medium.ttf">../../assets/fonts/NotoSansSC-Medium.ttf</file>
+        <file alias="fonts/NotoSansSC-Bold.ttf">../../assets/fonts/NotoSansSC-Bold.ttf</file>
+        <file alias="images/app_icon.png">../../scripts/icon_1024.png</file>
+        <file alias="images/tray_icon.png">../../images/tray_icon.png</file>
+    </qresource>
+</RCC>
