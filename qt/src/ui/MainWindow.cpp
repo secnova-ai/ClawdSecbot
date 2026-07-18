@@ -543,16 +543,25 @@ void MainWindow::refreshProtectionStates() {
     if (bridge_ == nullptr || !bridge_->isReady()) return;
     auto* watcher = new QFutureWatcher<QJsonObject>(this);
     connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
-        QSet<QString> protectedIds;
-        for (const QJsonValue& value : watcher->result().value(QStringLiteral("data")).toArray()) {
-            protectedIds.insert(value.toObject().value(QStringLiteral("asset_id")).toString());
+        const QJsonObject response = watcher->result();
+        if (!response.value(QStringLiteral("success")).toBool()) {
+            UiDialogs::showWarning(this, QStringLiteral("防护状态加载失败"),
+                                   response.value(QStringLiteral("error")).toString(QStringLiteral("无法获取代理实时运行状态。")));
+            watcher->deleteLater();
+            return;
         }
+        QSet<QString> protectedIds;
+        for (const QJsonValue& value : response.value(QStringLiteral("data")).toObject()
+                                           .value(QStringLiteral("running_asset_ids")).toArray())
+            protectedIds.insert(value.toString());
         for (AssetCardWidget* card : assetCards_) {
             if (card != nullptr) card->setProtected(protectedIds.contains(card->asset().id));
         }
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() { return bridge->call("GetEnabledProtectionConfigsFFI"); }));
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() {
+        return ProtectionService::activeProtectionSummary(*bridge);
+    }));
 }
 
 void MainWindow::stopProtection(const AssetModel& asset) {

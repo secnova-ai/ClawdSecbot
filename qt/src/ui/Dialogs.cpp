@@ -881,15 +881,15 @@ void ProtectionConfigDialog::saveConfig() {
     watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, configJson = json, rulesJson, id = asset_.id, botConfig,
                                          auditOnly = auditOnly_->isChecked(), userInputDetection = userInputDetection_->isChecked(),
                                          singleTokenLimit = tokenLimit_->text().toInt(), dailyTokenLimit = dailyTokenLimit_->text().toInt()]() {
-        QJsonObject result = bridge->call("SaveProtectionConfigFFI", configJson);
-        if (!result.value(QStringLiteral("success")).toBool()) return result;
-        result = bridge->call("SaveShepherdRulesFFI", rulesJson);
-        if (!result.value(QStringLiteral("success")).toBool()) return result;
-        const QJsonObject securityModel = unwrap(bridge->call("GetSecurityModelConfigFFI"));
+        const QJsonObject securityModelResponse = bridge->call("GetSecurityModelConfigFFI");
+        if (!securityModelResponse.value(QStringLiteral("success")).toBool()) return securityModelResponse;
+        const QJsonObject securityModel = unwrap(securityModelResponse);
         if (securityModel.value(QStringLiteral("provider")).toString().isEmpty() || securityModel.value(QStringLiteral("model")).toString().isEmpty()) {
             return QJsonObject{{QStringLiteral("success"), false},
                                {QStringLiteral("error"), QStringLiteral("请先在全局设置中配置安全模型。")}};
         }
+        QJsonObject result = bridge->call("SaveShepherdRulesFFI", rulesJson);
+        if (!result.value(QStringLiteral("success")).toBool()) return result;
         const QJsonObject runtime{{QStringLiteral("audit_only"), auditOnly},
                                   {QStringLiteral("single_session_token_limit"), singleTokenLimit},
                                   {QStringLiteral("daily_token_limit"), dailyTokenLimit},
@@ -897,7 +897,29 @@ void ProtectionConfigDialog::saveConfig() {
         const QJsonObject proxyConfig{{QStringLiteral("asset_id"), id},
                                       {QStringLiteral("security_model"), securityModel}, {QStringLiteral("bot_model"), botConfig},
                                       {QStringLiteral("runtime"), runtime}};
-        return bridge->call("StartProtectionProxy", QString::fromUtf8(QJsonDocument(proxyConfig).toJson(QJsonDocument::Compact)));
+        const QJsonObject startResult = bridge->call(
+            "StartProtectionProxy", QString::fromUtf8(QJsonDocument(proxyConfig).toJson(QJsonDocument::Compact)));
+        if (!startResult.value(QStringLiteral("success")).toBool()) return startResult;
+
+        result = bridge->call("SaveProtectionConfigFFI", configJson);
+        if (result.value(QStringLiteral("success")).toBool()) return startResult;
+
+        QStringList rollbackErrors;
+        const QJsonObject stopResult = bridge->call("StopProtectionProxyByAsset", id);
+        if (!stopResult.value(QStringLiteral("success")).toBool())
+            rollbackErrors.append(stopResult.value(QStringLiteral("error")).toString(QStringLiteral("停止代理失败")));
+        const QJsonObject restoreResult = bridge->call("RestoreToInitialConfigByAssetFFI", id);
+        if (!restoreResult.value(QStringLiteral("success")).toBool())
+            rollbackErrors.append(restoreResult.value(QStringLiteral("error")).toString(QStringLiteral("恢复 Bot 配置失败")));
+        const QJsonObject disablePayload{{QStringLiteral("asset_id"), id}, {QStringLiteral("enabled"), false}};
+        const QJsonObject disableResult = bridge->call(
+            "SetProtectionEnabledFFI", QString::fromUtf8(QJsonDocument(disablePayload).toJson(QJsonDocument::Compact)));
+        if (!disableResult.value(QStringLiteral("success")).toBool())
+            rollbackErrors.append(disableResult.value(QStringLiteral("error")).toString(QStringLiteral("回滚启用状态失败")));
+
+        QString error = result.value(QStringLiteral("error")).toString(QStringLiteral("保存防护配置失败"));
+        if (!rollbackErrors.isEmpty()) error += QStringLiteral("；回滚未完全完成：%1").arg(rollbackErrors.join(QStringLiteral("；")));
+        return QJsonObject{{QStringLiteral("success"), false}, {QStringLiteral("error"), error}};
     }));
 }
 
@@ -919,7 +941,18 @@ SkillScanResultsDialog::SkillScanResultsDialog(GoBridge* bridge, QWidget* parent
         auto* watcher = new QFutureWatcher<QJsonObject>(this);
         connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [list, watcher]() {
             list->clear();
-            const QJsonArray rows = watcher->result().value(QStringLiteral("data")).toArray();
+            const QJsonObject response = watcher->result();
+            if (!response.value(QStringLiteral("success")).toBool()) {
+                auto* error = new QListWidgetItem(
+                    QStringLiteral("△\n\n技能扫描记录加载失败\n%1")
+                        .arg(response.value(QStringLiteral("error")).toString(QStringLiteral("请稍后重试"))), list);
+                error->setTextAlignment(Qt::AlignCenter);
+                error->setSizeHint(QSize(0, 220));
+                error->setFlags(Qt::ItemIsEnabled);
+                watcher->deleteLater();
+                return;
+            }
+            const QJsonArray rows = response.value(QStringLiteral("data")).toArray();
             for (const QJsonValue& value : rows) {
                 const QJsonObject row = value.toObject();
                 const bool deleted = !row.value(QStringLiteral("deleted_at")).toString().isEmpty();
@@ -973,7 +1006,7 @@ SkillScanResultsDialog::SkillScanResultsDialog(GoBridge* bridge, QWidget* parent
                 top->addWidget(name, 1);
                 auto* badge = new QLabel(status, card);
                 badge->setStyleSheet(QStringLiteral("padding:3px 8px;border-radius:4px;background:%1;color:%2;font-size:10px;font-weight:600;")
-                                         .arg(color + QStringLiteral("33"), color));
+                                         .arg(background, color));
                 top->addWidget(badge);
                 cardLayout->addLayout(top);
 
@@ -1118,23 +1151,16 @@ OnboardingDialog::OnboardingDialog(GoBridge* bridge, QWidget* parent) : QDialog(
     updateStep.second->addStretch();
     root->addWidget(pages_, 1);
     auto* buttons = new QHBoxLayout;
-    auto* back = new QPushButton(QStringLiteral("上一步"), this);
+    backButton_ = new QPushButton(QStringLiteral("上一步"), this);
     nextButton_ = new QPushButton(QStringLiteral("下一步"), this);
     nextButton_->setObjectName(QStringLiteral("primaryButton"));
-    connect(back, &QPushButton::clicked, this, [this]() { moveStep(-1); });
+    connect(backButton_, &QPushButton::clicked, this, [this]() { moveStep(-1); });
     connect(nextButton_, &QPushButton::clicked, this, [this]() {
         if (pages_->currentIndex() == 1) return saveBotAndContinue();
-        if (pages_->currentIndex() == pages_->count() - 1) {
-            if (bridge_ != nullptr) {
-                const QJsonObject payload{{QStringLiteral("key"), QStringLiteral("is_first_launch")}, {QStringLiteral("value"), false}};
-                const QString json = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
-                [[maybe_unused]] const QFuture<void> saveFuture = QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, json]() { bridge->call("SaveAppSettingFFI", json); });
-            }
-            return accept();
-        }
+        if (pages_->currentIndex() == pages_->count() - 1) return finishOnboarding();
         moveStep(1);
     });
-    buttons->addWidget(back);
+    buttons->addWidget(backButton_);
     buttons->addStretch();
     buttons->addWidget(nextButton_);
     root->addLayout(buttons);
@@ -1197,6 +1223,35 @@ void OnboardingDialog::saveBotAndContinue() {
         watcher->deleteLater();
     });
     watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, json]() { return bridge->call("SaveBotModelConfigFFI", json); }));
+}
+
+void OnboardingDialog::finishOnboarding() {
+    if (bridge_ == nullptr || !bridge_->isReady()) {
+        UiDialogs::showWarning(this, QStringLiteral("无法完成引导"), QStringLiteral("业务引擎尚未就绪，请稍后重试。"));
+        return;
+    }
+    const QJsonObject payload{{QStringLiteral("key"), QStringLiteral("is_first_launch")}, {QStringLiteral("value"), false}};
+    const QString json = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    backButton_->setEnabled(false);
+    nextButton_->setEnabled(false);
+    nextButton_->setText(QStringLiteral("完成中…"));
+    auto* watcher = new QFutureWatcher<QJsonObject>(this);
+    connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
+        const QJsonObject result = watcher->result();
+        watcher->deleteLater();
+        if (result.value(QStringLiteral("success")).toBool()) {
+            accept();
+            return;
+        }
+        backButton_->setEnabled(true);
+        nextButton_->setEnabled(true);
+        nextButton_->setText(QStringLiteral("完成"));
+        UiDialogs::showWarning(this, QStringLiteral("引导状态保存失败"),
+                               result.value(QStringLiteral("error")).toString(QStringLiteral("请稍后重试。")));
+    });
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, json]() {
+        return bridge->call("SaveAppSettingFFI", json);
+    }));
 }
 
 MitigationDialog::MitigationDialog(const RiskModel& risk, GoBridge* bridge, QWidget* parent) : QDialog(parent) {

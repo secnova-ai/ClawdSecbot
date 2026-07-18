@@ -9,6 +9,7 @@ class GoBridge;
 
 class ProtectionService final {
 public:
+    static QJsonObject activeProtectionSummary(GoBridge& bridge);
     static QJsonObject stopAndRestore(GoBridge& bridge, const AssetModel& asset);
     static QStringList restoreAll(GoBridge& bridge);
 };

@@ -2,9 +2,11 @@
 #include "ui/widgets/AnalysisLogView.h"
 #include "ui/widgets/SecurityEventListWidget.h"
 #include "ui/widgets/TrendChartWidget.h"
+#include "bridge/GoBridge.h"
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QDir>
 #include <QFile>
 #include <QFrame>
 #include <QLabel>
@@ -135,6 +137,42 @@ private slots:
         QVERIFY(rawLogs->isVisible());
         const QString rawScreenshotPath = qEnvironmentVariable("MONITOR_RAW_SCREENSHOT_PATH");
         if (!rawScreenshotPath.isEmpty()) QVERIFY(window.grab().save(rawScreenshotPath));
+    }
+
+    void rendersFailedRefreshAsAnErrorInsteadOfEmptyData() {
+        AppConfig config;
+        config.workspaceDir = QDir::tempPath();
+        config.homeDir = QDir::homePath();
+        config.sandboxDir = QDir::tempPath();
+        config.logDir = QDir::tempPath();
+        config.libraryPath = QString::fromUtf8(MONITOR_ERROR_FIXTURE_PATH);
+        config.appVersion = QStringLiteral("1.0.0");
+        GoBridge bridge;
+        QString error;
+        QVERIFY2(bridge.initialize(config, &error), qPrintable(error));
+
+        const AssetModel asset{QStringLiteral("openclaw:error-test"), QStringLiteral("Openclaw"), QStringLiteral("Openclaw"),
+                               QStringLiteral("service"), QStringLiteral("1.0"), QString(), QJsonObject{}};
+        {
+            ProtectionMonitorWindow window(asset, &bridge, QStringLiteral("session-error-test"));
+            window.show();
+            auto* banner = window.findChild<QLabel*>(QStringLiteral("monitorInlineError"));
+            QVERIFY(banner != nullptr);
+            QTRY_VERIFY(banner->isVisible());
+            QTRY_VERIFY(banner->text().contains(QStringLiteral("status unavailable")));
+            QTRY_VERIFY(banner->text().contains(QStringLiteral("metrics unavailable")));
+            QTRY_VERIFY(banner->text().contains(QStringLiteral("logs unavailable")));
+            QTRY_VERIFY(banner->text().contains(QStringLiteral("events unavailable")));
+            QLabel* state = nullptr;
+            for (QLabel* label : window.findChildren<QLabel*>()) {
+                if (label->objectName() == QStringLiteral("monitorStatusValue")) state = label;
+            }
+            QVERIFY(state != nullptr);
+            QCOMPARE(state->text(), QStringLiteral("状态获取失败"));
+            const QString screenshotPath = qEnvironmentVariable("MONITOR_ERROR_SCREENSHOT_PATH");
+            if (!screenshotPath.isEmpty()) QVERIFY(window.grab().save(screenshotPath));
+        }
+        bridge.shutdown();
     }
 };
 

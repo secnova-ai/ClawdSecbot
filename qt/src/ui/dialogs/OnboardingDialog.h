@@ -17,10 +17,12 @@ public:
 private:
     void moveStep(int delta);
     void saveBotAndContinue();
+    void finishOnboarding();
 
     GoBridge* bridge_;
     QStackedWidget* pages_ = nullptr;
     QLabel* stepLabel_ = nullptr;
+    QPushButton* backButton_ = nullptr;
     QPushButton* nextButton_ = nullptr;
     QComboBox* onboardingBotProvider_ = nullptr;
     QLineEdit* onboardingBotBaseUrl_ = nullptr;

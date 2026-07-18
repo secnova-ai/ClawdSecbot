@@ -151,6 +151,13 @@ endif()
 
 enable_testing()
 
+add_library(go_bridge_init_failure_fixture SHARED tests/go_bridge_init_failure_fixture.cpp)
+add_library(go_bridge_monitor_error_fixture SHARED tests/go_bridge_monitor_error_fixture.cpp)
+if(WIN32)
+    set_target_properties(go_bridge_init_failure_fixture go_bridge_monitor_error_fixture
+        PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
+
 qt_add_executable(models_test
     tests/models_test.cpp
 )
@@ -171,6 +178,9 @@ qt_add_executable(monitor_smoke_test
 )
 target_include_directories(monitor_smoke_test PRIVATE src)
 target_link_libraries(monitor_smoke_test PRIVATE clawdsecbot_qt_core Qt6::Widgets Qt6::Test)
+target_compile_definitions(monitor_smoke_test PRIVATE
+    MONITOR_ERROR_FIXTURE_PATH="$<TARGET_FILE:go_bridge_monitor_error_fixture>")
+add_dependencies(monitor_smoke_test go_bridge_monitor_error_fixture)
 add_test(NAME monitor_smoke_test COMMAND monitor_smoke_test)
 set_tests_properties(monitor_smoke_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
@@ -195,7 +205,19 @@ qt_add_executable(bridge_lifecycle_test
 )
 target_include_directories(bridge_lifecycle_test PRIVATE src)
 target_link_libraries(bridge_lifecycle_test PRIVATE clawdsecbot_qt_core Qt6::Concurrent Qt6::Test)
+target_compile_definitions(bridge_lifecycle_test PRIVATE
+    INIT_FAILURE_FIXTURE_PATH="$<TARGET_FILE:go_bridge_init_failure_fixture>")
+add_dependencies(bridge_lifecycle_test go_bridge_init_failure_fixture)
 add_test(NAME bridge_lifecycle_test COMMAND bridge_lifecycle_test)
+
+qt_add_executable(protection_service_test
+    tests/protection_service_test.cpp
+)
+target_include_directories(protection_service_test PRIVATE src)
+target_link_libraries(protection_service_test PRIVATE clawdsecbot_qt_core Qt6::Test)
+target_compile_definitions(protection_service_test PRIVATE GO_LIBRARY_PATH="${GO_LIBRARY_SOURCE}")
+add_dependencies(protection_service_test botsec_go_library)
+add_test(NAME protection_service_test COMMAND protection_service_test)
 
 add_test(NAME ui_non_blocking_source_test
     COMMAND "${CMAKE_COMMAND}" -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
@@ -224,6 +246,9 @@ qt_add_executable(dialog_visual_test
 )
 target_include_directories(dialog_visual_test PRIVATE src)
 target_link_libraries(dialog_visual_test PRIVATE clawdsecbot_qt_core Qt6::Widgets Qt6::Test)
+target_compile_definitions(dialog_visual_test PRIVATE
+    DIALOG_FIXTURE_PATH="$<TARGET_FILE:go_bridge_monitor_error_fixture>")
+add_dependencies(dialog_visual_test go_bridge_monitor_error_fixture)
 add_test(NAME dialog_visual_test COMMAND dialog_visual_test)
 set_tests_properties(dialog_visual_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 

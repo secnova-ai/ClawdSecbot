@@ -5,15 +5,20 @@
 
 #include <memory>
 
+#include <QObject>
 #include <QThreadPool>
 
 class MainWindow;
+class QEvent;
 class QSystemTrayIcon;
 
-class AppController {
+class AppController final : public QObject {
 public:
     explicit AppController(const AppConfig& config);
     ~AppController();
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void createTrayIcon();
@@ -28,4 +33,5 @@ private:
     bool quitInProgress_ = false;
     bool shutdownStarted_ = false;
     bool bridgeShutdown_ = false;
+    bool applicationQuitAllowed_ = false;
 };

@@ -40,41 +40,44 @@ bool GoBridge::initialize(const AppConfig& config, QString* errorMessage) {
         library_.unload();
         return false;
     }
-    using ThreeArgFunction = char* (*)(const char*, const char*, const char*);
-    const QByteArray workspace = config.workspaceDir.toUtf8();
-    const QByteArray home = config.homeDir.toUtf8();
-    const QByteArray sandbox = config.sandboxDir.toUtf8();
-    const auto initPathsWithConfig = reinterpret_cast<ThreeArgFunction>(library_.resolve("InitPathsWithConfigFFI"));
-    if (initPathsWithConfig != nullptr) {
-        decodeAndFree(initPathsWithConfig(workspace.constData(), home.constData(), sandbox.constData()));
-    } else {
-        const auto initPaths = reinterpret_cast<TwoArgFunction>(library_.resolve("InitPathsFFI"));
-        if (initPaths != nullptr) decodeAndFree(initPaths(workspace.constData(), home.constData()));
-    }
-    const auto initLogging = reinterpret_cast<OneArgFunction>(library_.resolve("InitLoggingFFI"));
-    if (initLogging != nullptr) {
-        const QByteArray logDir = config.logDir.toUtf8();
-        decodeAndFree(initLogging(logDir.constData()));
-    }
-    const QJsonObject versionPayload{{QStringLiteral("current_version"), config.appVersion}};
-    const auto initDatabase = reinterpret_cast<OneArgFunction>(library_.resolve("InitDatabase"));
-    if (initDatabase == nullptr) {
-        const QString message = QStringLiteral("InitDatabase is missing from the Go library.");
-        if (errorMessage != nullptr) *errorMessage = message;
-        freeString_ = nullptr;
-        library_.unload();
-        return false;
-    }
-    const QByteArray versionJson = QJsonDocument(versionPayload).toJson(QJsonDocument::Compact);
-    const QJsonObject database = decodeAndFree(initDatabase(versionJson.constData()));
-    if (!database.value(QStringLiteral("success")).toBool(true)) {
-        const QString message = database.value(QStringLiteral("error")).toString(QStringLiteral("Go database initialization failed."));
+    const auto failInitialization = [this, errorMessage](const QString& message) {
         if (errorMessage != nullptr) *errorMessage = message;
         ready_.store(false);
         freeString_ = nullptr;
         library_.unload();
         return false;
-    }
+    };
+    const auto responseError = [](const QString& stage, const QJsonObject& response) {
+        return response.value(QStringLiteral("error")).toString(
+            QStringLiteral("%1 returned an invalid response.").arg(stage));
+    };
+    using ThreeArgFunction = char* (*)(const char*, const char*, const char*);
+    const QByteArray workspace = config.workspaceDir.toUtf8();
+    const QByteArray home = config.homeDir.toUtf8();
+    const QByteArray sandbox = config.sandboxDir.toUtf8();
+    const auto initPathsWithConfig = reinterpret_cast<ThreeArgFunction>(library_.resolve("InitPathsWithConfigFFI"));
+    if (initPathsWithConfig == nullptr)
+        return failInitialization(QStringLiteral("InitPathsWithConfigFFI is missing from the Go library."));
+    const QJsonObject paths = decodeAndFree(initPathsWithConfig(workspace.constData(), home.constData(), sandbox.constData()));
+    if (!paths.value(QStringLiteral("success")).toBool())
+        return failInitialization(responseError(QStringLiteral("Go path initialization"), paths));
+
+    const auto initLogging = reinterpret_cast<OneArgFunction>(library_.resolve("InitLoggingFFI"));
+    if (initLogging == nullptr)
+        return failInitialization(QStringLiteral("InitLoggingFFI is missing from the Go library."));
+    const QByteArray logDir = config.logDir.toUtf8();
+    const QJsonObject logging = decodeAndFree(initLogging(logDir.constData()));
+    if (!logging.value(QStringLiteral("success")).toBool())
+        return failInitialization(responseError(QStringLiteral("Go logging initialization"), logging));
+
+    const QJsonObject versionPayload{{QStringLiteral("current_version"), config.appVersion}};
+    const auto initDatabase = reinterpret_cast<OneArgFunction>(library_.resolve("InitDatabase"));
+    if (initDatabase == nullptr)
+        return failInitialization(QStringLiteral("InitDatabase is missing from the Go library."));
+    const QByteArray versionJson = QJsonDocument(versionPayload).toJson(QJsonDocument::Compact);
+    const QJsonObject database = decodeAndFree(initDatabase(versionJson.constData()));
+    if (!database.value(QStringLiteral("success")).toBool())
+        return failInitialization(responseError(QStringLiteral("Go database initialization"), database));
     if (shuttingDown_.load()) {
         if (errorMessage != nullptr) *errorMessage = QStringLiteral("Go bridge was shut down during initialization.");
         return false;

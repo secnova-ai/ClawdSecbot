@@ -15,6 +15,7 @@ QFrame#monitorStatusCard { background:rgba(245,158,11,26); border:1px solid rgba
 QLabel#monitorStatusDot { background:#F59E0B; border-radius:6px; }
 QLabel#monitorStatusCaption { font-size:11px; color:rgba(255,255,255,138); }
 QLabel#monitorStatusValue { font-size:16px; font-weight:600; color:#F59E0B; }
+QLabel#monitorInlineError { color:#FCA5A5; background:rgba(239,68,68,20); border:1px solid rgba(239,68,68,58); border-radius:8px; padding:8px 10px; font-size:11px; }
 QLabel#monitorRealtimePill { padding:6px 10px; border-radius:14px; background:rgba(245,158,11,35); color:#F59E0B; font-size:11px; }
 QCheckBox#monitorAuditSwitch { padding:3px 8px; border:1px solid rgba(255,255,255,25); border-radius:14px; background:rgba(255,255,255,18); color:rgba(255,255,255,138); font-size:11px; spacing:6px; }
 QCheckBox#monitorAuditSwitch::indicator { width:32px; height:18px; border-radius:9px; border:1px solid rgba(255,255,255,55); background:rgba(255,255,255,18); }

@@ -9,6 +9,7 @@
 #include "ui/dialogs/SkillScanDialog.h"
 #include "ui/dialogs/SkillScanResultsDialog.h"
 #include "ui/widgets/SecurityEventListWidget.h"
+#include "bridge/GoBridge.h"
 
 #include <QApplication>
 #include <QDialog>
@@ -16,6 +17,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QLabel>
+#include <QListWidget>
 #include <QPainter>
 #include <QPushButton>
 #include <QtTest>
@@ -94,6 +96,46 @@ private slots:
             dialog->hide();
             delete dialog;
         }
+    }
+
+    void skillHistoryUsesQtRgbaBadgeColors() {
+        AppConfig config;
+        config.workspaceDir = QDir::tempPath();
+        config.homeDir = QDir::homePath();
+        config.sandboxDir = QDir::tempPath();
+        config.logDir = QDir::tempPath();
+        config.libraryPath = QString::fromUtf8(DIALOG_FIXTURE_PATH);
+        config.appVersion = QStringLiteral("1.0.0");
+        GoBridge bridge;
+        QString error;
+        QVERIFY2(bridge.initialize(config, &error), qPrintable(error));
+
+        SkillScanResultsDialog dialog(&bridge);
+        dialog.show();
+        auto* list = dialog.findChild<QListWidget*>(QStringLiteral("skillScanList"));
+        QVERIFY(list != nullptr);
+        QTRY_COMPARE(list->count(), 1);
+        QTRY_VERIFY(list->itemWidget(list->item(0)) != nullptr);
+        QLabel* trustedBadge = nullptr;
+        for (QLabel* label : list->itemWidget(list->item(0))->findChildren<QLabel*>()) {
+            if (label->text() == QStringLiteral("可信")) trustedBadge = label;
+        }
+        QVERIFY(trustedBadge != nullptr);
+        QVERIFY(trustedBadge->styleSheet().contains(QStringLiteral("background:rgba(")));
+        QVERIFY(!trustedBadge->styleSheet().contains(QStringLiteral("#3B82F633")));
+        const QString screenshotDir = qEnvironmentVariable("DIALOG_SCREENSHOT_DIR");
+        if (!screenshotDir.isEmpty()) {
+            const QPixmap popup = dialog.grab();
+            QImage composed(popup.size(), QImage::Format_ARGB32_Premultiplied);
+            composed.fill(QColor(QStringLiteral("#0F0F23")));
+            QPainter painter(&composed);
+            QPixmap flattened = popup;
+            flattened.setDevicePixelRatio(1.0);
+            painter.drawPixmap(0, 0, flattened);
+            painter.end();
+            QVERIFY(composed.save(QDir(screenshotDir).filePath(QStringLiteral("skill_history_result.png"))));
+        }
+        bridge.shutdown();
     }
 };
 

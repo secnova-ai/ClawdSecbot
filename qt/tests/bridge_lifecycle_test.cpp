@@ -1,6 +1,8 @@
 #include "bridge/GoBridge.h"
 
+#include <QDir>
 #include <QElapsedTimer>
+#include <QTemporaryDir>
 #include <QThread>
 #include <QtConcurrent>
 #include <QtTest>
@@ -11,6 +13,24 @@ class BridgeLifecycleTest final : public QObject {
     Q_OBJECT
 
 private slots:
+    void initializationStopsOnPathFailure() {
+        QTemporaryDir temporary;
+        QVERIFY(temporary.isValid());
+        AppConfig config;
+        config.workspaceDir = temporary.path();
+        config.homeDir = temporary.path();
+        config.sandboxDir = temporary.path();
+        config.logDir = temporary.path();
+        config.libraryPath = QString::fromUtf8(INIT_FAILURE_FIXTURE_PATH);
+        config.appVersion = QStringLiteral("1.0.0");
+
+        GoBridge bridge;
+        QString error;
+        QVERIFY(!bridge.initialize(config, &error));
+        QCOMPARE(error, QStringLiteral("fixture path failure"));
+        QVERIFY(!bridge.isReady());
+    }
+
     void shutdownDoesNotWaitForUnrelatedGlobalPoolWork() {
         std::atomic_bool completed = false;
         std::atomic_bool bridgeWorkCompleted = false;

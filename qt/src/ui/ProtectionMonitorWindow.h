@@ -27,12 +27,14 @@ private:
     void refreshSecurityEvents();
     void clearSecurityEvents();
     void updateEventCount();
+    void updateErrorBanner();
 
     AssetModel asset_;
     GoBridge* bridge_;
     QFrame* statusCard_ = nullptr;
     QLabel* statusDot_ = nullptr;
     QLabel* stateLabel_ = nullptr;
+    QLabel* errorLabel_ = nullptr;
     QLabel* requestCount_ = nullptr;
     QLabel* messageCount_ = nullptr;
     QLabel* riskCount_ = nullptr;
@@ -55,6 +57,10 @@ private:
     TrendChartWidget* toolTrend_ = nullptr;
     QTimer* refreshTimer_ = nullptr;
     QString sessionId_;
+    QString statusError_;
+    QString metricsError_;
+    QString logsError_;
+    QString eventsError_;
     bool refreshInFlight_ = false;
     bool logsInFlight_ = false;
     bool eventsInFlight_ = false;

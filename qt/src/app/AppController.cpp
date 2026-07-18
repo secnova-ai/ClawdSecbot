@@ -7,15 +7,18 @@
 
 #include <QApplication>
 #include <QDialog>
+#include <QEvent>
 #include <QIcon>
 #include <QFutureWatcher>
 #include <QJsonObject>
 #include <QMenu>
 #include <QPointer>
 #include <QSystemTrayIcon>
+#include <QTimer>
 #include <QtConcurrent>
 
 AppController::AppController(const AppConfig& config) : config_(config) {
+    qApp->installEventFilter(this);
     shutdownPool_.setMaxThreadCount(1);
     mainWindow_ = std::make_unique<MainWindow>(&bridge_);
     mainWindow_->show();
@@ -39,8 +42,18 @@ AppController::AppController(const AppConfig& config) : config_(config) {
 }
 
 AppController::~AppController() {
+    qApp->removeEventFilter(this);
     shutdownPool_.waitForDone();
     if (!bridgeShutdown_) bridge_.shutdown();
+}
+
+bool AppController::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == qApp && event->type() == QEvent::Quit && !applicationQuitAllowed_) {
+        event->ignore();
+        QTimer::singleShot(0, mainWindow_.get(), [this]() { requestQuit(); });
+        return true;
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 void AppController::createTrayIcon() {
@@ -71,7 +84,8 @@ void AppController::createTrayIcon() {
 void AppController::requestQuit() {
     if (quitInProgress_) return;
     if (!bridge_.isReady()) {
-        qApp->quit();
+        quitInProgress_ = true;
+        beginAsyncShutdown();
         return;
     }
     quitInProgress_ = true;
@@ -132,11 +146,14 @@ void AppController::requestQuit() {
             restoreWatcher->setFuture(QtConcurrent::run(bridge_.workerPool(), [bridge = &bridge_]() { return ProtectionService::restoreAll(*bridge); }));
         });
     });
-    countWatcher->setFuture(QtConcurrent::run(bridge_.workerPool(), [bridge = &bridge_]() { return bridge->call("GetActiveProtectionCountFFI"); }));
+    countWatcher->setFuture(QtConcurrent::run(bridge_.workerPool(), [bridge = &bridge_]() {
+        return ProtectionService::activeProtectionSummary(*bridge);
+    }));
 }
 
 void AppController::beginAsyncShutdown() {
     if (bridgeShutdown_) {
+        applicationQuitAllowed_ = true;
         qApp->quit();
         return;
     }
@@ -149,6 +166,7 @@ void AppController::beginAsyncShutdown() {
         bridgeShutdown_ = true;
         watcher->deleteLater();
         if (progress != nullptr) progress->close();
+        applicationQuitAllowed_ = true;
         qApp->quit();
     });
     watcher->setFuture(QtConcurrent::run(&shutdownPool_, [this]() { bridge_.shutdown(); }));

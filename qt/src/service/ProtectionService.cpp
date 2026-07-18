@@ -14,6 +14,30 @@ QJsonObject setProtectionDisabled(GoBridge& bridge, const QString& assetId) {
 }
 }
 
+QJsonObject ProtectionService::activeProtectionSummary(GoBridge& bridge) {
+    const QJsonObject configsResponse = bridge.call("GetEnabledProtectionConfigsFFI");
+    if (!configsResponse.value(QStringLiteral("success")).toBool()) return configsResponse;
+
+    QJsonArray runningAssetIds;
+    const QJsonArray configs = configsResponse.value(QStringLiteral("data")).toArray();
+    for (const QJsonValue& value : configs) {
+        const QString assetId = value.toObject().value(QStringLiteral("asset_id")).toString().trimmed();
+        if (assetId.isEmpty()) continue;
+        const QJsonObject status = bridge.call("GetProtectionProxyStatusByAsset", assetId);
+        if (status.contains(QStringLiteral("success")) && !status.value(QStringLiteral("success")).toBool()) {
+            return status;
+        }
+        if (status.value(QStringLiteral("running")).toBool(status.value(QStringLiteral("is_running")).toBool())) {
+            runningAssetIds.append(assetId);
+        }
+    }
+
+    return {{QStringLiteral("success"), true},
+            {QStringLiteral("data"), QJsonObject{{QStringLiteral("count"), runningAssetIds.size()},
+                                                  {QStringLiteral("enabled_count"), configs.size()},
+                                                  {QStringLiteral("running_asset_ids"), runningAssetIds}}}};
+}
+
 QJsonObject ProtectionService::stopAndRestore(GoBridge& bridge, const AssetModel& asset) {
     QJsonObject result = bridge.call("StopProtectionProxyByAsset", asset.id);
     if (!result.value(QStringLiteral("success")).toBool()) return result;

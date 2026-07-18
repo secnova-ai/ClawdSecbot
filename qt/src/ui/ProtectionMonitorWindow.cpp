@@ -20,6 +20,7 @@
 #include <QPushButton>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QStringList>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QtConcurrent>
@@ -68,6 +69,13 @@ QPushButton* iconButton(const QString& glyph, const QString& tooltip, QWidget* p
     button->setToolTip(tooltip);
     button->setFixedSize(28, 28);
     return button;
+}
+
+QString responseError(const QJsonObject& response, const QString& fallback) {
+    const QString error = response.value(QStringLiteral("error")).toString().trimmed();
+    if (!error.isEmpty()) return error;
+    if (response.contains(QStringLiteral("success")) && !response.value(QStringLiteral("success")).toBool()) return fallback;
+    return {};
 }
 }
 
@@ -159,6 +167,8 @@ void ProtectionMonitorWindow::buildUi() {
                 auditOnly_->blockSignals(true);
                 auditOnly_->setChecked(!checked);
                 auditOnly_->blockSignals(false);
+                UiDialogs::showWarning(this, QStringLiteral("审计模式更新失败"),
+                                       result.value(QStringLiteral("error")).toString(QStringLiteral("业务引擎未返回有效结果。")));
             }
             watcher->deleteLater();
         });
@@ -168,6 +178,11 @@ void ProtectionMonitorWindow::buildUi() {
     });
     statusLayout->addWidget(auditOnly_);
     contentLayout->addWidget(statusCard_);
+    errorLabel_ = new QLabel(content);
+    errorLabel_->setObjectName(QStringLiteral("monitorInlineError"));
+    errorLabel_->setWordWrap(true);
+    errorLabel_->hide();
+    contentLayout->addWidget(errorLabel_);
 
     auto* metrics = new QGridLayout;
     metrics->setSpacing(12);
@@ -327,26 +342,43 @@ void ProtectionMonitorWindow::refreshStatus() {
     connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
         const QJsonObject response = watcher->result();
         const QJsonObject status = response.value(QStringLiteral("status")).toObject();
-        const QJsonObject metrics = response.value(QStringLiteral("metrics")).toObject().value(QStringLiteral("data")).toObject();
+        const QJsonObject metricsResponse = response.value(QStringLiteral("metrics")).toObject();
+        statusError_ = responseError(status, QStringLiteral("无法获取代理运行状态。"));
+        metricsError_ = responseError(metricsResponse, QStringLiteral("无法获取监控指标。"));
         const QString previousSessionId = sessionId_;
-        sessionId_ = status.value(QStringLiteral("session_id")).toString(status.value(QStringLiteral("proxy_session_id")).toString(sessionId_));
-        const bool running = status.value(QStringLiteral("running")).toBool(status.value(QStringLiteral("is_running")).toBool());
-        auditOnly_->blockSignals(true);
-        auditOnly_->setChecked(status.value(QStringLiteral("audit_only")).toBool());
-        auditOnly_->blockSignals(false);
-        const QString statusColor = running ? QStringLiteral("#22C55E") : QStringLiteral("#F59E0B");
-        stateLabel_->setText(running ? QStringLiteral("防护已启用") : QStringLiteral("防护未启用"));
-        stateLabel_->setStyleSheet(QStringLiteral("color:%1;").arg(statusColor));
-        statusDot_->setStyleSheet(QStringLiteral("background:%1;border-radius:6px;").arg(statusColor));
-        statusCard_->setStyleSheet(running
-            ? QStringLiteral("QFrame#monitorStatusCard{background:rgba(34,197,94,26);border:1px solid rgba(34,197,94,77);border-radius:12px;}")
-            : QStringLiteral("QFrame#monitorStatusCard{background:rgba(245,158,11,26);border:1px solid rgba(245,158,11,77);border-radius:12px;}"));
-        QList<int> tokenValues;
-        for (const QJsonValue& value : metrics.value(QStringLiteral("token_trend")).toArray()) tokenValues.append(value.toObject().value(QStringLiteral("tokens")).toInt());
-        QList<int> toolValues;
-        for (const QJsonValue& value : metrics.value(QStringLiteral("tool_call_trend")).toArray()) toolValues.append(value.toObject().value(QStringLiteral("count")).toInt());
-        tokenTrend_->setValues(tokenValues);
-        toolTrend_->setValues(toolValues);
+        if (statusError_.isEmpty()) {
+            const bool running = status.value(QStringLiteral("running")).toBool(status.value(QStringLiteral("is_running")).toBool());
+            sessionId_ = running
+                ? status.value(QStringLiteral("session_id")).toString(status.value(QStringLiteral("proxy_session_id")).toString())
+                : QString();
+            if (!running) logsError_.clear();
+            auditOnly_->blockSignals(true);
+            auditOnly_->setChecked(status.value(QStringLiteral("audit_only")).toBool());
+            auditOnly_->blockSignals(false);
+            const QString statusColor = running ? QStringLiteral("#22C55E") : QStringLiteral("#F59E0B");
+            stateLabel_->setText(running ? QStringLiteral("防护已启用") : QStringLiteral("防护未启用"));
+            stateLabel_->setStyleSheet(QStringLiteral("color:%1;").arg(statusColor));
+            statusDot_->setStyleSheet(QStringLiteral("background:%1;border-radius:6px;").arg(statusColor));
+            statusCard_->setStyleSheet(running
+                ? QStringLiteral("QFrame#monitorStatusCard{background:rgba(34,197,94,26);border:1px solid rgba(34,197,94,77);border-radius:12px;}")
+                : QStringLiteral("QFrame#monitorStatusCard{background:rgba(245,158,11,26);border:1px solid rgba(245,158,11,77);border-radius:12px;}"));
+        } else {
+            stateLabel_->setText(QStringLiteral("状态获取失败"));
+            stateLabel_->setStyleSheet(QStringLiteral("color:#F87171;"));
+            statusDot_->setStyleSheet(QStringLiteral("background:#EF4444;border-radius:6px;"));
+            statusCard_->setStyleSheet(QStringLiteral(
+                "QFrame#monitorStatusCard{background:rgba(239,68,68,26);border:1px solid rgba(239,68,68,77);border-radius:12px;}"));
+        }
+        if (metricsError_.isEmpty()) {
+            const QJsonObject metrics = metricsResponse.value(QStringLiteral("data")).toObject();
+            QList<int> tokenValues;
+            for (const QJsonValue& value : metrics.value(QStringLiteral("token_trend")).toArray()) tokenValues.append(value.toObject().value(QStringLiteral("tokens")).toInt());
+            QList<int> toolValues;
+            for (const QJsonValue& value : metrics.value(QStringLiteral("tool_call_trend")).toArray()) toolValues.append(value.toObject().value(QStringLiteral("count")).toInt());
+            tokenTrend_->setValues(tokenValues);
+            toolTrend_->setValues(toolValues);
+        }
+        updateErrorBanner();
         refreshInFlight_ = false;
         watcher->deleteLater();
         if (previousSessionId.isEmpty() && !sessionId_.isEmpty()) QTimer::singleShot(0, this, &ProtectionMonitorWindow::refreshLogs);
@@ -364,7 +396,15 @@ void ProtectionMonitorWindow::refreshLogs() {
     auto* watcher = new QFutureWatcher<QJsonObject>(this);
     connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
         const QJsonObject response = watcher->result();
-        const QJsonObject data = response.value(QStringLiteral("data")).isObject() ? response.value(QStringLiteral("data")).toObject() : response;
+        logsError_ = responseError(response, QStringLiteral("无法获取代理日志。"));
+        if (!logsError_.isEmpty()) {
+            updateErrorBanner();
+            logsInFlight_ = false;
+            watcher->deleteLater();
+            return;
+        }
+        const QJsonObject data = response.value(QStringLiteral("data")).isObject()
+            ? response.value(QStringLiteral("data")).toObject() : response;
         const QJsonArray logs = data.value(QStringLiteral("logs")).toArray();
         QStringList logLines;
         for (const QJsonValue& value : logs) logLines.append(value.toString());
@@ -384,6 +424,7 @@ void ProtectionMonitorWindow::refreshLogs() {
         auditTokenCount_->setText(QString::number(data.value(QStringLiteral("audit_prompt_tokens")).toInteger() + data.value(QStringLiteral("audit_completion_tokens")).toInteger()));
         const QJsonArray requestViews = data.value(QStringLiteral("request_views")).toArray();
         groupedLog_->applySnapshots(requestViews);
+        updateErrorBanner();
         logsInFlight_ = false;
         watcher->deleteLater();
     });
@@ -405,8 +446,12 @@ void ProtectionMonitorWindow::refreshSecurityEvents() {
         const QJsonObject response = watcher->result();
         if (generation == eventsGeneration_ && !clearEventsInFlight_) {
             if (response.value(QStringLiteral("success")).toBool()) {
+                eventsError_.clear();
                 eventsList_->setEvents(response.value(QStringLiteral("data")).toArray());
+            } else {
+                eventsError_ = response.value(QStringLiteral("error")).toString(QStringLiteral("无法获取安全事件。"));
             }
+            updateErrorBanner();
         }
         eventsInFlight_ = false;
         watcher->deleteLater();
@@ -453,4 +498,14 @@ void ProtectionMonitorWindow::updateEventCount() {
     eventCount_->setText(QString::number(count));
     eventStack_->setCurrentIndex(count == 0 ? 0 : 1);
     if (clearEventsButton_ != nullptr) clearEventsButton_->setEnabled(count > 0 && !clearEventsInFlight_);
+}
+
+void ProtectionMonitorWindow::updateErrorBanner() {
+    if (errorLabel_ == nullptr) return;
+    QStringList errors;
+    for (const QString& error : {statusError_, metricsError_, logsError_, eventsError_}) {
+        if (!error.isEmpty() && !errors.contains(error)) errors.append(error);
+    }
+    errorLabel_->setVisible(!errors.isEmpty());
+    errorLabel_->setText(errors.isEmpty() ? QString() : QStringLiteral("△  数据刷新异常：%1").arg(errors.join(QStringLiteral("；"))));
 }
