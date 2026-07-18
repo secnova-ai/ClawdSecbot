@@ -3,6 +3,7 @@
 #include "domain/Models.h"
 
 #include <QMainWindow>
+#include <QSet>
 
 class GoBridge;
 class QLabel;
@@ -49,4 +50,6 @@ private:
     QPushButton* scanButton_ = nullptr;
     ScanResultModel result_;
     QList<AssetCardWidget*> assetCards_;
+    QSet<QString> stoppingAssetIds_;
+    bool scanInProgress_ = false;
 };

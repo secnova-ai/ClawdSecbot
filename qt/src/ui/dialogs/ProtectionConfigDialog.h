@@ -9,6 +9,7 @@ class GoBridge;
 class QCheckBox;
 class QComboBox;
 class QLineEdit;
+class QPushButton;
 class QTabWidget;
 class QVBoxLayout;
 
@@ -50,4 +51,5 @@ private:
     QCheckBox* auditOnly_ = nullptr;
     QCheckBox* userInputDetection_ = nullptr;
     QCheckBox* sandboxEnabled_ = nullptr;
+    QPushButton* saveButton_ = nullptr;
 };

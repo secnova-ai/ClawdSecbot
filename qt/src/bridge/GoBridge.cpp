@@ -3,14 +3,24 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
-#include <QThreadPool>
+#include <QMutexLocker>
 
 GoBridge::GoBridge(QObject* parent) : QObject(parent) {}
 
 GoBridge::~GoBridge() { shutdown(); }
 
+GoBridge::CallLease::CallLease(const GoBridge& bridge, bool requireReady)
+    : bridge_(bridge), active_(bridge_.beginCall(requireReady)) {}
+
+GoBridge::CallLease::~CallLease() {
+    if (active_) bridge_.endCall();
+}
+
+GoBridge::CallLease::operator bool() const { return active_; }
+
 bool GoBridge::initialize(const AppConfig& config, QString* errorMessage) {
-    if (shuttingDown_.load()) {
+    const CallLease initializeLease(*this, false);
+    if (!initializeLease) {
         if (errorMessage != nullptr) *errorMessage = QStringLiteral("Go bridge is shutting down.");
         return false;
     }
@@ -30,8 +40,6 @@ bool GoBridge::initialize(const AppConfig& config, QString* errorMessage) {
         library_.unload();
         return false;
     }
-    ready_.store(true);
-
     using ThreeArgFunction = char* (*)(const char*, const char*, const char*);
     const QByteArray workspace = config.workspaceDir.toUtf8();
     const QByteArray home = config.homeDir.toUtf8();
@@ -43,9 +51,22 @@ bool GoBridge::initialize(const AppConfig& config, QString* errorMessage) {
         const auto initPaths = reinterpret_cast<TwoArgFunction>(library_.resolve("InitPathsFFI"));
         if (initPaths != nullptr) decodeAndFree(initPaths(workspace.constData(), home.constData()));
     }
-    call("InitLoggingFFI", config.logDir);
+    const auto initLogging = reinterpret_cast<OneArgFunction>(library_.resolve("InitLoggingFFI"));
+    if (initLogging != nullptr) {
+        const QByteArray logDir = config.logDir.toUtf8();
+        decodeAndFree(initLogging(logDir.constData()));
+    }
     const QJsonObject versionPayload{{QStringLiteral("current_version"), config.appVersion}};
-    const QJsonObject database = call("InitDatabase", QString::fromUtf8(QJsonDocument(versionPayload).toJson(QJsonDocument::Compact)));
+    const auto initDatabase = reinterpret_cast<OneArgFunction>(library_.resolve("InitDatabase"));
+    if (initDatabase == nullptr) {
+        const QString message = QStringLiteral("InitDatabase is missing from the Go library.");
+        if (errorMessage != nullptr) *errorMessage = message;
+        freeString_ = nullptr;
+        library_.unload();
+        return false;
+    }
+    const QByteArray versionJson = QJsonDocument(versionPayload).toJson(QJsonDocument::Compact);
+    const QJsonObject database = decodeAndFree(initDatabase(versionJson.constData()));
     if (!database.value(QStringLiteral("success")).toBool(true)) {
         const QString message = database.value(QStringLiteral("error")).toString(QStringLiteral("Go database initialization failed."));
         if (errorMessage != nullptr) *errorMessage = message;
@@ -54,36 +75,45 @@ bool GoBridge::initialize(const AppConfig& config, QString* errorMessage) {
         library_.unload();
         return false;
     }
+    if (shuttingDown_.load()) {
+        if (errorMessage != nullptr) *errorMessage = QStringLiteral("Go bridge was shut down during initialization.");
+        return false;
+    }
+    ready_.store(true);
     return true;
 }
 
 void GoBridge::shutdown() {
     if (shuttingDown_.exchange(true)) return;
-
-    // Every QtConcurrent task in this client uses the global pool. Waiting here
-    // keeps the Go symbols loaded until all queued and running FFI calls finish.
-    QThreadPool::globalInstance()->waitForDone();
+    ready_.store(false);
+    workerPool_.waitForDone();
+    {
+        QMutexLocker locker(&callMutex_);
+        while (activeCalls_ > 0) callsFinished_.wait(&callMutex_);
+    }
 
     if (library_.isLoaded() && freeString_ != nullptr) {
         const auto closeDatabase = reinterpret_cast<NoArgFunction>(library_.resolve("CloseDatabase"));
         if (closeDatabase != nullptr) decodeAndFree(closeDatabase());
     }
-    ready_.store(false);
     freeString_ = nullptr;
     if (library_.isLoaded()) library_.unload();
 }
 
 bool GoBridge::isReady() const { return ready_.load() && !shuttingDown_.load(); }
 QString GoBridge::libraryPath() const { return library_.fileName(); }
+QThreadPool* GoBridge::workerPool() { return &workerPool_; }
 
 QJsonObject GoBridge::call(const char* method) const {
-    if (!isReady()) return failure(QStringLiteral("Go bridge is not ready."));
+    const CallLease lease(*this, true);
+    if (!lease) return failure(QStringLiteral("Go bridge is not ready."));
     const auto fn = reinterpret_cast<NoArgFunction>(library_.resolve(method));
     return fn == nullptr ? failure(QStringLiteral("Missing Go symbol: %1").arg(QString::fromLatin1(method))) : decodeAndFree(fn());
 }
 
 QJsonObject GoBridge::call(const char* method, const QString& value) const {
-    if (!isReady()) return failure(QStringLiteral("Go bridge is not ready."));
+    const CallLease lease(*this, true);
+    if (!lease) return failure(QStringLiteral("Go bridge is not ready."));
     const auto fn = reinterpret_cast<OneArgFunction>(library_.resolve(method));
     if (fn == nullptr) return failure(QStringLiteral("Missing Go symbol: %1").arg(QString::fromLatin1(method)));
     const QByteArray utf8 = value.toUtf8();
@@ -91,7 +121,8 @@ QJsonObject GoBridge::call(const char* method, const QString& value) const {
 }
 
 QJsonObject GoBridge::call(const char* method, const QString& first, const QString& second) const {
-    if (!isReady()) return failure(QStringLiteral("Go bridge is not ready."));
+    const CallLease lease(*this, true);
+    if (!lease) return failure(QStringLiteral("Go bridge is not ready."));
     const auto fn = reinterpret_cast<TwoArgFunction>(library_.resolve(method));
     if (fn == nullptr) return failure(QStringLiteral("Missing Go symbol: %1").arg(QString::fromLatin1(method)));
     const QByteArray firstUtf8 = first.toUtf8();
@@ -100,7 +131,8 @@ QJsonObject GoBridge::call(const char* method, const QString& first, const QStri
 }
 
 QJsonObject GoBridge::call(const char* method, const QString& value, int number) const {
-    if (!isReady()) return failure(QStringLiteral("Go bridge is not ready."));
+    const CallLease lease(*this, true);
+    if (!lease) return failure(QStringLiteral("Go bridge is not ready."));
     const auto fn = reinterpret_cast<OneArgOneIntFunction>(library_.resolve(method));
     if (fn == nullptr) return failure(QStringLiteral("Missing Go symbol: %1").arg(QString::fromLatin1(method)));
     const QByteArray utf8 = value.toUtf8();
@@ -108,7 +140,8 @@ QJsonObject GoBridge::call(const char* method, const QString& value, int number)
 }
 
 QJsonObject GoBridge::callInt(const char* method, int value) const {
-    if (!isReady()) return failure(QStringLiteral("Go bridge is not ready."));
+    const CallLease lease(*this, true);
+    if (!lease) return failure(QStringLiteral("Go bridge is not ready."));
     const auto fn = reinterpret_cast<OneIntFunction>(library_.resolve(method));
     return fn == nullptr ? failure(QStringLiteral("Missing Go symbol: %1").arg(QString::fromLatin1(method))) : decodeAndFree(fn(value));
 }
@@ -130,4 +163,17 @@ QJsonObject GoBridge::decodeAndFree(char* result) const {
 
 QJsonObject GoBridge::failure(const QString& message) const {
     return {{QStringLiteral("success"), false}, {QStringLiteral("error"), message}};
+}
+
+bool GoBridge::beginCall(bool requireReady) const {
+    QMutexLocker locker(&callMutex_);
+    if (shuttingDown_.load() || (requireReady && !ready_.load())) return false;
+    ++activeCalls_;
+    return true;
+}
+
+void GoBridge::endCall() const {
+    QMutexLocker locker(&callMutex_);
+    --activeCalls_;
+    if (activeCalls_ == 0) callsFinished_.wakeAll();
 }

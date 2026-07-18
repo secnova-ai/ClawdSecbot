@@ -5,6 +5,7 @@
 class GoBridge;
 class QComboBox;
 class QLineEdit;
+class QPushButton;
 class QTabWidget;
 
 class SettingsDialog final : public QDialog {
@@ -22,4 +23,5 @@ private:
     QLineEdit* baseUrl_ = nullptr;
     QLineEdit* apiKey_ = nullptr;
     QLineEdit* modelName_ = nullptr;
+    QPushButton* saveButton_ = nullptr;
 };

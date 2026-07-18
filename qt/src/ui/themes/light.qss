@@ -1,5 +1,4 @@
 * {
-    font-family: "Inter", "Noto Sans SC";
     font-size: 13px;
     color: #FFFFFF;
     outline: none;
@@ -8,8 +7,63 @@ QMainWindow, QDialog, QWidget#appShell, QWidget#dialogShell { background: #0F0F2
 QWidget#titleBar { background: rgba(0, 0, 0, 76); border-bottom: 1px solid rgba(255, 255, 255, 25); }
 QLabel#appTitle { font-size: 14px; font-weight: 600; color: #FFFFFF; }
 QLabel#pageTitle { font-size: 20px; font-weight: 700; color: #FFFFFF; }
-QLabel#dialogTitle { font-size: 18px; font-weight: 600; color: #FFFFFF; }
+QLabel#dialogTitle { font-size: 19px; font-weight: 700; color: #FFFFFF; }
 QLabel#sectionTitle { font-size: 14px; font-weight: 600; color: #FFFFFF; }
+QLabel#monitorAssetName { font-size: 11px; color: rgba(255,255,255,138); }
+QWidget#monitorContent, QWidget#monitorTrendColumn, QWidget#monitorPanelHeader { background: transparent; }
+QFrame#monitorStatusCard { background:rgba(245,158,11,26); border:1px solid rgba(245,158,11,77); border-radius:12px; }
+QLabel#monitorStatusDot { background:#F59E0B; border-radius:6px; }
+QLabel#monitorStatusCaption { font-size:11px; color:rgba(255,255,255,138); }
+QLabel#monitorStatusValue { font-size:16px; font-weight:600; color:#F59E0B; }
+QLabel#monitorRealtimePill { padding:6px 10px; border-radius:14px; background:rgba(245,158,11,35); color:#F59E0B; font-size:11px; }
+QCheckBox#monitorAuditSwitch { padding:3px 8px; border:1px solid rgba(255,255,255,25); border-radius:14px; background:rgba(255,255,255,18); color:rgba(255,255,255,138); font-size:11px; spacing:6px; }
+QCheckBox#monitorAuditSwitch::indicator { width:32px; height:18px; border-radius:9px; border:1px solid rgba(255,255,255,55); background:rgba(255,255,255,18); }
+QCheckBox#monitorAuditSwitch::indicator:checked { background:#F59E0B; border-color:#FBBF24; }
+QLabel#monitorMetricValue { font-family:"Menlo"; font-size:18px; font-weight:700; color:#FFFFFF; }
+QLabel#monitorMetricLabel { font-size:10px; color:rgba(255,255,255,138); }
+QFrame#monitorPanel { background:rgba(255,255,255,13); border:1px solid rgba(255,255,255,25); border-radius:12px; }
+QLabel#monitorPanelIcon { color:#818CF8; font-family:"Menlo"; font-size:14px; font-weight:600; }
+QLabel#monitorPanelTitle { font-size:14px; font-weight:600; color:#FFFFFF; }
+QLabel#monitorEventCount { padding:2px 6px; border-radius:9px; background:rgba(99,102,241,42); color:#818CF8; font-family:"Menlo"; font-size:11px; }
+QStackedWidget#monitorEventStack { background:transparent; border:0; }
+QLabel#monitorEmptyIcon { color:rgba(255,255,255,38); font-size:28px; }
+QLabel#monitorEmptyText { color:rgba(255,255,255,92); font-size:12px; }
+QFrame#monitorDivider { background:rgba(255,255,255,25); border:0; }
+QPushButton#monitorSegmentButton { min-width:42px; padding:4px 8px; border-radius:12px; background:transparent; color:rgba(255,255,255,138); font-size:11px; }
+QPushButton#monitorSegmentButton:checked { background:rgba(99,102,241,77); color:#FFFFFF; }
+QPushButton#monitorTextButton { padding:4px 8px; border-radius:4px; background:rgba(255,255,255,18); color:rgba(255,255,255,138); font-size:11px; }
+QPushButton#monitorIconButton { min-width:28px; max-width:28px; min-height:28px; max-height:28px; padding:0; border-radius:6px; background:transparent; color:rgba(255,255,255,92); font-size:14px; }
+QPushButton#monitorIconButton:hover { background:rgba(255,255,255,18); color:#FFFFFF; }
+QPlainTextEdit#monitorLogView { background:transparent; border:0; border-radius:0; padding:10px; font-family:"Menlo"; font-size:10px; color:rgba(255,255,255,185); }
+QScrollArea#analysisLogView, QWidget#analysisLogContent { background:transparent; border:0; }
+QLabel#analysisEmptyIcon { color:rgba(255,255,255,38); font-size:30px; }
+QLabel#analysisEmptyText { color:rgba(255,255,255,92); font-size:12px; }
+QLabel#analysisWorkflowIcon { color:#818CF8; font-size:16px; }
+QLabel#analysisIdentity { color:rgba(255,255,255,180); font-size:11px; }
+QLabel#analysisTime { color:rgba(255,255,255,138); font-family:"Menlo"; font-size:10px; }
+QLabel#analysisStatusChip { font-family:"Menlo"; font-size:10px; }
+QLabel#analysisSectionIcon { color:#818CF8; font-size:13px; }
+QLabel#analysisSectionTitle { color:rgba(255,255,255,190); font-size:11px; font-weight:600; }
+QFrame#analysisSummaryCard { background:rgba(255,255,255,8); border:1px solid rgba(255,255,255,15); border-radius:8px; }
+QWidget#analysisRoleRow { background:transparent; }
+QLabel#analysisRoleLabel { font-size:11px; font-weight:600; }
+QLabel#analysisRoleContent { color:rgba(255,255,255,220); font-size:11px; }
+QLabel#analysisMetaTitle { font-size:10px; font-weight:600; }
+QLabel#analysisMetaValue { color:rgba(255,255,255,180); font-family:"Menlo"; font-size:10px; }
+QFrame#analysisDivider { background:rgba(255,255,255,25); border:0; }
+QListWidget#securityEventList { padding:4px 8px; background:transparent; border:0; }
+QListWidget#securityEventList::item { margin:2px 0; padding:0; border:0; background:transparent; }
+QFrame#monitorEventCard:hover { background:rgba(255,255,255,20); }
+QLabel#monitorEventTypeIcon { font-size:13px; }
+QLabel#monitorEventAction { color:rgba(255,255,255,217); font-size:12px; }
+QLabel#monitorEventSourceAgent { padding:1px 4px; border-radius:3px; background:rgba(99,102,241,42); color:#818CF8; font-family:"Menlo"; font-size:9px; font-weight:600; }
+QLabel#monitorEventSourceHeuristic { padding:1px 4px; border-radius:3px; background:rgba(245,158,11,42); color:#F59E0B; font-family:"Menlo"; font-size:9px; font-weight:600; }
+QLabel#monitorEventRiskBadge { font-size:10px; }
+QLabel#monitorEventTime { color:rgba(255,255,255,92); font-family:"Menlo"; font-size:10px; }
+QLabel#eventDetailTitle { color:#FFFFFF; font-size:16px; font-weight:600; }
+QLabel#eventDetailKey { color:rgba(255,255,255,92); font-size:11px; }
+QLabel#eventDetailValue { color:rgba(255,255,255,217); font-size:13px; }
+QSplitter#monitorMainSplitter::handle { background:transparent; }
 QLabel#muted, QLabel#statusLabel { color: rgba(255, 255, 255, 138); }
 QLabel#subtle { color: rgba(255, 255, 255, 92); }
 QLabel#pill { padding: 3px 8px; border-radius: 5px; background: rgba(255,255,255,18); color: rgba(255,255,255,160); }
@@ -25,11 +79,11 @@ QFrame#assetCard { background: rgba(99,102,241,13); border: 1px solid rgba(99,10
 QPushButton#assetCardHeader { background: transparent; border: 0; padding: 0; text-align: left; }
 QPushButton#assetCardHeader:hover { background: transparent; }
 QLabel#assetTitle { font-size: 14px; font-weight: 600; color: #FFFFFF; }
-QLabel#assetAddress { font-family: "Fira Code", "Menlo"; font-size: 10px; color: rgba(255,255,255,92); }
+QLabel#assetAddress { font-family: "Menlo"; font-size: 10px; color: rgba(255,255,255,92); }
 QLabel#assetChevron { font-size: 18px; color: rgba(255,255,255,110); }
 QLabel#assetSectionTitle { font-size: 11px; font-weight: 600; color: rgba(255,255,255,110); }
 QLabel#assetDetailKey { font-size: 11px; color: rgba(255,255,255,78); }
-QLabel#assetDetailValue { font-family: "Fira Code", "Menlo"; font-size: 11px; color: rgba(255,255,255,180); }
+QLabel#assetDetailValue { font-family: "Menlo"; font-size: 11px; color: rgba(255,255,255,180); }
 QFrame#assetDivider { color: rgba(255,255,255,25); background: rgba(255,255,255,25); max-height: 1px; border: 0; }
 QPushButton#assetIconButton { min-width: 36px; max-width: 36px; min-height: 36px; max-height: 36px; padding: 0; border-radius: 8px; background: rgba(99,102,241,35); color: #818CF8; font-size: 17px; }
 QPushButton#assetPrimaryButton { padding: 8px 12px; border-radius: 8px; background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6366F1,stop:1 #8B5CF6); color:#FFFFFF; font-size:12px; font-weight:600; }
@@ -56,9 +110,37 @@ QToolButton::menu-indicator { image: none; width: 0; }
 QPushButton#closeButton { min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; padding: 0; border-radius: 6px; background: rgba(239,68,68,45); color: #FCA5A5; }
 QPushButton#tabButton { border-radius: 6px; padding: 11px; color: rgba(255,255,255,105); background: transparent; }
 QPushButton#tabButton:checked { background: #6366F1; color: #FFFFFF; font-weight: 600; }
-QLabel#dialogHeaderIcon { background:rgba(99,102,241,38); color:#818CF8; border-radius:8px; font-size:18px; }
-QPushButton#dialogCloseButton { min-width:30px; max-width:30px; min-height:30px; max-height:30px; padding:0; border-radius:7px; background:transparent; color:rgba(255,255,255,120); font-size:18px; }
-QPushButton#dialogCloseButton:hover { background:rgba(255,255,255,20); color:#FFFFFF; }
+QDialog#styledDialog {
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #1B1B34,stop:1 #121225);
+    border:1px solid rgba(129,140,248,82);
+    border-radius:18px;
+}
+QDialog#styledDialog[tone="success"] { border-color:rgba(34,197,94,82); }
+QDialog#styledDialog[tone="warning"] { border-color:rgba(245,158,11,92); }
+QDialog#styledDialog[tone="danger"] { border-color:rgba(239,68,68,92); }
+QWidget#dialogHeader { background:transparent; min-height:44px; }
+QLabel#dialogSubtitle { color:rgba(255,255,255,112); font-size:11px; }
+QLabel#dialogHeaderIcon { background:rgba(99,102,241,38); border:1px solid rgba(129,140,248,65); color:#A5B4FC; border-radius:11px; font-size:19px; font-weight:700; }
+QLabel#dialogHeaderIcon[tone="info"] { background:rgba(59,130,246,32); border-color:rgba(96,165,250,72); color:#60A5FA; }
+QLabel#dialogHeaderIcon[tone="success"] { background:rgba(34,197,94,30); border-color:rgba(74,222,128,72); color:#4ADE80; }
+QLabel#dialogHeaderIcon[tone="warning"] { background:rgba(245,158,11,32); border-color:rgba(251,191,36,76); color:#FBBF24; }
+QLabel#dialogHeaderIcon[tone="danger"] { background:rgba(239,68,68,32); border-color:rgba(248,113,113,76); color:#F87171; }
+QPushButton#dialogCloseButton { min-width:32px; max-width:32px; min-height:32px; max-height:32px; padding:0; border:1px solid transparent; border-radius:9px; background:rgba(255,255,255,8); color:rgba(255,255,255,105); font-size:19px; }
+QPushButton#dialogCloseButton:hover { background:rgba(239,68,68,32); border-color:rgba(239,68,68,62); color:#FCA5A5; }
+QLabel#dialogStepBadge { padding:5px 10px; border:1px solid rgba(129,140,248,55); border-radius:11px; background:rgba(99,102,241,28); color:#A5B4FC; font-family:"Menlo"; font-size:10px; font-weight:600; }
+QFrame#dialogMessageBody { background:rgba(255,255,255,11); border:1px solid rgba(255,255,255,24); border-radius:12px; }
+QLabel#dialogMessageText { color:rgba(255,255,255,205); font-size:13px; }
+QWidget#dialogFooter { background:transparent; }
+QDialogButtonBox#dialogButtonBox { background:transparent; }
+QPushButton#dangerActionButton { background:rgba(239,68,68,48); border:1px solid rgba(239,68,68,90); color:#FCA5A5; font-weight:600; padding:11px 20px; }
+QPushButton#dangerActionButton:hover { background:rgba(239,68,68,72); border-color:#EF4444; color:#FFFFFF; }
+QProgressBar#dialogProgress { min-height:5px; max-height:5px; border-radius:2px; background:rgba(255,255,255,16); }
+QProgressBar#dialogProgress::chunk { border-radius:2px; background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6366F1,stop:1 #60A5FA); }
+QLabel#dialogHint { padding:11px 13px; border:1px solid rgba(99,102,241,55); border-radius:9px; background:rgba(99,102,241,18); color:#A5B4FC; font-size:11px; }
+QFrame#guideStepCard { background:rgba(255,255,255,10); border:1px solid rgba(255,255,255,22); border-radius:11px; }
+QFrame#guideStepCard:hover { background:rgba(99,102,241,18); border-color:rgba(129,140,248,55); }
+QLabel#guideStepNumber { background:rgba(99,102,241,40); border:1px solid rgba(129,140,248,68); border-radius:15px; color:#A5B4FC; font-weight:700; }
+QScrollArea#dialogDetailScroll, QWidget#dialogDetailBody { background:transparent; border:0; }
 QTabWidget#segmentedTabs QTabBar { background:rgba(255,255,255,12); border-radius:8px; }
 QTabWidget#segmentedTabs QTabBar::tab { min-height:26px; padding:8px 5px; margin:2px 1px; border-radius:6px; color:rgba(255,255,255,110); background:transparent; font-size:11px; }
 QTabWidget#segmentedTabs QTabBar::tab:selected { background:#6366F1; color:#FFFFFF; font-weight:600; }
@@ -109,7 +191,7 @@ QListWidget::item, QTreeWidget::item { padding: 8px; border-radius: 6px; }
 QListWidget::item:selected, QTreeWidget::item:selected { background: rgba(99,102,241,55); }
 QListWidget#skillScanList::item { padding:0; background:transparent; border:0; }
 QListWidget#skillScanList::item:selected { background:transparent; }
-QLabel#skillPath { color:rgba(255,255,255,110); font-family:"Fira Code", "Menlo"; font-size:10px; }
+QLabel#skillPath { color:rgba(255,255,255,110); font-family:"Menlo"; font-size:10px; }
 QPushButton#skillIssueToggle { padding:3px 0; background:transparent; color:rgba(255,255,255,120); font-size:11px; text-align:left; }
 QPushButton#skillIssueToggle:hover { background:transparent; color:#FFFFFF; }
 QFrame#skillSafeCard { background:rgba(34,197,94,18); border:1px solid rgba(34,197,94,70); border-radius:12px; }
@@ -117,7 +199,7 @@ QFrame#skillRiskCard { background:rgba(239,68,68,18); border:1px solid rgba(239,
 QFrame#skillFailedCard { background:rgba(156,163,175,16); border:1px solid rgba(156,163,175,60); border-radius:12px; }
 QLabel#skillSafeIcon { color:#22C55E; font-size:17px; font-weight:700; }
 QLabel#skillRiskIcon { color:#EF4444; font-size:17px; font-weight:700; }
-QPlainTextEdit#skillScanLog { background:rgba(0,0,0,65); border:1px solid rgba(255,255,255,22); border-radius:10px; padding:12px; font-family:"Fira Code", "Menlo"; font-size:11px; }
+QPlainTextEdit#skillScanLog { background:rgba(0,0,0,65); border:1px solid rgba(255,255,255,22); border-radius:10px; padding:12px; font-family:"Menlo"; font-size:11px; }
 QPushButton#auditSerialButton { padding:0; min-width:30px; max-width:30px; min-height:30px; max-height:30px; border:1px solid rgba(255,255,255,32); border-radius:8px; background:rgba(255,255,255,15); color:rgba(255,255,255,135); font-size:10px; }
 QPushButton#auditSerialButton:checked { background:rgba(99,102,241,60); border-color:#6366F1; color:#FFFFFF; font-weight:700; }
 QPushButton#auditLogCard { padding:0; text-align:left; border:1px solid rgba(255,255,255,25); border-radius:8px; background:rgba(0,0,0,75); }
@@ -127,10 +209,10 @@ QFrame#auditDetailPanel { background:rgba(0,0,0,48); border:1px solid rgba(99,10
 QScrollArea#auditDetailScroll, QWidget#auditTimelineView { background:transparent; border:0; }
 QFrame#auditMetadataCard, QFrame#auditTimeline, QFrame#auditSecurityEventTimeline { background:rgba(0,0,0,48); border:1px solid rgba(255,255,255,20); border-radius:10px; }
 QLabel#auditDetailLabel { color:rgba(255,255,255,105); font-size:11px; }
-QLabel#auditDetailValue { color:rgba(255,255,255,210); font-family:"Fira Code", "Menlo"; font-size:11px; }
+QLabel#auditDetailValue { color:rgba(255,255,255,210); font-family:"Menlo"; font-size:11px; }
 QLabel#auditSectionTitle { color:#818CF8; font-size:13px; font-weight:600; }
-QLabel#auditTimelineTick { color:rgba(255,255,255,105); font-family:"Fira Code", "Menlo"; font-size:9px; }
-QLabel#auditTimelineContent { color:rgba(255,255,255,185); font-family:"Fira Code", "Menlo"; font-size:10px; }
+QLabel#auditTimelineTick { color:rgba(255,255,255,105); font-family:"Menlo"; font-size:9px; }
+QLabel#auditTimelineContent { color:rgba(255,255,255,185); font-family:"Menlo"; font-size:10px; }
 QFrame#auditTimelineCardUser { background:rgba(0,0,0,55); border:1px solid rgba(34,197,94,62); border-radius:8px; }
 QFrame#auditTimelineCardAssistant { background:rgba(0,0,0,55); border:1px solid rgba(99,102,241,70); border-radius:8px; }
 QFrame#auditTimelineCardToolCall { background:rgba(0,0,0,55); border:1px solid rgba(245,158,11,68); border-radius:8px; }
@@ -152,16 +234,16 @@ QLabel#auditTimelineRoleToolCall, QLabel#auditTimelineBadgeToolCall { color:#F59
 QLabel#auditTimelineRoleToolResult, QLabel#auditTimelineBadgeToolResult { color:#EC4899; }
 QLabel#auditTimelineRoleUnknown, QLabel#auditTimelineBadgeUnknown { color:rgba(255,255,255,180); }
 QLabel#auditTimelineRoleUser, QLabel#auditTimelineRoleAssistant, QLabel#auditTimelineRoleToolCall, QLabel#auditTimelineRoleToolResult, QLabel#auditTimelineRoleUnknown { font-size:11px; font-weight:600; }
-QLabel#auditTimelineBadgeUser, QLabel#auditTimelineBadgeAssistant, QLabel#auditTimelineBadgeToolCall, QLabel#auditTimelineBadgeToolResult, QLabel#auditTimelineBadgeUnknown { padding:1px 6px; border:1px solid rgba(255,255,255,25); border-radius:7px; font-family:"Fira Code", "Menlo"; font-size:9px; }
-QLabel#auditSecurityEventTime { color:#F87171; font-family:"Fira Code", "Menlo"; font-size:9px; }
+QLabel#auditTimelineBadgeUser, QLabel#auditTimelineBadgeAssistant, QLabel#auditTimelineBadgeToolCall, QLabel#auditTimelineBadgeToolResult, QLabel#auditTimelineBadgeUnknown { padding:1px 6px; border:1px solid rgba(255,255,255,25); border-radius:7px; font-family:"Menlo"; font-size:9px; }
+QLabel#auditSecurityEventTime { color:#F87171; font-family:"Menlo"; font-size:9px; }
 QLabel#auditSecurityEventNode { background:rgba(239,68,68,35); border:1px solid rgba(239,68,68,110); border-radius:12px; color:#F87171; font-weight:700; }
 QFrame#auditSecurityEventConnector { background:rgba(239,68,68,55); border:0; }
 QFrame#auditSecurityEventCard { background:rgba(239,68,68,13); border:1px solid rgba(239,68,68,58); border-radius:8px; }
 QLabel#auditSecurityEventTitle { color:#FCA5A5; font-size:11px; font-weight:600; }
 QFrame#auditToolCard { background:rgba(0,0,0,48); border:1px solid rgba(255,255,255,22); border-radius:8px; }
 QFrame#auditToolCardSensitive { background:rgba(239,68,68,20); border:1px solid rgba(239,68,68,75); border-radius:8px; }
-QLabel#auditToolName { color:#FFFFFF; font-family:"Fira Code", "Menlo"; font-size:11px; font-weight:600; }
-QLabel#auditToolNameSensitive { color:#F87171; font-family:"Fira Code", "Menlo"; font-size:11px; font-weight:600; }
+QLabel#auditToolName { color:#FFFFFF; font-family:"Menlo"; font-size:11px; font-weight:600; }
+QLabel#auditToolNameSensitive { color:#F87171; font-family:"Menlo"; font-size:11px; font-weight:600; }
 QHeaderView::section { background: rgba(255,255,255,12); border: 0; border-bottom: 1px solid rgba(255,255,255,20); padding: 9px; color: rgba(255,255,255,130); }
 QToolTip { background: #1E1E2E; color: white; border: 1px solid rgba(255,255,255,30); padding: 6px; }
 QMenu { background:#1A1A2E; border:1px solid rgba(255,255,255,35); border-radius:8px; padding:6px; }
@@ -174,6 +256,10 @@ QPushButton#rescanMainButton:hover, QPushButton#rescanDropdownButton:hover { bac
 QMenu#rescanMenu { background:#17172B; border:1px solid rgba(99,102,241,72); border-radius:9px; padding:6px; }
 QMenu#rescanMenu::item { padding:9px 26px 9px 12px; border:0; border-radius:6px; }
 QMenu#rescanMenu::item:selected { background:rgba(99,102,241,52); }
+QMenu#appActionMenu { background:#17172B; border:1px solid rgba(129,140,248,70); border-radius:12px; padding:7px; }
+QMenu#appActionMenu::item { min-height:24px; padding:9px 18px 9px 12px; margin:1px 0; border-radius:7px; color:rgba(255,255,255,190); }
+QMenu#appActionMenu::item:selected { background:rgba(99,102,241,52); color:#FFFFFF; }
+QMenu#appActionMenu::separator { height:1px; margin:6px 8px; background:rgba(255,255,255,24); }
 QDialog#compactMenu { background:#1A1A2E; border:1px solid rgba(255,255,255,35); border-radius:8px; }
 QPushButton#compactMenuItem { padding:9px 12px; text-align:left; background:transparent; color:rgba(255,255,255,190); }
 QPushButton#compactMenuItem:hover { background:rgba(99,102,241,65); color:#FFFFFF; }

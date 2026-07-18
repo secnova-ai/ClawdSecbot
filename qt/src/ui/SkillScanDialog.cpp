@@ -1,6 +1,8 @@
 #include "ui/dialogs/SkillScanDialog.h"
 
 #include "bridge/GoBridge.h"
+#include "ui/DialogChrome.h"
+#include "ui/UiDialogs.h"
 
 #include <QDialogButtonBox>
 #include <QFrame>
@@ -9,7 +11,6 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
-#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
@@ -47,22 +48,16 @@ QString riskText(const QString& level) {
 
 SkillScanDialog::SkillScanDialog(GoBridge* bridge, const QString& assetName, QWidget* parent)
     : QDialog(parent), bridge_(bridge), assetName_(assetName) {
-    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
     setWindowTitle(QStringLiteral("AI 技能安全分析"));
-    resize(760, 620);
+    setProperty("tone", DialogChrome::toneName(DialogChrome::Tone::Info));
+    DialogChrome::prepare(this, QSize(800, 680), QSize(720, 600));
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(24, 24, 24, 20);
-    root->setSpacing(14);
-    auto* header = new QHBoxLayout;
-    auto* icon = scanLabel(QStringLiteral("⌕"), "dialogHeaderIcon", this);
-    icon->setAlignment(Qt::AlignCenter);
-    icon->setFixedSize(36, 36);
-    header->addWidget(icon);
-    header->addWidget(scanLabel(QStringLiteral("AI 技能安全分析"), "dialogTitle", this), 1);
-    auto* close = new QPushButton(QStringLiteral("×"), this);
-    close->setObjectName(QStringLiteral("dialogCloseButton"));
-    header->addWidget(close);
-    root->addLayout(header);
+    root->setContentsMargins(26, 24, 26, 22);
+    root->setSpacing(18);
+    auto* header = DialogChrome::createHeader(this, QStringLiteral("⌕"), QStringLiteral("AI 技能安全分析"),
+                                               QStringLiteral("检测提示词注入、数据窃取、代码执行和供应链风险"),
+                                               DialogChrome::Tone::Info);
+    root->addWidget(header);
 
     status_ = scanLabel(QStringLiteral("正在发现并扫描 Skill 中的提示词注入、数据窃取、代码执行和供应链风险…"), "muted", this);
     status_->setWordWrap(true);
@@ -95,35 +90,33 @@ SkillScanDialog::SkillScanDialog(GoBridge* bridge, const QString& assetName, QWi
     pollTimer_ = new QTimer(this);
     pollTimer_->setInterval(250);
     connect(pollTimer_, &QTimer::timeout, this, &SkillScanDialog::pollBatch);
-    auto closeDialog = [this]() {
-        pollTimer_->stop();
-        if (!batchId_.isEmpty() && bridge_ != nullptr) {
-            const QString batch = batchId_;
-            const QString asset = assetName_;
-            [[maybe_unused]] const auto cancelFuture = QtConcurrent::run([bridge = bridge_, batch, asset]() {
-                return asset.isEmpty() ? bridge->call("CancelBatchSkillScan", batch)
-                                       : bridge->call("CancelBatchSkillScanByAssetFFI", asset, batch);
-            });
-        }
-        reject();
-    };
-    connect(close, &QPushButton::clicked, this, closeDialog);
-    connect(closeButton_, &QPushButton::clicked, this, [this, closeDialog]() {
-        if (batchId_.isEmpty()) accept(); else closeDialog();
+    if (auto* close = header->findChild<QPushButton*>(QStringLiteral("dialogCloseButton"))) {
+        disconnect(close, &QPushButton::clicked, this, &QDialog::reject);
+        connect(close, &QPushButton::clicked, this, &SkillScanDialog::reject);
+    }
+    connect(closeButton_, &QPushButton::clicked, this, [this]() {
+        if (batchId_.isEmpty() && !startInFlight_) accept();
+        else reject();
     });
     QTimer::singleShot(0, this, &SkillScanDialog::startScan);
 }
 
 void SkillScanDialog::startScan() {
     if (bridge_ == nullptr || !bridge_->isReady()) return finishWithError(QStringLiteral("Go 业务库尚未就绪"));
+    startInFlight_ = true;
     const QString asset = assetName_;
     auto* watcher = new QFutureWatcher<QJsonObject>(this);
     connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
         const QJsonObject response = watcher->result();
+        startInFlight_ = false;
         watcher->deleteLater();
+        batchId_ = response.value(QStringLiteral("batch_id")).toString();
+        if (closeRequested_) {
+            reject();
+            return;
+        }
         if (!response.value(QStringLiteral("success")).toBool()) return finishWithError(response.value(QStringLiteral("error")).toString(QStringLiteral("启动扫描失败")));
         const int total = response.value(QStringLiteral("total")).toInt();
-        batchId_ = response.value(QStringLiteral("batch_id")).toString();
         if (total == 0 || batchId_.isEmpty()) {
             progress_->setRange(0, 1);
             progress_->setValue(1);
@@ -143,7 +136,7 @@ void SkillScanDialog::startScan() {
         pollTimer_->start();
         pollBatch();
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_, asset]() {
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, asset]() {
         return asset.isEmpty() ? bridge->call("StartBatchSkillScan") : bridge->call("StartBatchSkillScanByAssetFFI", asset);
     }));
 }
@@ -159,6 +152,10 @@ void SkillScanDialog::pollBatch() {
         const QJsonObject response = watcher->result();
         watcher->deleteLater();
         for (const QJsonValue& value : response.value(QStringLiteral("logs")).toArray()) logView_->appendPlainText(value.toString());
+        if (response.contains(QStringLiteral("success")) && !response.value(QStringLiteral("success")).toBool()) {
+            finishWithError(response.value(QStringLiteral("error")).toString(QStringLiteral("获取扫描进度失败")));
+            return;
+        }
         const int total = response.value(QStringLiteral("total")).toInt(progress_->maximum());
         const int current = response.value(QStringLiteral("current_index")).toInt();
         if (total > 0) progress_->setRange(0, total);
@@ -173,10 +170,31 @@ void SkillScanDialog::pollBatch() {
             loadResults();
         }
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_, batch, asset]() {
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, batch, asset]() {
         return asset.isEmpty() ? bridge->call("GetBatchSkillScanLog", batch)
                                : bridge->call("GetBatchSkillScanLogByAssetFFI", asset, batch);
     }));
+}
+
+void SkillScanDialog::reject() {
+    pollTimer_->stop();
+    if (startInFlight_ && batchId_.isEmpty()) {
+        closeRequested_ = true;
+        status_->setText(QStringLiteral("正在取消扫描，请稍候…"));
+        closeButton_->setEnabled(false);
+        if (auto* close = findChild<QPushButton*>(QStringLiteral("dialogCloseButton"))) close->setEnabled(false);
+        return;
+    }
+    if (!batchId_.isEmpty() && bridge_ != nullptr) {
+        const QString batch = batchId_;
+        const QString asset = assetName_;
+        batchId_.clear();
+        [[maybe_unused]] const auto cancelFuture = QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, batch, asset]() {
+            return asset.isEmpty() ? bridge->call("CancelBatchSkillScan", batch)
+                                   : bridge->call("CancelBatchSkillScanByAssetFFI", asset, batch);
+        });
+    }
+    QDialog::reject();
 }
 
 void SkillScanDialog::loadResults() {
@@ -189,7 +207,7 @@ void SkillScanDialog::loadResults() {
         if (!response.value(QStringLiteral("success")).toBool()) return finishWithError(response.value(QStringLiteral("error")).toString(QStringLiteral("加载扫描结果失败")));
         renderResults(response);
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_, batch, asset]() {
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, batch, asset]() {
         return asset.isEmpty() ? bridge->call("GetBatchSkillScanResults", batch)
                                : bridge->call("GetBatchSkillScanResultsByAssetFFI", asset, batch);
     }));
@@ -249,21 +267,27 @@ void SkillScanDialog::renderResults(const QJsonObject& response) {
                     trust->setText(watcher->result().value(QStringLiteral("success")).toBool() ? QStringLiteral("已信任") : QStringLiteral("信任失败"));
                     watcher->deleteLater();
                 });
-                watcher->setFuture(QtConcurrent::run([bridge = bridge_, hash]() { return bridge->call("TrustSkillScan", hash); }));
+                watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, hash]() { return bridge->call("TrustSkillScan", hash); }));
             });
             connect(remove, &QPushButton::clicked, card, [this, remove, path, hash]() {
-                if (QMessageBox::warning(this, QStringLiteral("删除 Skill"), QStringLiteral("确定要删除此 Skill 吗？此操作会移动或删除其目录。"),
-                                         QMessageBox::Cancel | QMessageBox::Yes, QMessageBox::Cancel) != QMessageBox::Yes) return;
-                remove->setEnabled(false);
-                auto* watcher = new QFutureWatcher<QJsonObject>(remove);
-                connect(watcher, &QFutureWatcher<QJsonObject>::finished, remove, [this, watcher, remove, hash]() {
-                    if (watcher->result().value(QStringLiteral("success")).toBool()) {
-                        [[maybe_unused]] const auto deleteRecordFuture = QtConcurrent::run([bridge = bridge_, hash]() { return bridge->call("DeleteSkillScanFFI", hash); });
-                        remove->setText(QStringLiteral("已删除"));
-                    } else remove->setText(QStringLiteral("删除失败"));
-                    watcher->deleteLater();
-                });
-                watcher->setFuture(QtConcurrent::run([bridge = bridge_, path]() { return bridge->call("DeleteSkill", path); }));
+                UiDialogs::confirm(this, QStringLiteral("删除 Skill"),
+                                   QStringLiteral("确定要删除此 Skill 吗？此操作会移动或删除其目录。"),
+                                   [this, remove, path, hash]() {
+                    remove->setEnabled(false);
+                    remove->setText(QStringLiteral("删除中…"));
+                    auto* watcher = new QFutureWatcher<QJsonObject>(remove);
+                    connect(watcher, &QFutureWatcher<QJsonObject>::finished, remove, [this, watcher, remove, hash]() {
+                        if (watcher->result().value(QStringLiteral("success")).toBool()) {
+                            [[maybe_unused]] const auto deleteRecordFuture = QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, hash]() { return bridge->call("DeleteSkillScanFFI", hash); });
+                            remove->setText(QStringLiteral("已删除"));
+                        } else {
+                            remove->setEnabled(true);
+                            remove->setText(QStringLiteral("删除失败，请重试"));
+                        }
+                        watcher->deleteLater();
+                    });
+                    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, path]() { return bridge->call("DeleteSkill", path); }));
+                }, QStringLiteral("删除"));
             });
         }
         resultsLayout_->addWidget(card);

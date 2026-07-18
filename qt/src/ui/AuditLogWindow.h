@@ -58,4 +58,6 @@ private:
     int totalCount_ = 0;
     quint64 refreshGeneration_ = 0;
     quint64 detailGeneration_ = 0;
+    bool refreshInFlight_ = false;
+    bool refreshPending_ = false;
 };

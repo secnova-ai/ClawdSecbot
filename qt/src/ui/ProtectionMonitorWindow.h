@@ -7,10 +7,13 @@
 class GoBridge;
 class QLabel;
 class QCheckBox;
-class QListWidget;
-class QPlainTextEdit;
-class QTabWidget;
+class QFrame;
+class QPushButton;
+class QStackedWidget;
 class QTimer;
+class AnalysisLogView;
+class RawLogView;
+class SecurityEventListWidget;
 class TrendChartWidget;
 
 class ProtectionMonitorWindow final : public QMainWindow {
@@ -22,11 +25,16 @@ private:
     void refreshStatus();
     void refreshLogs();
     void refreshSecurityEvents();
+    void clearSecurityEvents();
+    void updateEventCount();
 
     AssetModel asset_;
     GoBridge* bridge_;
+    QFrame* statusCard_ = nullptr;
+    QLabel* statusDot_ = nullptr;
     QLabel* stateLabel_ = nullptr;
     QLabel* requestCount_ = nullptr;
+    QLabel* messageCount_ = nullptr;
     QLabel* riskCount_ = nullptr;
     QLabel* blockedCount_ = nullptr;
     QLabel* tokenCount_ = nullptr;
@@ -34,14 +42,23 @@ private:
     QLabel* completionTokenCount_ = nullptr;
     QLabel* toolCallCount_ = nullptr;
     QLabel* auditTokenCount_ = nullptr;
-    QLabel* decision_ = nullptr;
+    QLabel* auditPromptTokenCount_ = nullptr;
+    QLabel* auditCompletionTokenCount_ = nullptr;
+    QLabel* eventCount_ = nullptr;
+    QPushButton* clearEventsButton_ = nullptr;
     QCheckBox* auditOnly_ = nullptr;
-    QListWidget* eventsList_ = nullptr;
-    QPlainTextEdit* groupedLog_ = nullptr;
-    QPlainTextEdit* rawLog_ = nullptr;
+    SecurityEventListWidget* eventsList_ = nullptr;
+    QStackedWidget* eventStack_ = nullptr;
+    AnalysisLogView* groupedLog_ = nullptr;
+    RawLogView* rawLog_ = nullptr;
     TrendChartWidget* tokenTrend_ = nullptr;
     TrendChartWidget* toolTrend_ = nullptr;
     QTimer* refreshTimer_ = nullptr;
     QString sessionId_;
     bool refreshInFlight_ = false;
+    bool logsInFlight_ = false;
+    bool eventsInFlight_ = false;
+    bool eventsRefreshPending_ = false;
+    bool clearEventsInFlight_ = false;
+    quint64 eventsGeneration_ = 0;
 };

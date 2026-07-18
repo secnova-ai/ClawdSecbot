@@ -92,8 +92,16 @@ set(UI_SOURCES
     src/ui/widgets/AuditTimelineWidget.cpp
     src/ui/widgets/TrendChartWidget.h
     src/ui/widgets/TrendChartWidget.cpp
+    src/ui/widgets/AnalysisLogView.h
+    src/ui/widgets/AnalysisLogView.cpp
+    src/ui/widgets/SecurityEventListWidget.h
+    src/ui/widgets/SecurityEventListWidget.cpp
     src/ui/UiTheme.h
     src/ui/UiTheme.cpp
+    src/ui/UiDialogs.h
+    src/ui/UiDialogs.cpp
+    src/ui/DialogChrome.h
+    src/ui/DialogChrome.cpp
     src/resources.qrc
 )
 
@@ -155,6 +163,11 @@ qt_add_executable(monitor_smoke_test
     src/ui/ProtectionMonitorWindow.cpp
     src/ui/widgets/GradientWidget.cpp
     src/ui/widgets/TrendChartWidget.cpp
+    src/ui/widgets/AnalysisLogView.cpp
+    src/ui/widgets/SecurityEventListWidget.cpp
+    src/ui/UiDialogs.cpp
+    src/ui/DialogChrome.cpp
+    src/resources.qrc
 )
 target_include_directories(monitor_smoke_test PRIVATE src)
 target_link_libraries(monitor_smoke_test PRIVATE clawdsecbot_qt_core Qt6::Widgets Qt6::Test)
@@ -183,6 +196,36 @@ qt_add_executable(bridge_lifecycle_test
 target_include_directories(bridge_lifecycle_test PRIVATE src)
 target_link_libraries(bridge_lifecycle_test PRIVATE clawdsecbot_qt_core Qt6::Concurrent Qt6::Test)
 add_test(NAME bridge_lifecycle_test COMMAND bridge_lifecycle_test)
+
+add_test(NAME ui_non_blocking_source_test
+    COMMAND "${CMAKE_COMMAND}" -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/ui_non_blocking_source_test.cmake"
+)
+
+qt_add_executable(dialog_visual_test
+    tests/dialog_visual_test.cpp
+    src/ui/dialogs/SettingsDialog.h
+    src/ui/dialogs/ProtectionConfigDialog.h
+    src/ui/dialogs/SkillScanDialog.h
+    src/ui/dialogs/SkillScanResultsDialog.h
+    src/ui/dialogs/OnboardingDialog.h
+    src/ui/dialogs/MitigationDialog.h
+    src/ui/dialogs/BotIconPickerDialog.h
+    src/ui/dialogs/AppStoreGuideDialog.h
+    src/ui/widgets/SecurityEventListWidget.h
+    src/ui/Dialogs.cpp
+    src/ui/SkillScanDialog.cpp
+    src/ui/dialogs/BotIconPickerDialog.cpp
+    src/ui/AppStoreGuideDialog.cpp
+    src/ui/widgets/SecurityEventListWidget.cpp
+    src/ui/UiDialogs.cpp
+    src/ui/DialogChrome.cpp
+    src/resources.qrc
+)
+target_include_directories(dialog_visual_test PRIVATE src)
+target_link_libraries(dialog_visual_test PRIVATE clawdsecbot_qt_core Qt6::Widgets Qt6::Test)
+add_test(NAME dialog_visual_test COMMAND dialog_visual_test)
+set_tests_properties(dialog_visual_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 include(GNUInstallDirs)
 install(TARGETS clawdsecbot_qt

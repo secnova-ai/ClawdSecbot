@@ -18,6 +18,7 @@ public:
 
     const AssetModel& asset() const;
     void setProtected(bool protectedState);
+    void setOperationInProgress(bool inProgress);
     void setIconAppearance(const QString& iconName, const QString& glyph, const QColor& color);
     QString iconName() const;
     QColor iconColor() const;
@@ -44,6 +45,7 @@ private:
     AssetModel asset_;
     bool expanded_ = false;
     bool protected_ = false;
+    bool operationInProgress_ = false;
     QWidget* header_ = nullptr;
     QWidget* details_ = nullptr;
     QLabel* statusBadge_ = nullptr;

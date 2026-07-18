@@ -6,9 +6,11 @@
 #include "ui/AuditLogWindow.h"
 #include "ui/Dialogs.h"
 #include "ui/ProtectionMonitorWindow.h"
+#include "ui/UiDialogs.h"
 #include "ui/widgets/AssetCardWidget.h"
 #include "ui/widgets/GradientWidget.h"
 
+#include <QAction>
 #include <QDateTime>
 #include <QDialog>
 #include <QEvent>
@@ -21,7 +23,6 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QMenu>
-#include <QMessageBox>
 #include <QMouseEvent>
 #include <QProgressBar>
 #include <QPointer>
@@ -142,9 +143,13 @@ void MainWindow::showOnboardingIfNeeded() {
         const bool firstLaunch = stored.isUndefined() || stored.isNull() || storedText.isEmpty()
             || (stored.isBool() ? stored.toBool() : storedText != QStringLiteral("false") && storedText != QStringLiteral("0"));
         watcher->deleteLater();
-        if (firstLaunch) OnboardingDialog(bridge_, this).exec();
+        if (firstLaunch) {
+            auto* dialog = new OnboardingDialog(bridge_, this);
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            dialog->open();
+        }
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_]() { return bridge->call("GetAppSettingFFI", QStringLiteral("is_first_launch")); }));
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() { return bridge->call("GetAppSettingFFI", QStringLiteral("is_first_launch")); }));
 }
 
 void MainWindow::buildUi() {
@@ -190,31 +195,30 @@ QWidget* MainWindow::buildTitleBar() {
     more->setText(QStringLiteral("⋯"));
     more->setObjectName(QStringLiteral("iconButton"));
     connect(more, &QPushButton::clicked, more, [this, more]() {
-        QDialog menu(this, Qt::Dialog | Qt::FramelessWindowHint);
-        menu.setWindowTitle(QStringLiteral("更多操作"));
-        menu.setObjectName(QStringLiteral("compactMenu"));
-        menu.setFixedWidth(220);
-        auto* menuLayout = new QVBoxLayout(&menu);
-        menuLayout->setContentsMargins(6, 6, 6, 6);
-        menuLayout->setSpacing(3);
-        auto addMenuAction = [&menu, menuLayout](const QString& text) {
-            auto* button = new QPushButton(text, &menu);
-            button->setObjectName(QStringLiteral("compactMenuItem"));
-            menuLayout->addWidget(button);
-            return button;
-        };
-        auto* onboarding = addMenuAction(QStringLiteral("快速开始"));
-        auto* guide = addMenuAction(QStringLiteral("配置引导"));
-        auto* skills = addMenuAction(QStringLiteral("AI 技能安全分析"));
-        connect(onboarding, &QPushButton::clicked, &menu, [&menu]() { menu.done(1); });
-        connect(guide, &QPushButton::clicked, &menu, [&menu]() { menu.done(2); });
-        connect(skills, &QPushButton::clicked, &menu, [&menu]() { menu.done(3); });
-        const QPoint popup = more->mapToGlobal(QPoint(more->width() - menu.width(), more->height() + 4));
-        menu.move(popup);
-        const int action = menu.exec();
-        if (action == 1) OnboardingDialog(bridge_, this).exec();
-        else if (action == 2) AppStoreGuideDialog(this).exec();
-        else if (action == 3) SkillScanDialog(bridge_, {}, this).exec();
+        auto* menu = new QMenu(this);
+        menu->setObjectName(QStringLiteral("appActionMenu"));
+        menu->setMinimumWidth(230);
+        auto* onboarding = menu->addAction(QStringLiteral("◇  快速开始"));
+        onboarding->setData(1);
+        auto* guide = menu->addAction(QStringLiteral("▤  配置引导"));
+        guide->setData(2);
+        menu->addSeparator();
+        auto* skills = menu->addAction(QStringLiteral("⌕  AI 技能安全分析"));
+        skills->setData(3);
+        connect(menu, &QMenu::triggered, this, [this](QAction* selected) {
+            const int action = selected == nullptr ? 0 : selected->data().toInt();
+            QDialog* dialog = nullptr;
+            if (action == 1) dialog = new OnboardingDialog(bridge_, this);
+            else if (action == 2) dialog = new AppStoreGuideDialog(this);
+            else if (action == 3) dialog = new SkillScanDialog(bridge_, {}, this);
+            if (dialog != nullptr) {
+                dialog->setAttribute(Qt::WA_DeleteOnClose);
+                dialog->open();
+            }
+        });
+        connect(menu, &QMenu::aboutToHide, menu, &QObject::deleteLater);
+        const QPoint popup = more->mapToGlobal(QPoint(more->width() - menu->sizeHint().width(), more->height() + 6));
+        menu->popup(popup);
     });
     layout->addWidget(audit);
     layout->addWidget(settings);
@@ -257,7 +261,11 @@ QWidget* MainWindow::buildIdlePage() {
     layout->addWidget(scanButton_, 0, Qt::AlignCenter);
     auto* history = new QPushButton(QStringLiteral("⌕  技能检测历史"), page);
     history->setStyleSheet(QStringLiteral("background:transparent;color:rgba(255,255,255,100);"));
-    connect(history, &QPushButton::clicked, this, [this]() { SkillScanResultsDialog(bridge_, this).exec(); });
+    connect(history, &QPushButton::clicked, this, [this]() {
+        auto* dialog = new SkillScanResultsDialog(bridge_, this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->open();
+    });
     layout->addWidget(history, 0, Qt::AlignCenter);
     layout->addStretch(3);
     return page;
@@ -322,14 +330,17 @@ void MainWindow::loadLatestResult() {
         }
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_]() { return ScanService::loadLatest(*bridge); }));
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() { return ScanService::loadLatest(*bridge); }));
 }
 
 void MainWindow::startScan() {
+    if (scanInProgress_) return;
     if (bridge_ == nullptr || !bridge_->isReady()) {
-        QMessageBox::warning(this, QStringLiteral("无法扫描"), QStringLiteral("Go 业务动态库尚未初始化。"));
+        UiDialogs::showWarning(this, QStringLiteral("无法扫描"), QStringLiteral("Go 业务动态库尚未初始化。"));
         return;
     }
+    scanInProgress_ = true;
+    scanButton_->setEnabled(false);
     pages_->setCurrentIndex(1);
     scanProgress_->setValue(8);
     scanStep_->setText(QStringLiteral("正在发现已安装的 Bot..."));
@@ -339,12 +350,14 @@ void MainWindow::startScan() {
     visualTimer->start();
     auto* watcher = new QFutureWatcher<ScanResultModel>(this);
     connect(watcher, &QFutureWatcher<ScanResultModel>::finished, this, [this, watcher, visualTimer]() {
+        scanInProgress_ = false;
+        scanButton_->setEnabled(true);
         visualTimer->stop();
         visualTimer->deleteLater();
         const ScanResultModel result = watcher->result();
         if (!result.valid) {
             pages_->setCurrentIndex(0);
-            QMessageBox::warning(this, QStringLiteral("扫描失败"), QStringLiteral("Go 扫描接口未返回有效结果。"));
+            UiDialogs::showWarning(this, QStringLiteral("扫描失败"), QStringLiteral("Go 扫描接口未返回有效结果。"));
         } else {
             scanProgress_->setValue(100);
             renderResult(result);
@@ -352,7 +365,7 @@ void MainWindow::startScan() {
         }
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_]() { return ScanService::runScan(*bridge); }));
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() { return ScanService::runScan(*bridge); }));
 }
 
 void MainWindow::renderResult(const ScanResultModel& result) {
@@ -381,7 +394,11 @@ void MainWindow::renderResult(const ScanResultModel& result) {
     header->addWidget(headerText);
     header->addStretch();
     auto* skillHistory = new QPushButton(QStringLiteral("♙  技能检测历史"), resultContent_);
-    connect(skillHistory, &QPushButton::clicked, this, [this]() { SkillScanResultsDialog(bridge_, this).exec(); });
+    connect(skillHistory, &QPushButton::clicked, this, [this]() {
+        auto* dialog = new SkillScanResultsDialog(bridge_, this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->open();
+    });
     auto* rescanControl = new QFrame(resultContent_);
     rescanControl->setObjectName(QStringLiteral("rescanControl"));
     auto* rescanLayout = new QHBoxLayout(rescanControl);
@@ -431,25 +448,32 @@ void MainWindow::renderResult(const ScanResultModel& result) {
                 }
                 iconWatcher->deleteLater();
             });
-            iconWatcher->setFuture(QtConcurrent::run([bridge = bridge_, asset]() { return bridge->call("GetAppSettingFFI", QStringLiteral("asset_icon_%1").arg(asset.id)); }));
+            iconWatcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, asset]() { return bridge->call("GetAppSettingFFI", QStringLiteral("asset_icon_%1").arg(asset.id)); }));
         }
         connect(card, &AssetCardWidget::iconPickerRequested, this, [this, card, asset]() {
-            BotIconPickerDialog picker(card->iconName(), card->iconColor().rgba(), this);
-            if (picker.exec() != QDialog::Accepted) return;
-            card->setIconAppearance(picker.selectedIcon(), BotIconPickerDialog::glyphForName(picker.selectedIcon()), QColor::fromRgba(picker.selectedColor()));
-            if (bridge_ == nullptr || !bridge_->isReady()) return;
-            const QJsonObject iconValue{{QStringLiteral("icon"), picker.selectedIcon()},
-                                        {QStringLiteral("color"), static_cast<double>(picker.selectedColor())}};
-            const QJsonObject payload{{QStringLiteral("key"), QStringLiteral("asset_icon_%1").arg(asset.id)},
-                                      {QStringLiteral("value"), QString::fromUtf8(QJsonDocument(iconValue).toJson(QJsonDocument::Compact))}};
-            const QString json = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
-            auto* saveWatcher = new QFutureWatcher<QJsonObject>(this);
-            connect(saveWatcher, &QFutureWatcher<QJsonObject>::finished, this, [this, saveWatcher]() {
-                if (!saveWatcher->result().value(QStringLiteral("success")).toBool())
-                    QMessageBox::warning(this, QStringLiteral("保存失败"), saveWatcher->result().value(QStringLiteral("error")).toString());
-                saveWatcher->deleteLater();
+            auto* picker = new BotIconPickerDialog(card->iconName(), card->iconColor().rgba(), this);
+            picker->setAttribute(Qt::WA_DeleteOnClose);
+            const QPointer<AssetCardWidget> safeCard(card);
+            connect(picker, &QDialog::accepted, this, [this, picker, safeCard, asset]() {
+                if (safeCard == nullptr) return;
+                const QString selectedIcon = picker->selectedIcon();
+                const quint32 selectedColor = picker->selectedColor();
+                safeCard->setIconAppearance(selectedIcon, BotIconPickerDialog::glyphForName(selectedIcon), QColor::fromRgba(selectedColor));
+                if (bridge_ == nullptr || !bridge_->isReady()) return;
+                const QJsonObject iconValue{{QStringLiteral("icon"), selectedIcon},
+                                            {QStringLiteral("color"), static_cast<double>(selectedColor)}};
+                const QJsonObject payload{{QStringLiteral("key"), QStringLiteral("asset_icon_%1").arg(asset.id)},
+                                          {QStringLiteral("value"), QString::fromUtf8(QJsonDocument(iconValue).toJson(QJsonDocument::Compact))}};
+                const QString json = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+                auto* saveWatcher = new QFutureWatcher<QJsonObject>(this);
+                connect(saveWatcher, &QFutureWatcher<QJsonObject>::finished, this, [this, saveWatcher]() {
+                    if (!saveWatcher->result().value(QStringLiteral("success")).toBool())
+                        UiDialogs::showWarning(this, QStringLiteral("保存失败"), saveWatcher->result().value(QStringLiteral("error")).toString());
+                    saveWatcher->deleteLater();
+                });
+                saveWatcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, json]() { return bridge->call("SaveAppSettingFFI", json); }));
             });
-            saveWatcher->setFuture(QtConcurrent::run([bridge = bridge_, json]() { return bridge->call("SaveAppSettingFFI", json); }));
+            picker->open();
         });
         assetCards_.append(card);
         resultLayout_->addWidget(card);
@@ -488,11 +512,16 @@ void MainWindow::renderResult(const ScanResultModel& result) {
         fix->setObjectName(QStringLiteral("riskFixButton"));
         connect(fix, &QPushButton::clicked, this, [this, risk]() {
             if (risk.id == QStringLiteral("skills_not_scanned")) {
-                SkillScanDialog(bridge_, risk.sourcePlugin, this).exec();
-                loadLatestResult();
+                auto* dialog = new SkillScanDialog(bridge_, risk.sourcePlugin, this);
+                dialog->setAttribute(Qt::WA_DeleteOnClose);
+                connect(dialog, &QDialog::finished, this, [this]() { loadLatestResult(); });
+                dialog->open();
                 return;
             }
-            if (MitigationDialog(risk, bridge_, this).exec() == QDialog::Accepted) loadLatestResult();
+            auto* dialog = new MitigationDialog(risk, bridge_, this);
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            connect(dialog, &QDialog::accepted, this, [this]() { loadLatestResult(); });
+            dialog->open();
         });
         content->addWidget(fix, 0, Qt::AlignLeft);
         layout->addLayout(content, 1);
@@ -523,27 +552,36 @@ void MainWindow::refreshProtectionStates() {
         }
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_]() { return bridge->call("GetEnabledProtectionConfigsFFI"); }));
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() { return bridge->call("GetEnabledProtectionConfigsFFI"); }));
 }
 
 void MainWindow::stopProtection(const AssetModel& asset) {
-    if (bridge_ == nullptr || QMessageBox::question(this, QStringLiteral("停止防护"),
-                                                     QStringLiteral("停止 %1 的防护并恢复 Bot 原始配置？").arg(asset.name)) != QMessageBox::Yes) return;
-    auto* watcher = new QFutureWatcher<QJsonObject>(this);
-    setEnabled(false);
-    connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
-        setEnabled(true);
-        const QJsonObject result = watcher->result();
-        if (!result.value(QStringLiteral("success")).toBool()) {
-            QMessageBox::warning(this, QStringLiteral("停止防护失败"), result.value(QStringLiteral("error")).toString());
-        }
-        refreshProtectionStates();
-        watcher->deleteLater();
-    });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_, asset]() { return ProtectionService::stopAndRestore(*bridge, asset); }));
+    if (bridge_ == nullptr || stoppingAssetIds_.contains(asset.id)) return;
+    UiDialogs::confirm(this, QStringLiteral("停止防护"),
+                       QStringLiteral("停止 %1 的防护并恢复 Bot 原始配置？").arg(asset.name), [this, asset]() {
+        if (stoppingAssetIds_.contains(asset.id)) return;
+        stoppingAssetIds_.insert(asset.id);
+        for (AssetCardWidget* card : assetCards_) if (card != nullptr && card->asset().id == asset.id) card->setOperationInProgress(true);
+        auto* watcher = new QFutureWatcher<QJsonObject>(this);
+        connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher, asset]() {
+            stoppingAssetIds_.remove(asset.id);
+            for (AssetCardWidget* card : assetCards_) if (card != nullptr && card->asset().id == asset.id) card->setOperationInProgress(false);
+            const QJsonObject result = watcher->result();
+            if (!result.value(QStringLiteral("success")).toBool()) {
+                UiDialogs::showWarning(this, QStringLiteral("停止防护失败"), result.value(QStringLiteral("error")).toString());
+            }
+            refreshProtectionStates();
+            watcher->deleteLater();
+        });
+        watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, asset]() { return ProtectionService::stopAndRestore(*bridge, asset); }));
+    }, QStringLiteral("停止并恢复"));
 }
 
-void MainWindow::openSettings() { SettingsDialog(bridge_, this).exec(); }
+void MainWindow::openSettings() {
+    auto* dialog = new SettingsDialog(bridge_, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->open();
+}
 
 void MainWindow::openAuditLog() {
     auto* window = new AuditLogWindow(bridge_);
@@ -552,8 +590,10 @@ void MainWindow::openAuditLog() {
 }
 
 void MainWindow::openProtectionConfig(const AssetModel& asset) {
-    ProtectionConfigDialog dialog(asset, bridge_, this);
-    if (dialog.exec() == QDialog::Accepted) openProtectionMonitor(asset, dialog.sessionId());
+    auto* dialog = new ProtectionConfigDialog(asset, bridge_, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dialog, &QDialog::accepted, this, [this, dialog, asset]() { openProtectionMonitor(asset, dialog->sessionId()); });
+    dialog->open();
 }
 
 void MainWindow::openProtectionMonitor(const AssetModel& asset, const QString& sessionId) {
@@ -564,11 +604,13 @@ void MainWindow::openProtectionMonitor(const AssetModel& asset, const QString& s
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     if (!watched->property("botIconAssetId").toString().isEmpty() && event->type() == QEvent::MouseButtonPress) {
-        BotIconPickerDialog picker(QStringLiteral("package"), 0xFF6366F1, this);
-        if (picker.exec() == QDialog::Accepted) {
-            auto* label = qobject_cast<QLabel*>(watched);
-            if (label != nullptr) label->setText(BotIconPickerDialog::glyphForName(picker.selectedIcon()));
-        }
+        auto* picker = new BotIconPickerDialog(QStringLiteral("package"), 0xFF6366F1, this);
+        picker->setAttribute(Qt::WA_DeleteOnClose);
+        const QPointer<QLabel> label(qobject_cast<QLabel*>(watched));
+        connect(picker, &QDialog::accepted, this, [picker, label]() {
+            if (label != nullptr) label->setText(BotIconPickerDialog::glyphForName(picker->selectedIcon()));
+        });
+        picker->open();
         return true;
     }
     if (watched->objectName() == QStringLiteral("titleBar") && event->type() == QEvent::MouseButtonPress) {

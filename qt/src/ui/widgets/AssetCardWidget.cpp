@@ -101,6 +101,12 @@ void AssetCardWidget::setProtected(bool protectedState) {
     updateProtectionState();
 }
 
+void AssetCardWidget::setOperationInProgress(bool inProgress) {
+    if (operationInProgress_ == inProgress) return;
+    operationInProgress_ = inProgress;
+    updateProtectionState();
+}
+
 void AssetCardWidget::buildUi() {
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(16, 16, 16, 16);
@@ -223,8 +229,10 @@ QWidget* AssetCardWidget::buildDetails() {
 }
 
 void AssetCardWidget::updateProtectionState() {
-    statusBadge_->setText(protected_ ? QStringLiteral("防护中") : QStringLiteral("未防护"));
-    statusBadge_->setObjectName(protected_ ? QStringLiteral("successPill") : QStringLiteral("pill"));
+    statusBadge_->setText(operationInProgress_ ? QStringLiteral("处理中…")
+                                               : protected_ ? QStringLiteral("防护中") : QStringLiteral("未防护"));
+    statusBadge_->setObjectName(operationInProgress_ ? QStringLiteral("warningPill")
+                                                     : protected_ ? QStringLiteral("successPill") : QStringLiteral("pill"));
     statusBadge_->style()->unpolish(statusBadge_);
     statusBadge_->style()->polish(statusBadge_);
 
@@ -259,6 +267,7 @@ void AssetCardWidget::updateProtectionState() {
         row->addStretch();
     }
     actionsLayout_->addLayout(row);
+    details_->setEnabled(!operationInProgress_);
 }
 
 void AssetCardWidget::mousePressEvent(QMouseEvent* event) {

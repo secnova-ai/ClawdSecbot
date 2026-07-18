@@ -1,6 +1,8 @@
 #include "ui/Dialogs.h"
 
 #include "bridge/GoBridge.h"
+#include "ui/DialogChrome.h"
+#include "ui/UiDialogs.h"
 
 #include <QAbstractButton>
 #include <QButtonGroup>
@@ -22,7 +24,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
@@ -148,26 +149,14 @@ QString mitigationRiskDescription(const RiskModel& risk) {
 
 SettingsDialog::SettingsDialog(GoBridge* bridge, QWidget* parent)
     : QDialog(parent), bridge_(bridge) {
-    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
     setWindowTitle(tr("全局设置"));
-    setModal(true);
-    setMinimumSize(500, 620);
-    resize(500, 620);
+    setProperty("tone", DialogChrome::toneName(DialogChrome::Tone::Accent));
+    DialogChrome::prepare(this, QSize(540, 680), QSize(520, 640));
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(24, 24, 24, 20);
-    root->setSpacing(16);
-    auto* header = new QHBoxLayout;
-    auto* settingsIcon = new QLabel(QStringLiteral("⚙"), this);
-    settingsIcon->setObjectName(QStringLiteral("dialogHeaderIcon"));
-    settingsIcon->setAlignment(Qt::AlignCenter);
-    settingsIcon->setFixedSize(36, 36);
-    header->addWidget(settingsIcon);
-    header->addWidget(titleLabel(QStringLiteral("全局设置"), this), 1);
-    auto* close = new QPushButton(QStringLiteral("×"), this);
-    close->setObjectName(QStringLiteral("dialogCloseButton"));
-    connect(close, &QPushButton::clicked, this, &QDialog::reject);
-    header->addWidget(close);
-    root->addLayout(header);
+    root->setContentsMargins(26, 24, 26, 22);
+    root->setSpacing(18);
+    root->addWidget(DialogChrome::createHeader(this, QStringLiteral("⚙"), QStringLiteral("全局设置"),
+                                                QStringLiteral("配置安全模型、服务和本地数据")));
 
     tabs_ = new QTabWidget(this);
     tabs_->setObjectName(QStringLiteral("segmentedTabs"));
@@ -217,7 +206,7 @@ SettingsDialog::SettingsDialog(GoBridge* bridge, QWidget* parent)
         const QList<int> seconds{0, 1800, 3600, 21600, 86400};
         const QJsonObject payload{{QStringLiteral("key"), QStringLiteral("scheduled_scan_interval_seconds")}, {QStringLiteral("value"), seconds.value(index)}};
         const QString json = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        [[maybe_unused]] const QFuture<void> saveFuture = QtConcurrent::run([bridge = bridge_, json]() { bridge->call("SaveAppSettingFFI", json); });
+        [[maybe_unused]] const QFuture<void> saveFuture = QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, json]() { bridge->call("SaveAppSettingFFI", json); });
     });
     if (bridge_ != nullptr && bridge_->isReady()) {
         auto* scheduleWatcher = new QFutureWatcher<QJsonObject>(this);
@@ -232,7 +221,7 @@ SettingsDialog::SettingsDialog(GoBridge* bridge, QWidget* parent)
             scheduleCombo->blockSignals(false);
             scheduleWatcher->deleteLater();
         });
-        scheduleWatcher->setFuture(QtConcurrent::run([bridge = bridge_]() { return bridge->call("GetAppSettingFFI", QStringLiteral("scheduled_scan_interval_seconds")); }));
+        scheduleWatcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() { return bridge->call("GetAppSettingFFI", QStringLiteral("scheduled_scan_interval_seconds")); }));
     }
     static_cast<QHBoxLayout*>(schedule->layout())->insertWidget(schedule->layout()->count() - 1, scheduleCombo);
     generalLayout->addWidget(schedule);
@@ -249,15 +238,15 @@ SettingsDialog::SettingsDialog(GoBridge* bridge, QWidget* parent)
                 apiCheck->blockSignals(true);
                 apiCheck->setChecked(!checked);
                 apiCheck->blockSignals(false);
-                QMessageBox::warning(this, QStringLiteral("API 服务"), result.value(QStringLiteral("error")).toString());
+                UiDialogs::showWarning(this, QStringLiteral("API 服务"), result.value(QStringLiteral("error")).toString());
             } else {
                 const QJsonObject payload{{QStringLiteral("key"), QStringLiteral("api_server_enabled")}, {QStringLiteral("value"), checked}};
                 const QString json = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
-                [[maybe_unused]] const QFuture<void> saveFuture = QtConcurrent::run([bridge = bridge_, json]() { bridge->call("SaveAppSettingFFI", json); });
+                [[maybe_unused]] const QFuture<void> saveFuture = QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, json]() { bridge->call("SaveAppSettingFFI", json); });
             }
             watcher->deleteLater();
         });
-        watcher->setFuture(QtConcurrent::run([bridge = bridge_, checked]() { return checked ? bridge->call("StartAPIServerFFI", QStringLiteral("{\"port\":0}")) : bridge->call("StopAPIServerFFI"); }));
+        watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, checked]() { return checked ? bridge->call("StartAPIServerFFI", QStringLiteral("{\"port\":0}")) : bridge->call("StopAPIServerFFI"); }));
     });
     if (bridge_ != nullptr && bridge_->isReady()) {
         auto* apiWatcher = new QFutureWatcher<QJsonObject>(this);
@@ -269,7 +258,7 @@ SettingsDialog::SettingsDialog(GoBridge* bridge, QWidget* parent)
             apiCheck->blockSignals(false);
             apiWatcher->deleteLater();
         });
-        apiWatcher->setFuture(QtConcurrent::run([bridge = bridge_]() { return bridge->call("GetAppSettingFFI", QStringLiteral("api_server_enabled")); }));
+        apiWatcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() { return bridge->call("GetAppSettingFFI", QStringLiteral("api_server_enabled")); }));
     }
     static_cast<QHBoxLayout*>(api->layout())->insertWidget(api->layout()->count() - 1, apiCheck);
     generalLayout->addWidget(api);
@@ -288,21 +277,43 @@ SettingsDialog::SettingsDialog(GoBridge* bridge, QWidget* parent)
     generalLayout->addWidget(clearData);
     generalLayout->addWidget(restoreConfig);
     generalLayout->addWidget(about);
-    connect(clearData, &QPushButton::clicked, this, [this]() {
-        if (bridge_ == nullptr || QMessageBox::question(this, QStringLiteral("清空数据"), QStringLiteral("确定清空日志、统计和分析数据吗？")) != QMessageBox::Yes) return;
-        auto* watcher = new QFutureWatcher<QJsonObject>(this);
-        setEnabled(false);
-        connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() { setEnabled(true); QMessageBox::information(this, QStringLiteral("清空数据"), watcher->result().value(QStringLiteral("success")).toBool() ? QStringLiteral("数据已清空") : watcher->result().value(QStringLiteral("error")).toString()); watcher->deleteLater(); });
-        watcher->setFuture(QtConcurrent::run([bridge = bridge_]() { return bridge->call("ClearAllDataFFI"); }));
+    connect(clearData, &QPushButton::clicked, this, [this, clearData]() {
+        if (bridge_ == nullptr) return;
+        UiDialogs::confirm(this, QStringLiteral("清空数据"), QStringLiteral("确定清空日志、统计和分析数据吗？"), [this, clearData]() {
+            clearData->setEnabled(false);
+            const QString original = clearData->text();
+            clearData->setText(QStringLiteral("◌  正在清空数据…"));
+            auto* watcher = new QFutureWatcher<QJsonObject>(this);
+            connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher, clearData, original]() {
+                clearData->setEnabled(true);
+                clearData->setText(original);
+                const QJsonObject result = watcher->result();
+                if (result.value(QStringLiteral("success")).toBool()) UiDialogs::showInformation(this, QStringLiteral("清空数据"), QStringLiteral("数据已清空"));
+                else UiDialogs::showWarning(this, QStringLiteral("清空失败"), result.value(QStringLiteral("error")).toString());
+                watcher->deleteLater();
+            });
+            watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() { return bridge->call("ClearAllDataFFI"); }));
+        }, QStringLiteral("清空"));
     });
-    connect(restoreConfig, &QPushButton::clicked, this, [this]() {
-        if (bridge_ == nullptr || QMessageBox::question(this, QStringLiteral("恢复初始配置"), QStringLiteral("确定恢复到首次启动前的状态吗？")) != QMessageBox::Yes) return;
-        auto* watcher = new QFutureWatcher<QJsonObject>(this);
-        setEnabled(false);
-        connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() { setEnabled(true); QMessageBox::information(this, QStringLiteral("恢复初始配置"), watcher->result().value(QStringLiteral("success")).toBool() ? QStringLiteral("配置已恢复到初始状态") : watcher->result().value(QStringLiteral("error")).toString()); watcher->deleteLater(); });
-        watcher->setFuture(QtConcurrent::run([bridge = bridge_]() { return bridge->call("RestoreToInitialConfigFFI"); }));
+    connect(restoreConfig, &QPushButton::clicked, this, [this, restoreConfig]() {
+        if (bridge_ == nullptr) return;
+        UiDialogs::confirm(this, QStringLiteral("恢复初始配置"), QStringLiteral("确定恢复到首次启动前的状态吗？"), [this, restoreConfig]() {
+            restoreConfig->setEnabled(false);
+            const QString original = restoreConfig->text();
+            restoreConfig->setText(QStringLiteral("◌  正在恢复初始配置…"));
+            auto* watcher = new QFutureWatcher<QJsonObject>(this);
+            connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher, restoreConfig, original]() {
+                restoreConfig->setEnabled(true);
+                restoreConfig->setText(original);
+                const QJsonObject result = watcher->result();
+                if (result.value(QStringLiteral("success")).toBool()) UiDialogs::showInformation(this, QStringLiteral("恢复初始配置"), QStringLiteral("配置已恢复到初始状态"));
+                else UiDialogs::showWarning(this, QStringLiteral("恢复失败"), result.value(QStringLiteral("error")).toString());
+                watcher->deleteLater();
+            });
+            watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() { return bridge->call("RestoreToInitialConfigFFI"); }));
+        }, QStringLiteral("恢复"));
     });
-    connect(about, &QPushButton::clicked, this, [this]() { QMessageBox::about(this, QStringLiteral("关于 ClawdSecbot"), QStringLiteral("ClawdSecbot 1.0.4\nQt 6 桌面客户端\nGo 安全业务引擎")); });
+    connect(about, &QPushButton::clicked, this, [this]() { UiDialogs::showAbout(this, QStringLiteral("关于 ClawdSecbot"), QStringLiteral("ClawdSecbot 1.0.4\nQt 6 桌面客户端\nGo 安全业务引擎")); });
     generalLayout->addStretch();
     tabs_->addTab(scrollPage(general, tabs_), QStringLiteral("☷  通用设置"));
     root->addWidget(tabs_, 1);
@@ -311,27 +322,30 @@ SettingsDialog::SettingsDialog(GoBridge* bridge, QWidget* parent)
     buttons->addStretch();
     auto* cancel = new QPushButton(QStringLiteral("取消"), this);
     auto* validate = new QPushButton(QStringLiteral("验证连通性"), this);
-    auto* save = new QPushButton(QStringLiteral("保存"), this);
-    save->setObjectName(QStringLiteral("primaryButton"));
+    saveButton_ = new QPushButton(QStringLiteral("保存"), this);
+    saveButton_->setObjectName(QStringLiteral("primaryButton"));
     connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
-    connect(validate, &QPushButton::clicked, this, [this]() {
+    connect(validate, &QPushButton::clicked, this, [this, validate]() {
         if (bridge_ == nullptr) return;
         const QJsonObject payload{{QStringLiteral("provider"), provider_->currentData().toString()}, {QStringLiteral("endpoint"), baseUrl_->text()}, {QStringLiteral("api_key"), apiKey_->text()}, {QStringLiteral("model"), modelName_->text()}};
         const QString json = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
         auto* watcher = new QFutureWatcher<QJsonObject>(this);
-        setEnabled(false);
-        connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
-            setEnabled(true);
+        validate->setEnabled(false);
+        validate->setText(QStringLiteral("验证中…"));
+        connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher, validate]() {
+            validate->setEnabled(true);
+            validate->setText(QStringLiteral("验证连通性"));
             const QJsonObject response = watcher->result();
-            QMessageBox::information(this, QStringLiteral("连通性验证"), response.value(QStringLiteral("success")).toBool() ? QStringLiteral("连通性验证通过") : response.value(QStringLiteral("error")).toString());
+            if (response.value(QStringLiteral("success")).toBool()) UiDialogs::showInformation(this, QStringLiteral("连通性验证"), QStringLiteral("连通性验证通过"));
+            else UiDialogs::showWarning(this, QStringLiteral("连通性验证失败"), response.value(QStringLiteral("error")).toString());
             watcher->deleteLater();
         });
-        watcher->setFuture(QtConcurrent::run([bridge = bridge_, json]() { return bridge->call("TestModelConnectionFFI", json); }));
+        watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, json]() { return bridge->call("TestModelConnectionFFI", json); }));
     });
-    connect(save, &QPushButton::clicked, this, &SettingsDialog::saveCurrentTab);
+    connect(saveButton_, &QPushButton::clicked, this, &SettingsDialog::saveCurrentTab);
     buttons->addWidget(cancel);
     buttons->addWidget(validate);
-    buttons->addWidget(save);
+    buttons->addWidget(saveButton_);
     root->addLayout(buttons);
     loadModelConfig();
 }
@@ -348,7 +362,7 @@ void SettingsDialog::loadModelConfig() {
         modelName_->setText(data.value(QStringLiteral("model")).toString(data.value(QStringLiteral("model_name")).toString()));
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_]() { return bridge->call("GetSecurityModelConfigFFI"); }));
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() { return bridge->call("GetSecurityModelConfigFFI"); }));
 }
 
 void SettingsDialog::saveCurrentTab() {
@@ -356,15 +370,17 @@ void SettingsDialog::saveCurrentTab() {
         const QJsonObject payload{{QStringLiteral("provider"), provider_->currentData().toString()}, {QStringLiteral("endpoint"), baseUrl_->text()}, {QStringLiteral("api_key"), apiKey_->text()}, {QStringLiteral("model"), modelName_->text()}};
         const QString json = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
         auto* watcher = new QFutureWatcher<QJsonObject>(this);
-        setEnabled(false);
+        saveButton_->setEnabled(false);
+        saveButton_->setText(QStringLiteral("保存中…"));
         connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
-            setEnabled(true);
+            saveButton_->setEnabled(true);
+            saveButton_->setText(QStringLiteral("保存"));
             const QJsonObject response = watcher->result();
-            if (!response.value(QStringLiteral("success")).toBool()) QMessageBox::warning(this, QStringLiteral("保存失败"), response.value(QStringLiteral("error")).toString());
+            if (!response.value(QStringLiteral("success")).toBool()) UiDialogs::showWarning(this, QStringLiteral("保存失败"), response.value(QStringLiteral("error")).toString());
             else accept();
             watcher->deleteLater();
         });
-        watcher->setFuture(QtConcurrent::run([bridge = bridge_, json]() { return bridge->call("SaveSecurityModelConfigFFI", json); }));
+        watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, json]() { return bridge->call("SaveSecurityModelConfigFFI", json); }));
         return;
     }
     accept();
@@ -372,32 +388,15 @@ void SettingsDialog::saveCurrentTab() {
 
 ProtectionConfigDialog::ProtectionConfigDialog(const AssetModel& asset, GoBridge* bridge, QWidget* parent)
     : QDialog(parent), asset_(asset), bridge_(bridge) {
-    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
     setWindowTitle(QStringLiteral("开启防护"));
-    setMinimumSize(528, 640);
-    resize(528, 680);
+    setProperty("tone", DialogChrome::toneName(DialogChrome::Tone::Success));
+    DialogChrome::prepare(this, QSize(580, 720), QSize(550, 660));
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(24, 24, 24, 20);
-    root->setSpacing(16);
-    auto* header = new QHBoxLayout;
-    auto* headerIcon = new QLabel(QStringLiteral("⚙"), this);
-    headerIcon->setObjectName(QStringLiteral("dialogHeaderIcon"));
-    headerIcon->setAlignment(Qt::AlignCenter);
-    headerIcon->setFixedSize(36, 36);
-    header->addWidget(headerIcon, 0, Qt::AlignTop);
-    auto* headerText = new QWidget(this);
-    auto* headerTextLayout = new QVBoxLayout(headerText);
-    headerTextLayout->setContentsMargins(0, 0, 0, 0);
-    headerTextLayout->setSpacing(1);
-    headerTextLayout->addWidget(titleLabel(QStringLiteral("开启防护"), headerText));
-    auto* assetSubtitle = titleLabel(asset_.name, headerText, "subtle");
-    headerTextLayout->addWidget(assetSubtitle);
-    header->addWidget(headerText, 1);
-    auto* close = new QPushButton(QStringLiteral("×"), this);
-    close->setObjectName(QStringLiteral("dialogCloseButton"));
-    connect(close, &QPushButton::clicked, this, &QDialog::reject);
-    header->addWidget(close, 0, Qt::AlignTop);
-    root->addLayout(header);
+    root->setContentsMargins(26, 24, 26, 22);
+    root->setSpacing(18);
+    root->addWidget(DialogChrome::createHeader(this, QStringLiteral("◇"), QStringLiteral("开启防护"),
+                                                QStringLiteral("为 %1 配置实时安全策略").arg(asset_.name),
+                                                DialogChrome::Tone::Success));
     tabs_ = new QTabWidget(this);
     tabs_->setObjectName(QStringLiteral("segmentedTabs"));
     tabs_->tabBar()->setObjectName(QStringLiteral("protectionTabBar"));
@@ -680,20 +679,22 @@ ProtectionConfigDialog::ProtectionConfigDialog(const AssetModel& asset, GoBridge
         connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher, validateBot]() {
             validateBot->setEnabled(true);
             const QJsonObject result = watcher->result();
-            QMessageBox::information(this, QStringLiteral("连通性验证"),
-                                     result.value(QStringLiteral("success")).toBool() ? QStringLiteral("连通性验证通过") : result.value(QStringLiteral("error")).toString());
+            if (result.value(QStringLiteral("success")).toBool()) UiDialogs::showInformation(this, QStringLiteral("连通性验证"), QStringLiteral("连通性验证通过"));
+            else UiDialogs::showWarning(this, QStringLiteral("连通性验证失败"), result.value(QStringLiteral("error")).toString());
             watcher->deleteLater();
         });
-        watcher->setFuture(QtConcurrent::run([bridge = bridge_, json]() { return bridge->call("TestModelConnectionFFI", json); }));
+        watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, json]() { return bridge->call("TestModelConnectionFFI", json); }));
     });
     botPage.second->addStretch();
     tabs_->addTab(botPage.first, QStringLiteral("▣  Bot模型"));
     root->addWidget(tabs_, 1);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Save, this);
+    DialogChrome::styleButtonBox(buttons);
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
-    buttons->button(QDialogButtonBox::Save)->setText(QStringLiteral("确认开启"));
-    buttons->button(QDialogButtonBox::Save)->setObjectName(QStringLiteral("primaryButton"));
+    saveButton_ = buttons->button(QDialogButtonBox::Save);
+    saveButton_->setText(QStringLiteral("确认开启"));
+    saveButton_->setObjectName(QStringLiteral("primaryButton"));
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, this, &ProtectionConfigDialog::saveConfig);
     root->addWidget(buttons);
@@ -767,6 +768,8 @@ void ProtectionConfigDialog::appendRuleCard(const QJsonObject& rule) {
 void ProtectionConfigDialog::loadConfig() {
     if (bridge_ == nullptr || asset_.id.isEmpty()) return;
     tabs_->setEnabled(false);
+    saveButton_->setEnabled(false);
+    saveButton_->setText(QStringLiteral("加载配置中…"));
     auto* watcher = new QFutureWatcher<QJsonObject>(this);
     connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
         const QJsonObject responses = watcher->result();
@@ -815,9 +818,11 @@ void ProtectionConfigDialog::loadConfig() {
         botModel_->setText(botConfig.value(QStringLiteral("model")).toString());
         botSecretKey_->setText(botConfig.value(QStringLiteral("secret_key")).toString());
         tabs_->setEnabled(true);
+        saveButton_->setEnabled(true);
+        saveButton_->setText(QStringLiteral("确认开启"));
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_, id = asset_.id]() {
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, id = asset_.id]() {
         return QJsonObject{{QStringLiteral("config"), bridge->call("GetProtectionConfigFFI", id)},
                            {QStringLiteral("rules"), bridge->call("GetShepherdRulesFFI", id)},
                            {QStringLiteral("providers"), bridge->call("GetSupportedProviders", QStringLiteral("bot"))}};
@@ -827,7 +832,7 @@ void ProtectionConfigDialog::loadConfig() {
 void ProtectionConfigDialog::saveConfig() {
     if (bridge_ == nullptr) return accept();
     if (botProvider_->currentData().toString().isEmpty() || botBaseUrl_->text().trimmed().isEmpty() || botModel_->text().trimmed().isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Bot 模型未配置"), QStringLiteral("请填写模型供应商、基础 URL 和 Bot 模型。"));
+        UiDialogs::showWarning(this, QStringLiteral("Bot 模型未配置"), QStringLiteral("请填写模型供应商、基础 URL 和 Bot 模型。"));
         tabs_->setCurrentIndex(3);
         return;
     }
@@ -859,19 +864,21 @@ void ProtectionConfigDialog::saveConfig() {
     }
     const QJsonObject rulesPayload{{QStringLiteral("asset_id"), asset_.id}, {QStringLiteral("semantic_rules"), rules}};
     const QString rulesJson = QString::fromUtf8(QJsonDocument(rulesPayload).toJson(QJsonDocument::Compact));
-    setEnabled(false);
+    saveButton_->setEnabled(false);
+    saveButton_->setText(QStringLiteral("启动中…"));
     auto* watcher = new QFutureWatcher<QJsonObject>(this);
     connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
-        setEnabled(true);
+        saveButton_->setEnabled(true);
+        saveButton_->setText(QStringLiteral("确认开启"));
         const QJsonObject result = watcher->result();
-        if (!result.value(QStringLiteral("success")).toBool()) QMessageBox::warning(this, QStringLiteral("防护启动失败"), result.value(QStringLiteral("error")).toString());
+        if (!result.value(QStringLiteral("success")).toBool()) UiDialogs::showWarning(this, QStringLiteral("防护启动失败"), result.value(QStringLiteral("error")).toString());
         else {
             sessionId_ = result.value(QStringLiteral("session_id")).toString();
             accept();
         }
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_, configJson = json, rulesJson, id = asset_.id, botConfig,
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, configJson = json, rulesJson, id = asset_.id, botConfig,
                                          auditOnly = auditOnly_->isChecked(), userInputDetection = userInputDetection_->isChecked(),
                                          singleTokenLimit = tokenLimit_->text().toInt(), dailyTokenLimit = dailyTokenLimit_->text().toInt()]() {
         QJsonObject result = bridge->call("SaveProtectionConfigFFI", configJson);
@@ -895,23 +902,14 @@ void ProtectionConfigDialog::saveConfig() {
 }
 
 SkillScanResultsDialog::SkillScanResultsDialog(GoBridge* bridge, QWidget* parent) : QDialog(parent) {
-    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
     setWindowTitle(QStringLiteral("技能检测历史"));
-    resize(600, 500);
+    setProperty("tone", DialogChrome::toneName(DialogChrome::Tone::Info));
+    DialogChrome::prepare(this, QSize(660, 560), QSize(600, 500));
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(24, 24, 24, 20);
-    auto* header = new QHBoxLayout;
-    auto* headerIcon = new QLabel(QStringLiteral("⌕"), this);
-    headerIcon->setObjectName(QStringLiteral("dialogHeaderIcon"));
-    headerIcon->setAlignment(Qt::AlignCenter);
-    headerIcon->setFixedSize(36, 36);
-    header->addWidget(headerIcon);
-    header->addWidget(titleLabel(QStringLiteral("技能检测历史"), this), 1);
-    auto* close = new QPushButton(QStringLiteral("×"), this);
-    close->setObjectName(QStringLiteral("dialogCloseButton"));
-    connect(close, &QPushButton::clicked, this, &QDialog::reject);
-    header->addWidget(close);
-    root->addLayout(header);
+    root->setContentsMargins(26, 24, 26, 22);
+    root->setSpacing(18);
+    root->addWidget(DialogChrome::createHeader(this, QStringLiteral("⌕"), QStringLiteral("技能检测历史"),
+                                                QStringLiteral("查看 Skill 扫描结果与处置状态"), DialogChrome::Tone::Info));
     auto* list = new QListWidget(this);
     list->setObjectName(QStringLiteral("skillScanList"));
     list->setSpacing(10);
@@ -1033,7 +1031,7 @@ SkillScanResultsDialog::SkillScanResultsDialog(GoBridge* bridge, QWidget* parent
             }
             watcher->deleteLater();
         });
-        watcher->setFuture(QtConcurrent::run([bridge]() { return bridge->call("GetAllSkillScansFFI"); }));
+        watcher->setFuture(QtConcurrent::run(bridge->workerPool(), [bridge]() { return bridge->call("GetAllSkillScansFFI"); }));
     }
     root->addWidget(list, 1);
     auto* done = new QPushButton(QStringLiteral("完成"), this);
@@ -1043,25 +1041,18 @@ SkillScanResultsDialog::SkillScanResultsDialog(GoBridge* bridge, QWidget* parent
 }
 
 OnboardingDialog::OnboardingDialog(GoBridge* bridge, QWidget* parent) : QDialog(parent), bridge_(bridge) {
-    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
     setWindowTitle(QStringLiteral("快速开始"));
-    setModal(true);
-    resize(760, 650);
+    setProperty("tone", DialogChrome::toneName(DialogChrome::Tone::Accent));
+    DialogChrome::prepare(this, QSize(800, 700), QSize(720, 640));
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(28, 24, 28, 22);
-    auto* header = new QHBoxLayout;
-    header->addWidget(titleLabel(QStringLiteral("快速开始"), this));
-    header->addStretch();
-    stepLabel_ = new QLabel(QStringLiteral("1 / 4"), this);
-    stepLabel_->setObjectName(QStringLiteral("muted"));
-    header->addWidget(stepLabel_);
-    auto* close = new QPushButton(QStringLiteral("×"), this);
-    close->setObjectName(QStringLiteral("dialogCloseButton"));
-    close->setToolTip(QStringLiteral("关闭快速开始，稍后可从主菜单重新打开"));
-    close->setAccessibleName(QStringLiteral("关闭快速开始"));
-    connect(close, &QPushButton::clicked, this, &QDialog::reject);
-    header->addWidget(close);
-    root->addLayout(header);
+    root->setSpacing(18);
+    auto* header = DialogChrome::createHeader(this, QStringLiteral("◇"), QStringLiteral("快速开始"),
+                                               QStringLiteral("四步完成安全模型与 Bot 防护配置"));
+    stepLabel_ = new QLabel(QStringLiteral("1 / 4"), header);
+    stepLabel_->setObjectName(QStringLiteral("dialogStepBadge"));
+    qobject_cast<QHBoxLayout*>(header->layout())->insertWidget(header->layout()->count() - 1, stepLabel_, 0, Qt::AlignTop);
+    root->addWidget(header);
     pages_ = new QStackedWidget(this);
     auto addStep = [this](const QString& title, const QString& description, const QStringList& items) {
         auto* page = new QWidget(pages_);
@@ -1103,7 +1094,11 @@ OnboardingDialog::OnboardingDialog(GoBridge* bridge, QWidget* parent) : QDialog(
                                  QStringLiteral("连通性验证|保存前通过 Go 模型服务验证连接")});
     auto* openSecuritySettings = new QPushButton(QStringLiteral("打开安全模型设置"), securityStep.first);
     openSecuritySettings->setObjectName(QStringLiteral("primaryButton"));
-    connect(openSecuritySettings, &QPushButton::clicked, this, [this]() { SettingsDialog(bridge_, this).exec(); });
+    connect(openSecuritySettings, &QPushButton::clicked, this, [this]() {
+        auto* dialog = new SettingsDialog(bridge_, this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->open();
+    });
     securityStep.second->addWidget(openSecuritySettings, 0, Qt::AlignLeft);
     securityStep.second->addStretch();
 
@@ -1114,7 +1109,11 @@ OnboardingDialog::OnboardingDialog(GoBridge* bridge, QWidget* parent) : QDialog(
                                QStringLiteral("4. 保存并重载|点击 Save 后再点击 Reload")});
     auto* openGuide = new QPushButton(QStringLiteral("打开配置引导"), updateStep.first);
     openGuide->setObjectName(QStringLiteral("primaryButton"));
-    connect(openGuide, &QPushButton::clicked, this, [this]() { AppStoreGuideDialog(this).exec(); });
+    connect(openGuide, &QPushButton::clicked, this, [this]() {
+        auto* dialog = new AppStoreGuideDialog(this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->open();
+    });
     updateStep.second->addWidget(openGuide, 0, Qt::AlignLeft);
     updateStep.second->addStretch();
     root->addWidget(pages_, 1);
@@ -1129,7 +1128,7 @@ OnboardingDialog::OnboardingDialog(GoBridge* bridge, QWidget* parent) : QDialog(
             if (bridge_ != nullptr) {
                 const QJsonObject payload{{QStringLiteral("key"), QStringLiteral("is_first_launch")}, {QStringLiteral("value"), false}};
                 const QString json = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
-                [[maybe_unused]] const QFuture<void> saveFuture = QtConcurrent::run([bridge = bridge_, json]() { bridge->call("SaveAppSettingFFI", json); });
+                [[maybe_unused]] const QFuture<void> saveFuture = QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, json]() { bridge->call("SaveAppSettingFFI", json); });
             }
             return accept();
         }
@@ -1152,7 +1151,7 @@ OnboardingDialog::OnboardingDialog(GoBridge* bridge, QWidget* parent) : QDialog(
             onboardingBotModel_->setText(data.value(QStringLiteral("model")).toString());
             watcher->deleteLater();
         });
-        watcher->setFuture(QtConcurrent::run([bridge = bridge_]() {
+        watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() {
             const ScanResultModel scan = ScanResultModel::fromResponse(bridge->call("GetLatestScanResult"));
             AssetModel selected;
             for (const AssetModel& asset : scan.assets) {
@@ -1175,11 +1174,11 @@ void OnboardingDialog::moveStep(int delta) {
 void OnboardingDialog::saveBotAndContinue() {
     if (bridge_ == nullptr) return moveStep(1);
     if (onboardingAssetId_.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("未发现 Bot"), QStringLiteral("请先完成资产扫描，再登记 Bot 模型。"));
+        UiDialogs::showWarning(this, QStringLiteral("未发现 Bot"), QStringLiteral("请先完成资产扫描，再登记 Bot 模型。"));
         return;
     }
     if (onboardingBotBaseUrl_->text().trimmed().isEmpty() || onboardingBotModel_->text().trimmed().isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Bot 模型未配置"), QStringLiteral("请填写基础 URL 和模型名称。"));
+        UiDialogs::showWarning(this, QStringLiteral("Bot 模型未配置"), QStringLiteral("请填写基础 URL 和模型名称。"));
         return;
     }
     const QJsonObject payload{{QStringLiteral("asset_id"), onboardingAssetId_},
@@ -1194,31 +1193,21 @@ void OnboardingDialog::saveBotAndContinue() {
         nextButton_->setEnabled(true);
         const QJsonObject result = watcher->result();
         if (result.value(QStringLiteral("success")).toBool()) moveStep(1);
-        else QMessageBox::warning(this, QStringLiteral("保存失败"), result.value(QStringLiteral("error")).toString());
+        else UiDialogs::showWarning(this, QStringLiteral("保存失败"), result.value(QStringLiteral("error")).toString());
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_, json]() { return bridge->call("SaveBotModelConfigFFI", json); }));
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, json]() { return bridge->call("SaveBotModelConfigFFI", json); }));
 }
 
 MitigationDialog::MitigationDialog(const RiskModel& risk, GoBridge* bridge, QWidget* parent) : QDialog(parent) {
-    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
     setWindowTitle(QStringLiteral("风险处置"));
-    resize(620, 560);
+    setProperty("tone", DialogChrome::toneName(DialogChrome::Tone::Warning));
+    DialogChrome::prepare(this, QSize(660, 610), QSize(600, 540));
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(24, 24, 24, 20);
-    root->setSpacing(16);
-    auto* header = new QHBoxLayout;
-    auto* headerIcon = new QLabel(QStringLiteral("△"), this);
-    headerIcon->setObjectName(QStringLiteral("mitigationHeaderIcon"));
-    headerIcon->setAlignment(Qt::AlignCenter);
-    headerIcon->setFixedSize(40, 40);
-    header->addWidget(headerIcon);
-    header->addWidget(titleLabel(QStringLiteral("风险处置"), this), 1);
-    auto* close = new QPushButton(QStringLiteral("×"), this);
-    close->setObjectName(QStringLiteral("dialogCloseButton"));
-    connect(close, &QPushButton::clicked, this, &QDialog::reject);
-    header->addWidget(close);
-    root->addLayout(header);
+    root->setContentsMargins(26, 24, 26, 22);
+    root->setSpacing(18);
+    root->addWidget(DialogChrome::createHeader(this, QStringLiteral("△"), QStringLiteral("风险处置"),
+                                                QStringLiteral("确认风险信息并选择安全修复动作"), DialogChrome::Tone::Warning));
 
     auto* riskCard = new QFrame(this);
     riskCard->setObjectName(QStringLiteral("mitigationRiskCard"));
@@ -1289,19 +1278,21 @@ MitigationDialog::MitigationDialog(const RiskModel& risk, GoBridge* bridge, QWid
     formLayout->addStretch();
     root->addWidget(scrollPage(form, this), 1);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Apply, this);
+    DialogChrome::styleButtonBox(buttons);
     const bool suggestionOnly = risk.mitigation.value(QStringLiteral("type")).toString() == QStringLiteral("suggestion");
     buttons->button(QDialogButtonBox::Cancel)->setText(suggestionOnly ? QStringLiteral("关闭") : QStringLiteral("取消"));
     buttons->button(QDialogButtonBox::Apply)->setText(QStringLiteral("执行修复"));
     buttons->button(QDialogButtonBox::Apply)->setObjectName(QStringLiteral("primaryButton"));
     buttons->button(QDialogButtonBox::Apply)->setVisible(!suggestionOnly);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    connect(buttons, &QDialogButtonBox::accepted, this, [this, bridge, risk, form]() {
+    auto* applyButton = buttons->button(QDialogButtonBox::Apply);
+    connect(buttons, &QDialogButtonBox::accepted, this, [this, bridge, risk, form, applyButton]() {
         QJsonObject values;
         for (QLineEdit* edit : form->findChildren<QLineEdit*>()) {
             const QString key = edit->property("fieldKey").toString();
             if (key.isEmpty()) continue;
             if (edit->property("required").toBool() && edit->text().trimmed().isEmpty()) {
-                QMessageBox::warning(this, QStringLiteral("请完善配置"), QStringLiteral("必填项不能为空。"));
+                UiDialogs::showWarning(this, QStringLiteral("请完善配置"), QStringLiteral("必填项不能为空。"));
                 edit->setFocus();
                 return;
             }
@@ -1319,16 +1310,18 @@ MitigationDialog::MitigationDialog(const RiskModel& risk, GoBridge* bridge, QWid
         payload.insert(QStringLiteral("form_values"), values);
         if (bridge == nullptr) return accept();
         const QString json = QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        setEnabled(false);
+        applyButton->setEnabled(false);
+        applyButton->setText(QStringLiteral("修复中…"));
         auto* watcher = new QFutureWatcher<QJsonObject>(this);
-        connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
-            setEnabled(true);
+        connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher, applyButton]() {
+            applyButton->setEnabled(true);
+            applyButton->setText(QStringLiteral("执行修复"));
             const QJsonObject response = watcher->result();
-            if (!response.value(QStringLiteral("success")).toBool()) QMessageBox::warning(this, QStringLiteral("修复失败"), response.value(QStringLiteral("error")).toString());
+            if (!response.value(QStringLiteral("success")).toBool()) UiDialogs::showWarning(this, QStringLiteral("修复失败"), response.value(QStringLiteral("error")).toString());
             else accept();
             watcher->deleteLater();
         });
-        watcher->setFuture(QtConcurrent::run([bridge, json]() { return bridge->call("MitigateRiskFFI", json); }));
+        watcher->setFuture(QtConcurrent::run(bridge->workerPool(), [bridge, json]() { return bridge->call("MitigateRiskFFI", json); }));
     });
     root->addWidget(buttons);
 }

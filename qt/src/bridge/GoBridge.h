@@ -4,8 +4,11 @@
 
 #include <QJsonObject>
 #include <QLibrary>
+#include <QMutex>
 #include <QObject>
 #include <QString>
+#include <QThreadPool>
+#include <QWaitCondition>
 
 #include <atomic>
 
@@ -20,6 +23,7 @@ public:
     void shutdown();
     bool isReady() const;
     QString libraryPath() const;
+    QThreadPool* workerPool();
 
     QJsonObject call(const char* method) const;
     QJsonObject call(const char* method, const QString& value) const;
@@ -31,6 +35,17 @@ signals:
     void bridgeError(const QString& message);
 
 private:
+    class CallLease {
+    public:
+        CallLease(const GoBridge& bridge, bool requireReady);
+        ~CallLease();
+        explicit operator bool() const;
+
+    private:
+        const GoBridge& bridge_;
+        bool active_ = false;
+    };
+
     using NoArgFunction = char* (*)();
     using OneArgFunction = char* (*)(const char*);
     using TwoArgFunction = char* (*)(const char*, const char*);
@@ -40,9 +55,15 @@ private:
 
     QJsonObject decodeAndFree(char* result) const;
     QJsonObject failure(const QString& message) const;
+    bool beginCall(bool requireReady) const;
+    void endCall() const;
 
     mutable QLibrary library_;
     FreeStringFunction freeString_ = nullptr;
     std::atomic_bool ready_ = false;
     std::atomic_bool shuttingDown_ = false;
+    mutable QMutex callMutex_;
+    mutable QWaitCondition callsFinished_;
+    mutable int activeCalls_ = 0;
+    QThreadPool workerPool_;
 };

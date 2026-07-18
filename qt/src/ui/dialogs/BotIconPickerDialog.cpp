@@ -1,5 +1,7 @@
 #include "ui/dialogs/BotIconPickerDialog.h"
 
+#include "ui/DialogChrome.h"
+
 #include <QAbstractButton>
 #include <QButtonGroup>
 #include <QColor>
@@ -11,14 +13,6 @@
 #include <QPushButton>
 #include <QVariant>
 #include <QVBoxLayout>
-
-namespace {
-QLabel* titleLabel(const QString& text, QWidget* parent) {
-    auto* label = new QLabel(text, parent);
-    label->setObjectName(QStringLiteral("dialogTitle"));
-    return label;
-}
-}
 
 QString BotIconPickerDialog::glyphForName(const QString& iconName) {
     static const QHash<QString, QString> glyphs{
@@ -34,27 +28,32 @@ QString BotIconPickerDialog::glyphForName(const QString& iconName) {
 }
 
 BotIconPickerDialog::BotIconPickerDialog(const QString& currentIcon, quint32 currentColor, QWidget* parent) : QDialog(parent) {
-    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
     setWindowTitle(QStringLiteral("选择图标"));
-    resize(400, 430);
+    setProperty("tone", DialogChrome::toneName(DialogChrome::Tone::Accent));
+    DialogChrome::prepare(this, QSize(460, 550), QSize(430, 520));
     selectedIcon_ = currentIcon.isEmpty() ? QStringLiteral("package") : currentIcon;
     selectedColor_ = currentColor;
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(24, 24, 24, 24);
-    root->setSpacing(12);
-    auto* header = new QHBoxLayout;
-    header->addWidget(titleLabel(QStringLiteral("选择图标"), this), 1);
+    root->setContentsMargins(26, 24, 26, 22);
+    root->setSpacing(16);
+    auto* header = DialogChrome::createHeader(this, QStringLiteral("◈"), QStringLiteral("选择 Bot 图标"),
+                                               QStringLiteral("为资产选择容易识别的图标与主题色"));
     preview_ = new QLabel(glyphForName(selectedIcon_), this);
     preview_->setObjectName(QStringLiteral("botIconPreview"));
     preview_->setAlignment(Qt::AlignCenter);
-    preview_->setFixedSize(44, 44);
-    header->addWidget(preview_);
-    root->addLayout(header);
+    preview_->setFixedSize(48, 48);
+    qobject_cast<QHBoxLayout*>(header->layout())->insertWidget(header->layout()->count() - 1, preview_, 0, Qt::AlignTop);
+    root->addWidget(header);
     auto* iconLabel = new QLabel(QStringLiteral("图标"), this);
     iconLabel->setObjectName(QStringLiteral("muted"));
     root->addWidget(iconLabel);
-    auto* grid = new QGridLayout;
-    grid->setSpacing(6);
+    auto* iconGrid = new QWidget(this);
+    iconGrid->setObjectName(QStringLiteral("botIconGrid"));
+    iconGrid->setFixedHeight(190);
+    auto* grid = new QGridLayout(iconGrid);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(8);
+    grid->setVerticalSpacing(10);
     auto* group = new QButtonGroup(this);
     group->setExclusive(true);
     const QStringList icons{QStringLiteral("scissors"), QStringLiteral("bug"), QStringLiteral("bot"), QStringLiteral("shield"), QStringLiteral("globe"), QStringLiteral("server"), QStringLiteral("zap"),
@@ -76,7 +75,7 @@ BotIconPickerDialog::BotIconPickerDialog(const QString& currentIcon, quint32 cur
         selectedIcon_ = icons.value(id, QStringLiteral("package"));
         preview_->setText(glyphForName(selectedIcon_));
     });
-    root->addLayout(grid);
+    root->addWidget(iconGrid);
     auto* colorLabel = new QLabel(QStringLiteral("颜色"), this);
     colorLabel->setObjectName(QStringLiteral("muted"));
     root->addWidget(colorLabel);
@@ -126,6 +125,7 @@ BotIconPickerDialog::BotIconPickerDialog(const QString& currentIcon, quint32 cur
     updatePreview();
     root->addSpacing(6);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, this);
+    DialogChrome::styleButtonBox(buttons);
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("确认"));
     buttons->button(QDialogButtonBox::Ok)->setObjectName(QStringLiteral("primaryButton"));

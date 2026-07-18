@@ -17,6 +17,7 @@ class SkillScanDialog final : public QDialog {
     Q_OBJECT
 public:
     SkillScanDialog(GoBridge* bridge, const QString& assetName = {}, QWidget* parent = nullptr);
+    void reject() override;
 
 private:
     void startScan();
@@ -38,4 +39,6 @@ private:
     QPushButton* closeButton_ = nullptr;
     QTimer* pollTimer_ = nullptr;
     bool polling_ = false;
+    bool startInFlight_ = false;
+    bool closeRequested_ = false;
 };

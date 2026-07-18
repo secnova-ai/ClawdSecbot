@@ -25,8 +25,15 @@ void TrendChartWidget::paintEvent(QPaintEvent*) {
     painter.setPen(QColor(255, 255, 255, 220));
     QFont titleFont = painter.font();
     titleFont.setBold(true);
+    titleFont.setPointSizeF(13);
     painter.setFont(titleFont);
-    painter.drawText(QRectF(14, 10, width() - 28, 24), Qt::AlignLeft | Qt::AlignVCenter, title_);
+    painter.setPen(color_);
+    painter.drawText(QRectF(14, 10, 18, 24), Qt::AlignLeft | Qt::AlignVCenter,
+                     mode_ == Mode::Line ? QStringLiteral("↗") : QStringLiteral("⌘"));
+    painter.setPen(QColor(255, 255, 255, 220));
+    painter.drawText(QRectF(38, 10, width() - 52, 24), Qt::AlignLeft | Qt::AlignVCenter, title_);
+    painter.setPen(QColor(255, 255, 255, 25));
+    painter.drawLine(QPointF(1, 42), QPointF(width() - 1, 42));
 
     const QRectF plot = panel.adjusted(14, 42, -14, -14);
     painter.setPen(QColor(255, 255, 255, 16));

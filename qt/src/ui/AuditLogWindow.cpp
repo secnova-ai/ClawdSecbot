@@ -4,6 +4,7 @@
 #include "service/AuditService.h"
 #include "ui/widgets/AuditTimelineWidget.h"
 #include "ui/widgets/GradientWidget.h"
+#include "ui/UiDialogs.h"
 
 #include <QCheckBox>
 #include <QButtonGroup>
@@ -20,7 +21,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QMessageBox>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QScrollArea>
@@ -108,32 +108,64 @@ void AuditLogWindow::buildUi() {
     titleLayout->addWidget(clearButton);
     connect(refreshButton, &QPushButton::clicked, this, &AuditLogWindow::refresh);
     connect(exportButton_, &QPushButton::clicked, this, [this]() {
-        const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("选择导出位置"), QStringLiteral("audit_logs.md"), QStringLiteral("Markdown (*.md)"));
-        if (path.isEmpty()) return;
-        QSaveFile file(path);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
         QList<AuditLogModel> selected = selectedLogs_.values();
         std::sort(selected.begin(), selected.end(), [](const AuditLogModel& left, const AuditLogModel& right) {
             return left.timestamp > right.timestamp;
         });
-        file.write(exportMarkdown(selected));
-        if (!file.commit()) QMessageBox::warning(this, QStringLiteral("导出失败"), file.errorString());
-    });
-    connect(clearButton, &QPushButton::clicked, this, [this]() {
-        if (QMessageBox::question(this, QStringLiteral("清空所有日志"), QStringLiteral("确定要清空所有审计日志吗？此操作无法撤销。")) != QMessageBox::Yes) return;
-        if (bridge_ == nullptr) return;
-        auto* watcher = new QFutureWatcher<QJsonObject>(this);
-        connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
-            const QJsonObject response = watcher->result();
-            watcher->deleteLater();
-            if (!response.value(QStringLiteral("success")).toBool()) {
-                QMessageBox::warning(this, QStringLiteral("清空失败"), response.value(QStringLiteral("error")).toString());
-                return;
-            }
-            selectedLogs_.clear();
-            resetAndRefresh();
+        exportButton_->setEnabled(false);
+        exportButton_->setToolTip(QStringLiteral("选择导出位置…"));
+        auto* picker = new QFileDialog(this, QStringLiteral("选择导出位置"), QStringLiteral("audit_logs.md"), QStringLiteral("Markdown (*.md)"));
+        picker->setAttribute(Qt::WA_DeleteOnClose);
+        picker->setAcceptMode(QFileDialog::AcceptSave);
+        picker->setFileMode(QFileDialog::AnyFile);
+        picker->setDefaultSuffix(QStringLiteral("md"));
+        connect(picker, &QFileDialog::rejected, this, [this]() {
+            exportButton_->setEnabled(!selectedLogs_.isEmpty());
+            exportButton_->setToolTip(QStringLiteral("导出已选择日志"));
         });
-        watcher->setFuture(QtConcurrent::run([bridge = bridge_]() { return bridge->call("ClearAllAuditLogsFFI"); }));
+        connect(picker, &QFileDialog::fileSelected, this, [this, selected](const QString& path) {
+            if (path.isEmpty()) return;
+            exportButton_->setEnabled(false);
+            exportButton_->setToolTip(QStringLiteral("正在导出…"));
+            using ExportResult = QPair<bool, QString>;
+            auto* watcher = new QFutureWatcher<ExportResult>(this);
+            connect(watcher, &QFutureWatcher<ExportResult>::finished, this, [this, watcher]() {
+                const ExportResult result = watcher->result();
+                exportButton_->setEnabled(!selectedLogs_.isEmpty());
+                exportButton_->setToolTip(QStringLiteral("导出已选择日志"));
+                if (!result.first) UiDialogs::showWarning(this, QStringLiteral("导出失败"), result.second);
+                watcher->deleteLater();
+            });
+            watcher->setFuture(QtConcurrent::run([path, selected]() {
+                QSaveFile file(path);
+                if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return ExportResult{false, file.errorString()};
+                if (file.write(exportMarkdown(selected)) < 0) return ExportResult{false, file.errorString()};
+                if (!file.commit()) return ExportResult{false, file.errorString()};
+                return ExportResult{true, QString()};
+            }));
+        });
+        picker->open();
+    });
+    connect(clearButton, &QPushButton::clicked, this, [this, clearButton]() {
+        if (bridge_ == nullptr) return;
+        UiDialogs::confirm(this, QStringLiteral("清空所有日志"), QStringLiteral("确定要清空所有审计日志吗？此操作无法撤销。"), [this, clearButton]() {
+            clearButton->setEnabled(false);
+            clearButton->setToolTip(QStringLiteral("正在清空…"));
+            auto* watcher = new QFutureWatcher<QJsonObject>(this);
+            connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher, clearButton]() {
+                clearButton->setEnabled(true);
+                clearButton->setToolTip(QStringLiteral("清空全部"));
+                const QJsonObject response = watcher->result();
+                watcher->deleteLater();
+                if (!response.value(QStringLiteral("success")).toBool()) {
+                    UiDialogs::showWarning(this, QStringLiteral("清空失败"), response.value(QStringLiteral("error")).toString());
+                    return;
+                }
+                selectedLogs_.clear();
+                resetAndRefresh();
+            });
+            watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() { return bridge->call("ClearAllAuditLogsFFI"); }));
+        }, QStringLiteral("清空"));
     });
     root->addWidget(titleBar);
 
@@ -264,11 +296,16 @@ void AuditLogWindow::loadAssetTabs() {
         }
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_]() { return bridge->call("GetAuditLogAssetsFFI"); }));
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() { return bridge->call("GetAuditLogAssetsFFI"); }));
 }
 
 void AuditLogWindow::refresh() {
     if (bridge_ == nullptr || !bridge_->isReady()) return;
+    if (refreshInFlight_) {
+        refreshPending_ = true;
+        return;
+    }
+    refreshInFlight_ = true;
     list_->clear();
     list_->addItem(QStringLiteral("正在加载审计日志..."));
     previousPageButton_->setEnabled(false);
@@ -279,6 +316,12 @@ void AuditLogWindow::refresh() {
     connect(watcher, &QFutureWatcher<AuditPageResult>::finished, this, [this, watcher, generation]() {
         const AuditPageResult result = watcher->result();
         watcher->deleteLater();
+        refreshInFlight_ = false;
+        if (refreshPending_) {
+            refreshPending_ = false;
+            refresh();
+            return;
+        }
         if (generation != refreshGeneration_) return;
         if (!result.success) {
             list_->clear();
@@ -294,7 +337,7 @@ void AuditLogWindow::refresh() {
         }
         render(result);
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_, query]() { return AuditService::fetchPage(*bridge, query); }));
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, query]() { return AuditService::fetchPage(*bridge, query); }));
 }
 
 void AuditLogWindow::resetAndRefresh() {
@@ -411,7 +454,7 @@ void AuditLogWindow::showDetail(const AuditLogModel& log) {
         detailTitle_->setToolTip(result.second);
         detailView_->setLog(log, result.first);
     });
-    watcher->setFuture(QtConcurrent::run([bridge = bridge_, log]() {
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_, log]() {
         QString error;
         const QList<SecurityEventModel> events = AuditService::fetchRelatedEvents(*bridge, log, &error);
         return qMakePair(events, error);
