@@ -1,7 +1,9 @@
 #include "ui/MainWindow.h"
 
 #include "bridge/GoBridge.h"
+#include "common/AppLogger.h"
 #include "service/ProtectionService.h"
+#include "service/ScheduledScanService.h"
 #include "service/ScanService.h"
 #include "ui/AuditLogWindow.h"
 #include "ui/Dialogs.h"
@@ -125,11 +127,37 @@ MainWindow::MainWindow(GoBridge* bridge, QWidget* parent) : QMainWindow(parent),
     setMinimumSize(610, 780);
     resize(610, 780);
     buildUi();
+    scheduledScanService_ = new ScheduledScanService(this);
+    connect(scheduledScanService_, &ScheduledScanService::scanRequested, this, [this]() {
+        if (!scanInProgress_) startScan();
+    });
 }
 
 void MainWindow::initializeData() {
     loadLatestResult();
     showOnboardingIfNeeded();
+    restoreScheduledScan();
+}
+
+void MainWindow::restoreScheduledScan() {
+    if (bridge_ == nullptr || !bridge_->isReady()) return;
+    auto* watcher = new QFutureWatcher<QJsonObject>(this);
+    connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher]() {
+        const QJsonObject result = watcher->result();
+        if (!result.value(QStringLiteral("success")).toBool()) {
+            AppLogger::error(QStringLiteral("Failed to restore scheduled scan setting: %1")
+                                 .arg(result.value(QStringLiteral("error")).toString()));
+            watcher->deleteLater();
+            return;
+        }
+        const QJsonValue raw = result.value(QStringLiteral("data"));
+        const int seconds = raw.isObject() ? raw.toObject().value(QStringLiteral("value")).toVariant().toInt() : raw.toVariant().toInt();
+        scheduledScanService_->configure(seconds);
+        watcher->deleteLater();
+    });
+    watcher->setFuture(QtConcurrent::run(bridge_->workerPool(), [bridge = bridge_]() {
+        return bridge->call("GetAppSettingFFI", QStringLiteral("scheduled_scan_interval_seconds"));
+    }));
 }
 
 void MainWindow::showOnboardingIfNeeded() {
@@ -589,6 +617,7 @@ void MainWindow::stopProtection(const AssetModel& asset) {
 void MainWindow::openSettings() {
     auto* dialog = new SettingsDialog(bridge_, this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dialog, &SettingsDialog::scheduledScanIntervalChanged, scheduledScanService_, &ScheduledScanService::configure);
     dialog->open();
 }
 

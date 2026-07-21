@@ -20,6 +20,7 @@
 #include <QListWidget>
 #include <QPainter>
 #include <QPushButton>
+#include <QTabWidget>
 #include <QtTest>
 
 class DialogVisualTest final : public QObject {
@@ -92,6 +93,21 @@ private slots:
                 painter.drawPixmap(0, 0, flattened);
                 painter.end();
                 QVERIFY(composed.save(QDir(screenshotDir).filePath(name)));
+                if (dialog->windowTitle() == QStringLiteral("全局设置")) {
+                    auto* tabs = dialog->findChild<QTabWidget*>(QStringLiteral("segmentedTabs"));
+                    QVERIFY(tabs != nullptr);
+                    tabs->setCurrentIndex(1);
+                    QTest::qWait(100);
+                    const QPixmap generalPopup = dialog->grab();
+                    QImage generalComposed(generalPopup.size(), QImage::Format_ARGB32_Premultiplied);
+                    generalComposed.fill(QColor(QStringLiteral("#0F0F23")));
+                    QPainter generalPainter(&generalComposed);
+                    QPixmap flattenedGeneral = generalPopup;
+                    flattenedGeneral.setDevicePixelRatio(1.0);
+                    generalPainter.drawPixmap(0, 0, flattenedGeneral);
+                    generalPainter.end();
+                    QVERIFY(generalComposed.save(QDir(screenshotDir).filePath(QStringLiteral("settings_general.png"))));
+                }
             }
             dialog->hide();
             delete dialog;

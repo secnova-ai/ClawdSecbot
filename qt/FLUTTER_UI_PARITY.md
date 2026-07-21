@@ -8,12 +8,12 @@
 
 | Flutter 界面/状态 | Qt 实现 | 视觉 | 交互/业务 | 当前结论 |
 |---|---|---:|---:|---|
-| 主窗口标题栏、扫描完成头部 | `MainWindow` | 已实机对照 | 设置、审计、语言、重扫可点击 | 第一轮通过，图标字形仍需统一 |
+| 主窗口标题栏、扫描完成头部 | `MainWindow` | 已实机对照 | 设置、审计、重扫可点击 | 第一轮通过，图标字形仍需统一 |
 | 折叠资产卡 | `AssetCardWidget` | 已实机对照 | 头部可展开、图标可选 | 通过 |
 | 展开资产详情 | `AssetCardWidget` | 已核对真实 Openclaw 数据 | 一键防护/监控/停止/配置按状态切换 | 通过 |
 | 风险卡 | `MainWindow::renderResult` | 已实机对照图标色块、等级、Bot 徽章、修复按钮 | 普通修复进入表单，`skills_not_scanned` 转 Skill 扫描 | 通过 |
 | 全局设置：安全模型 | `SettingsDialog` | 已实机对照 | 加载、编辑、验证、保存均走 Go FFI | 通过 |
-| 全局设置：通用设置 | `SettingsDialog` | 已实机对照 | 自启、定时扫描、API、清理、恢复、关于均有动作 | 第一轮通过 |
+| 全局设置：通用设置 | `SettingsDialog` | 已实机对照 | 自启写入平台注册项；定时扫描配置驱动 Qt 定时器；API 服务按持久化设置恢复；清理、恢复、关于均接入 | 运行态与持久化回归通过，平台启动项仍需 Windows/Linux CI 验证 |
 | 防护配置：智能规则 | `ProtectionConfigDialog` | 已按 Flutter 重建卡片与滚动结构 | 审计/输入开关、自定义规则、内置规则开关可操作 | 第一轮通过 |
 | 防护配置：Token 限制 | `ProtectionConfigDialog` | 已实机对照预设与提示卡 | 预设与数值输入双向联动 | 第一轮通过 |
 | 防护配置：权限设置 | `ProtectionConfigDialog` | 已按沙箱、路径、网络、Shell 卡片重建并截图复核 | 开关、黑白名单、输入均写入原 Go JSON | 通过 |

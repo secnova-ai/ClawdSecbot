@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=ClawdSecbot
+Comment=AI bot security manager
+Exec=ClawdSecbot
+Icon=clawdsecbot
+Terminal=false
+Categories=Security;Utility;

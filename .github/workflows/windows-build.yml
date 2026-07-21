@@ -8,6 +8,7 @@ on:
       - 'lib/**'
       - 'test/**'
       - 'windows/**'
+      - 'qt/**'
       - 'images/**'
       - 'pubspec.yaml'
       - 'analysis_options.yaml'
@@ -19,12 +20,63 @@ on:
       - 'lib/**'
       - 'test/**'
       - 'windows/**'
+      - 'qt/**'
       - 'images/**'
       - 'pubspec.yaml'
       - 'analysis_options.yaml'
       - 'scripts/build_windows_release.ps1'
 
 jobs:
+  build-qt:
+    name: Qt Build & Test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go_lib/go.mod
+
+      - name: Install MinGW for Go c-shared
+        run: choco install mingw -y --no-progress
+
+      - name: Add MinGW to PATH
+        shell: pwsh
+        run: |
+          $gcc = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw" -Recurse -Filter "gcc.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $gcc) {
+            Write-Error "MinGW gcc.exe not found after installation"
+            exit 1
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $gcc.Directory.FullName
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Configure Qt client
+        run: cmake -S qt -B qt/build/ci -A x64
+
+      - name: Build Qt client
+        run: cmake --build qt/build/ci --config Release --parallel 4
+
+      - name: Test Qt client
+        run: ctest --test-dir qt/build/ci -C Release --output-on-failure
+
+      - name: Package Qt client
+        working-directory: qt/build/ci
+        run: cpack --config CPackConfig.cmake -C Release -G ZIP
+
+      - name: Upload Qt package
+        uses: actions/upload-artifact@v4
+        with:
+          name: clawdsecbot-qt-windows
+          path: qt/build/ci/*.zip
+          retention-days: 7
+
   test-flutter:
     name: Flutter Test & Analyze (Windows)
     runs-on: windows-latest

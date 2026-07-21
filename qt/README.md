@@ -35,6 +35,22 @@ ctest --test-dir qt/build/debug --output-on-failure
 
 CMake 会用 `-buildmode=c-shared` 构建现有 `go_lib`，并将 `botsec` 动态库复制到应用运行目录；macOS 会放入 `ClawdSecbot.app/Contents/Resources/plugins/`。
 
+## 安装与打包
+
+Release 安装阶段会调用 Qt 部署工具，将 Qt Framework 和平台插件复制到应用包中，避免目标电脑依赖 Homebrew Qt。macOS 可生成自包含 DMG：
+
+```bash
+cmake -S qt -B qt/build/release \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+cmake --build qt/build/release --parallel
+cpack --config qt/build/release/CPackConfig.cmake -G DragNDrop
+```
+
+生成的 DMG 尚未使用发布证书签名和 Apple 公证；正式对外发布前仍需执行签名、公证和干净机器安装验证。
+
+通用设置中的开机自启会写入真实的平台启动项：macOS LaunchAgent、Windows 当前用户 Run 注册表或 Linux XDG autostart。定时扫描和 API 服务状态会在客户端启动后从 Go AppSetting 恢复。
+
 ## 一步启动与 pprof
 
 ```bash

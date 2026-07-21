@@ -22,6 +22,7 @@ protected:
 
 private:
     void createTrayIcon();
+    void restoreApiServer();
     void requestQuit();
     void beginAsyncShutdown();
 

@@ -9,10 +9,14 @@ endif()
 
 project(clawdsecbot_qt VERSION "${APP_VERSION}" LANGUAGES CXX)
 
+if(WIN32)
+    enable_language(RC)
+endif()
+
 set(APP_DISPLAY_NAME "ClawdSecbot")
 
 if(APPLE)
-    set(APP_BUNDLE_IDENTIFIER "com.bot.secnova.clawdsecbot.qt" CACHE STRING "macOS bundle identifier")
+    set(APP_BUNDLE_IDENTIFIER "com.bot.secnova.clawdsecbot" CACHE STRING "macOS bundle identifier" FORCE)
     set(APP_MACOS_MINIMUM_VERSION "14.0" CACHE STRING "Minimum supported macOS version")
     set(CMAKE_OSX_DEPLOYMENT_TARGET "${APP_MACOS_MINIMUM_VERSION}" CACHE STRING "Minimum macOS deployment version" FORCE)
 endif()
@@ -56,10 +60,16 @@ set(CORE_SOURCES
     src/bridge/GoBridge.cpp
     src/service/AuditService.h
     src/service/AuditService.cpp
+    src/service/ApiServerState.h
+    src/service/ApiServerState.cpp
     src/service/ProtectionService.h
     src/service/ProtectionService.cpp
     src/service/ScanService.h
     src/service/ScanService.cpp
+    src/service/ScheduledScanService.h
+    src/service/ScheduledScanService.cpp
+    src/service/StartupService.h
+    src/service/StartupService.cpp
 )
 
 set(UI_SOURCES
@@ -73,6 +83,7 @@ set(UI_SOURCES
     src/ui/ProtectionMonitorWindow.cpp
     src/ui/Dialogs.h
     src/ui/Dialogs.cpp
+    src/ui/SettingsDialog.cpp
     src/ui/dialogs/SettingsDialog.h
     src/ui/dialogs/ProtectionConfigDialog.h
     src/ui/dialogs/SkillScanDialog.h
@@ -114,6 +125,16 @@ qt_add_executable(clawdsecbot_qt
     src/main.cpp
     ${UI_SOURCES}
 )
+set_target_properties(clawdsecbot_qt PROPERTIES OUTPUT_NAME "${APP_DISPLAY_NAME}")
+
+if(APPLE)
+    set(APP_ICON_FILE "${REPOSITORY_ROOT}/macos/Runner/Assets.xcassets/AppIcon.appiconset/AppIcon.icns")
+    set_source_files_properties("${APP_ICON_FILE}" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+    target_sources(clawdsecbot_qt PRIVATE "${APP_ICON_FILE}")
+endif()
+if(WIN32)
+    target_sources(clawdsecbot_qt PRIVATE src/app_icon.rc)
+endif()
 target_include_directories(clawdsecbot_qt PRIVATE src)
 target_link_libraries(clawdsecbot_qt PRIVATE clawdsecbot_qt_core Qt6::Widgets)
 add_dependencies(clawdsecbot_qt botsec_go_library)
@@ -146,6 +167,9 @@ if(APPLE)
         OUTPUT_NAME "${APP_DISPLAY_NAME}"
         MACOSX_BUNDLE_BUNDLE_NAME "${APP_DISPLAY_NAME}"
         MACOSX_BUNDLE_GUI_IDENTIFIER "${APP_BUNDLE_IDENTIFIER}"
+        MACOSX_BUNDLE_ICON_FILE "AppIcon.icns"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
     )
 endif()
 
@@ -219,6 +243,22 @@ target_compile_definitions(protection_service_test PRIVATE GO_LIBRARY_PATH="${GO
 add_dependencies(protection_service_test botsec_go_library)
 add_test(NAME protection_service_test COMMAND protection_service_test)
 
+qt_add_executable(runtime_settings_service_test
+    tests/runtime_settings_service_test.cpp
+)
+target_include_directories(runtime_settings_service_test PRIVATE src)
+target_link_libraries(runtime_settings_service_test PRIVATE clawdsecbot_qt_core Qt6::Test)
+add_test(NAME runtime_settings_service_test COMMAND runtime_settings_service_test)
+
+qt_add_executable(app_settings_bridge_test
+    tests/app_settings_bridge_test.cpp
+)
+target_include_directories(app_settings_bridge_test PRIVATE src)
+target_link_libraries(app_settings_bridge_test PRIVATE clawdsecbot_qt_core Qt6::Test)
+target_compile_definitions(app_settings_bridge_test PRIVATE GO_LIBRARY_PATH="${GO_LIBRARY_SOURCE}")
+add_dependencies(app_settings_bridge_test botsec_go_library)
+add_test(NAME app_settings_bridge_test COMMAND app_settings_bridge_test)
+
 add_test(NAME ui_non_blocking_source_test
     COMMAND "${CMAKE_COMMAND}" -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/ui_non_blocking_source_test.cmake"
@@ -236,6 +276,7 @@ qt_add_executable(dialog_visual_test
     src/ui/dialogs/AppStoreGuideDialog.h
     src/ui/widgets/SecurityEventListWidget.h
     src/ui/Dialogs.cpp
+    src/ui/SettingsDialog.cpp
     src/ui/SkillScanDialog.cpp
     src/ui/dialogs/BotIconPickerDialog.cpp
     src/ui/AppStoreGuideDialog.cpp
@@ -259,6 +300,62 @@ install(TARGETS clawdsecbot_qt
 )
 if(NOT APPLE)
     install(FILES "${GO_LIBRARY_SOURCE}" DESTINATION "${CMAKE_INSTALL_BINDIR}/plugins")
+endif()
+if(UNIX AND NOT APPLE)
+    install(FILES packaging/clawdsecbot.desktop DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+    install(FILES "${REPOSITORY_ROOT}/images/tray_icon.png"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps"
+        RENAME clawdsecbot.png)
+endif()
+
+if(APPLE)
+    function(resolve_imported_target_realpath target output_variable)
+        get_target_property(imported_location "${target}" IMPORTED_LOCATION)
+        if(NOT imported_location)
+            get_target_property(imported_configurations "${target}" IMPORTED_CONFIGURATIONS)
+            foreach(imported_configuration IN LISTS imported_configurations)
+                get_target_property(imported_location "${target}" "IMPORTED_LOCATION_${imported_configuration}")
+                if(imported_location)
+                    break()
+                endif()
+            endforeach()
+        endif()
+        if(NOT imported_location OR NOT EXISTS "${imported_location}")
+            message(FATAL_ERROR "Unable to resolve imported Qt plugin target: ${target}")
+        endif()
+        get_filename_component(imported_realpath "${imported_location}" REALPATH)
+        set("${output_variable}" "${imported_realpath}" PARENT_SCOPE)
+    endfunction()
+
+    get_target_property(QT_QMAKE_EXECUTABLE Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(QT_BIN_DIR "${QT_QMAKE_EXECUTABLE}" DIRECTORY)
+    find_program(MACDEPLOYQT_EXECUTABLE macdeployqt HINTS "${QT_BIN_DIR}" REQUIRED NO_DEFAULT_PATH)
+    install(CODE "
+        execute_process(
+            COMMAND \"${MACDEPLOYQT_EXECUTABLE}\"
+                    \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${APP_DISPLAY_NAME}.app\"
+                    -no-plugins -appstore-compliant -always-overwrite
+            COMMAND_ERROR_IS_FATAL ANY)")
+
+    resolve_imported_target_realpath(Qt6::QCocoaIntegrationPlugin QT_COCOA_PLUGIN_REALPATH)
+    resolve_imported_target_realpath(Qt6::QMacStylePlugin QT_MAC_STYLE_PLUGIN_REALPATH)
+    install(FILES "${QT_COCOA_PLUGIN_REALPATH}"
+        DESTINATION "${APP_DISPLAY_NAME}.app/Contents/PlugIns/platforms")
+    install(FILES "${QT_MAC_STYLE_PLUGIN_REALPATH}"
+        DESTINATION "${APP_DISPLAY_NAME}.app/Contents/PlugIns/styles")
+    install(CODE [=[
+        execute_process(
+            COMMAND /usr/bin/codesign --force --deep --sign -
+                    "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/ClawdSecbot.app"
+            COMMAND_ERROR_IS_FATAL ANY)
+    ]=])
+else()
+    qt_generate_deploy_app_script(
+        TARGET clawdsecbot_qt
+        OUTPUT_SCRIPT QT_DEPLOY_SCRIPT
+        NO_UNSUPPORTED_PLATFORM_ERROR
+    )
+    install(SCRIPT "${QT_DEPLOY_SCRIPT}")
 endif()
 
 if(APPLE)

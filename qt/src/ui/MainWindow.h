@@ -12,6 +12,7 @@ class QPushButton;
 class QStackedWidget;
 class QVBoxLayout;
 class AssetCardWidget;
+class ScheduledScanService;
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -30,6 +31,7 @@ private:
     QWidget* buildResultsPage();
     void loadLatestResult();
     void showOnboardingIfNeeded();
+    void restoreScheduledScan();
     void startScan();
     void renderResult(const ScanResultModel& result);
     void refreshProtectionStates();
@@ -52,4 +54,5 @@ private:
     QList<AssetCardWidget*> assetCards_;
     QSet<QString> stoppingAssetIds_;
     bool scanInProgress_ = false;
+    ScheduledScanService* scheduledScanService_ = nullptr;
 };

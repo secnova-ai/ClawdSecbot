@@ -8,6 +8,7 @@ on:
       - 'lib/**'
       - 'test/**'
       - 'macos/**'
+      - 'qt/**'
       - 'images/**'
       - 'pubspec.yaml'
       - 'analysis_options.yaml'
@@ -18,11 +19,45 @@ on:
       - 'lib/**'
       - 'test/**'
       - 'macos/**'
+      - 'qt/**'
       - 'images/**'
       - 'pubspec.yaml'
       - 'analysis_options.yaml'
 
 jobs:
+  build-qt:
+    name: Qt Build, Test & Package (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go_lib/go.mod
+
+      - name: Install Qt
+        run: brew install qt
+
+      - name: Configure Qt client
+        run: cmake -S qt -B qt/build/ci -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+
+      - name: Build Qt client
+        run: cmake --build qt/build/ci --parallel 4
+
+      - name: Test Qt client
+        run: ctest --test-dir qt/build/ci --output-on-failure
+
+      - name: Package unsigned Qt DMG
+        working-directory: qt/build/ci
+        run: cpack --config CPackConfig.cmake -G DragNDrop
+
+      - name: Upload Qt DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: clawdsecbot-qt-macos-unsigned
+          path: qt/build/ci/*.dmg
+          retention-days: 7
+
   test-flutter:
     name: Flutter Test & Analyze (macOS)
     runs-on: macos-latest

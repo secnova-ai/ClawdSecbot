@@ -1,6 +1,7 @@
 #include "app/AppController.h"
 
 #include "common/AppLogger.h"
+#include "service/ApiServerState.h"
 #include "service/ProtectionService.h"
 #include "ui/MainWindow.h"
 #include "ui/UiDialogs.h"
@@ -31,6 +32,7 @@ AppController::AppController(const AppConfig& config) : config_(config) {
             UiDialogs::showWarning(mainWindow_.get(), QObject::tr("Go 业务库初始化失败"), result.second);
         } else {
             mainWindow_->initializeData();
+            restoreApiServer();
         }
         watcher->deleteLater();
     });
@@ -38,6 +40,33 @@ AppController::AppController(const AppConfig& config) : config_(config) {
         QString error;
         const bool ready = bridge->initialize(config, &error);
         return qMakePair(ready, error);
+    }));
+}
+
+void AppController::restoreApiServer() {
+    auto* watcher = new QFutureWatcher<QJsonObject>(mainWindow_.get());
+    QObject::connect(watcher, &QFutureWatcher<QJsonObject>::finished, mainWindow_.get(), [this, watcher]() {
+        const QJsonObject result = watcher->result();
+        watcher->deleteLater();
+        if (!result.value(QStringLiteral("success")).toBool()) {
+            AppLogger::error(QStringLiteral("Failed to restore API server state: %1").arg(result.value(QStringLiteral("error")).toString()));
+            UiDialogs::showWarning(mainWindow_.get(), QObject::tr("API 服务启动失败"),
+                                   result.value(QStringLiteral("error")).toString(QObject::tr("无法恢复上次的 API 服务状态。")));
+        }
+    });
+    watcher->setFuture(QtConcurrent::run(bridge_.workerPool(), [bridge = &bridge_]() {
+        const QJsonObject setting = bridge->call("GetAppSettingFFI", QStringLiteral("api_server_enabled"));
+        if (!setting.value(QStringLiteral("success")).toBool()) return setting;
+        const QJsonValue raw = setting.value(QStringLiteral("data"));
+        const QJsonValue value = raw.isObject() ? raw.toObject().value(QStringLiteral("value")) : raw;
+        const QString normalized = value.toVariant().toString().trimmed().toLower();
+        const bool enabled = value.isBool() ? value.toBool() : normalized == QStringLiteral("true") || normalized == QStringLiteral("1");
+        if (!enabled) return QJsonObject{{QStringLiteral("success"), true}};
+        QJsonObject result = bridge->call("StartAPIServerFFI", QStringLiteral("{\"port\":0}"));
+        if (!result.value(QStringLiteral("success")).toBool() && ApiServerState::isAlreadyInDesiredState(result, true)) {
+            result = QJsonObject{{QStringLiteral("success"), true}};
+        }
+        return result;
     }));
 }
 

@@ -8,6 +8,7 @@ on:
       - 'lib/**'
       - 'test/**'
       - 'linux/**'
+      - 'qt/**'
       - 'images/**'
       - 'pubspec.yaml'
       - 'analysis_options.yaml'
@@ -18,11 +19,47 @@ on:
       - 'lib/**'
       - 'test/**'
       - 'linux/**'
+      - 'qt/**'
       - 'images/**'
       - 'pubspec.yaml'
       - 'analysis_options.yaml'
 
 jobs:
+  build-qt:
+    name: Qt Build & Test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go_lib/go.mod
+
+      - name: Install Qt dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf qt6-base-dev
+
+      - name: Configure Qt client
+        run: cmake -S qt -B qt/build/ci -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Qt client
+        run: cmake --build qt/build/ci --parallel 4
+
+      - name: Test Qt client
+        run: ctest --test-dir qt/build/ci --output-on-failure
+
+      - name: Package Qt client
+        working-directory: qt/build/ci
+        run: cpack --config CPackConfig.cmake -G TGZ
+
+      - name: Upload Qt package
+        uses: actions/upload-artifact@v4
+        with:
+          name: clawdsecbot-qt-linux
+          path: qt/build/ci/*.tar.gz
+          retention-days: 7
+
   test-flutter:
     name: Flutter Test & Analyze (Linux)
     runs-on: ubuntu-latest
