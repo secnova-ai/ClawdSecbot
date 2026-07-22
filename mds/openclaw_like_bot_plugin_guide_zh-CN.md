@@ -74,6 +74,24 @@ type ProtectionLifecycleHooks interface {
 
 每个发现的资产都要设置 `asset.SourcePlugin = plugin.GetAssetName()`。
 
+### 5.3 共享运行时认领
+
+两个产品可以保持不同的用户展示身份，同时识别同一个兼容运行时。相同的
+runtime family 与 canonical `config_path` 用于识别该共享运行时；端口、PID、
+进程路径等只属于产品证据，不得影响 `asset_id`。
+
+当插件与其它插件共享运行时 family 时，实现可选的
+`core.RuntimeAssetClaimProvider`。claim 必须返回 canonical config path、
+variant ID 和确定性优先级；只有通用兼容插件可以设置 `IsFallback`。不得用
+插件注册顺序决定归属。
+
+`ScanAllAssets` 是权威仲裁路径：它选出唯一赢家，只绑定该插件实例，并将
+风险与防护路由交给获胜产品。即使为兼容性复用通用 fallback 的 asset ID，
+产品插件仍可保留自己的展示名称和 UI 区块。
+
+普通 claim 仲裁不得静默迁移已持久化的跨产品 asset ID。此类迁移必须显式
+执行数据库迁移并同步应用版本。
+
 ## 6. 多实例防护流程
 
 1. 执行资产扫描（`ScanAllAssets`），并按资产 ID 绑定插件实例。
@@ -86,6 +104,7 @@ type ProtectionLifecycleHooks interface {
 
 - 不存在独立的插件实例 ID。
 - 资产 ID 就是插件实例标识。
+- 一个共享运行时在聚合扫描中只能有一个赢家和一个路由归属。
 
 ## 7. 建议的适配步骤
 
@@ -162,7 +181,7 @@ func init() {
 func (p *YourBotPlugin) GetAssetName() string { return "yourbot" }
 
 func (p *YourBotPlugin) ScanAssets() ([]core.Asset, error) {
-    // 扫描 config/process/ports，计算确定性 assetID
+    // 扫描 config/process/ports；仅用名称和 canonical 配置路径计算确定性 assetID
     return nil, nil
 }
 

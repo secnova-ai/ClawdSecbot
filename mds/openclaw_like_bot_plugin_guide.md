@@ -74,6 +74,27 @@ Rules:
 
 For every discovered asset, fill `asset.SourcePlugin = plugin.GetAssetName()`.
 
+### 5.3 Shared Runtime Claim Ownership
+
+Two products may present different user-facing identities while recognizing the
+same compatible runtime. A matching runtime family plus canonical
+`config_path` identifies that shared runtime; matching ports, PIDs, and process
+paths are product evidence only and must not affect `asset_id`.
+
+Implement the optional `core.RuntimeAssetClaimProvider` when a plugin shares a
+runtime family with another plugin. Return a canonical config path, variant ID,
+and deterministic priority. Use `IsFallback` only for the generic compatibility
+plugin. Do not use registration order to decide ownership.
+
+`ScanAllAssets` is the authoritative arbitration path. It chooses one winner,
+binds only that plugin instance, and sends its risk/protection routing to the
+winning product. A product plugin may retain its own display name and UI
+sections even when it reuses a generic fallback asset ID for compatibility.
+
+Ordinary claim arbitration must not silently migrate persisted cross-product
+asset IDs. Such a migration requires an explicit database migration and
+application version update.
+
 ## 6. Multi-instance Protection Flow
 
 1. Scan assets (`ScanAllAssets`) and bind asset IDs to plugin instances.
@@ -130,6 +151,7 @@ Plugin responsibilities:
 - Deterministic asset ID is stable across repeated scans.
 - Different assets get different IDs.
 - One asset ID maps to one runtime plugin instance entry.
+- A shared runtime has exactly one aggregate-scan winner and one routing owner.
 - Start/stop/status all work with correct `assetID`.
 - `OnProtectionStart` modifies only target asset instance.
 - Rollback in `OnBeforeProxyStop` is idempotent.
@@ -162,7 +184,7 @@ func init() {
 func (p *YourBotPlugin) GetAssetName() string { return "yourbot" }
 
 func (p *YourBotPlugin) ScanAssets() ([]core.Asset, error) {
-    // detect config/process/ports, compute deterministic asset ID
+    // detect config/process/ports; compute asset ID from name + canonical config path only
     return nil, nil
 }
 

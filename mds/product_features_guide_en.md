@@ -10,7 +10,7 @@ ClawSecbot is a desktop security management tool for AI Bots (such as Openclaw, 
 
 ### Description
 
-Automatically scans the local system to discover running AI Bot instances. The scanner collects system snapshots (processes, ports, configuration files, etc.) and matches predefined detection rules to identify different types of Bot assets. Each discovered asset is assigned a unique `asset_id` fingerprint based on its name, config path, ports and process paths.
+Automatically scans the local system to discover running AI Bot instances. The scanner collects system snapshots (processes, ports, configuration files, etc.) and matches predefined detection rules to identify different types of Bot assets. Each discovered asset is assigned a unique `asset_id` fingerprint derived only from its normalized name and canonical config path. Ports and process paths are runtime evidence and do not affect the asset ID.
 
 ### How to Trigger
 
