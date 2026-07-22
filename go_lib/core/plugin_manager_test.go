@@ -1,6 +1,7 @@
 package core
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,6 +15,15 @@ type testPlugin struct {
 	schema    *plugin_sdk.AssetUISchema
 	assets    []Asset
 	mainPID   int
+}
+
+type claimingTestPlugin struct {
+	*testPlugin
+	claims []RuntimeAssetClaim
+}
+
+func (p *claimingTestPlugin) BuildRuntimeAssetClaims(assets []Asset) []RuntimeAssetClaim {
+	return append([]RuntimeAssetClaim(nil), p.claims...)
 }
 
 func (p *testPlugin) GetAssetName() string {
@@ -128,6 +138,233 @@ func newTestPlugin(assetName string) *testPlugin {
 			ID:      strings.ToLower(assetName) + ".asset.v1",
 			Version: "1",
 		},
+	}
+}
+
+func newTestPluginManager() *PluginManager {
+	return &PluginManager{
+		registeredPlugins: make(map[string]BotPlugin),
+		instances:         make(map[string]*AssetPluginInstance),
+	}
+}
+
+func newClaimingTestPlugin(assetName, variantID, configPath string, priority int, fallback bool) *claimingTestPlugin {
+	base := newTestPlugin(assetName)
+	asset := Asset{
+		ID:       ComputeAssetID(assetName, configPath),
+		Name:     assetName,
+		Metadata: map[string]string{"config_path": configPath},
+	}
+	base.assets = []Asset{asset}
+	return &claimingTestPlugin{
+		testPlugin: base,
+		claims: []RuntimeAssetClaim{{
+			Asset:               asset,
+			RuntimeFamily:       "openclaw",
+			CanonicalConfigPath: configPath,
+			VariantID:           variantID,
+			Priority:            priority,
+			IsFallback:          fallback,
+		}},
+	}
+}
+
+func TestPluginManager_ScanAllAssets_ClaimsSharedRuntimeBeforeBinding(t *testing.T) {
+	pm := newTestPluginManager()
+	configPath := filepath.Join(t.TempDir(), "openclaw.json")
+	openclaw := newClaimingTestPlugin("Openclaw", "openclaw", configPath, 10, true)
+	dwtsclaw := newClaimingTestPlugin("DWTSClaw", "dwtsclaw", configPath, 90, false)
+
+	pm.Register(openclaw)
+	pm.Register(dwtsclaw)
+
+	assets, err := pm.ScanAllAssets()
+	if err != nil {
+		t.Fatalf("ScanAllAssets returned error: %v", err)
+	}
+	if len(assets) != 1 {
+		t.Fatalf("expected one claimed asset, got %#v", assets)
+	}
+	if assets[0].Name != "DWTSClaw" || assets[0].SourcePlugin != "DWTSClaw" {
+		t.Fatalf("expected DWTSClaw presentation, got %#v", assets[0])
+	}
+	if assets[0].ID != openclaw.assets[0].ID {
+		t.Fatalf("expected fallback ID %q, got %q", openclaw.assets[0].ID, assets[0].ID)
+	}
+	if got := pm.GetPluginByAssetID(assets[0].ID); got != dwtsclaw {
+		t.Fatalf("expected DWTSClaw to own the routed instance, got %#v", got)
+	}
+}
+
+func TestPluginManager_ScanAllAssets_ReconcilesPriorFallbackOwnerBeforeBindingWinner(t *testing.T) {
+	pm := newTestPluginManager()
+	configPath := filepath.Join(t.TempDir(), "openclaw.json")
+	openclaw := newClaimingTestPlugin("Openclaw", "openclaw", configPath, 10, true)
+	dwtsclaw := newClaimingTestPlugin("DWTSClaw", "dwtsclaw", configPath, 90, false)
+	dwtsclaw.assets = nil
+	dwtsclaw.claims = nil
+	pm.Register(openclaw)
+	pm.Register(dwtsclaw)
+
+	fallbackID := openclaw.assets[0].ID
+	if _, err := pm.ScanAllAssets(); err != nil {
+		t.Fatalf("first ScanAllAssets returned error: %v", err)
+	}
+	if got := pm.GetPluginByAssetID(fallbackID); got != openclaw {
+		t.Fatalf("expected Openclaw to own the first scan, got %#v", got)
+	}
+
+	dwtsAsset := Asset{
+		ID:       ComputeAssetID("DWTSClaw", configPath),
+		Name:     "DWTSClaw",
+		Metadata: map[string]string{"config_path": configPath},
+	}
+	dwtsclaw.assets = []Asset{dwtsAsset}
+	dwtsclaw.claims = []RuntimeAssetClaim{{
+		Asset:               dwtsAsset,
+		RuntimeFamily:       "openclaw",
+		CanonicalConfigPath: configPath,
+		VariantID:           "dwtsclaw",
+		Priority:            90,
+	}}
+
+	assets, err := pm.ScanAllAssets()
+	if err != nil {
+		t.Fatalf("second ScanAllAssets returned error: %v", err)
+	}
+	if len(assets) != 1 || assets[0].ID != fallbackID {
+		t.Fatalf("expected one winner retaining fallback ID %q, got %#v", fallbackID, assets)
+	}
+	if got := pm.GetPluginByAssetID(fallbackID); got != dwtsclaw {
+		t.Fatalf("expected DWTSClaw to replace the fallback owner, got %#v", got)
+	}
+	if stale := pm.getAssetsByPlugin("Openclaw"); len(stale) != 0 {
+		t.Fatalf("expected losing Openclaw instances to be pruned, got %#v", stale)
+	}
+}
+
+func TestPluginManager_ScanAllAssets_ClaimWinnerDoesNotDependOnRegistrationOrder(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "openclaw.json")
+
+	scan := func(reverseRegistration bool) Asset {
+		pm := newTestPluginManager()
+		openclaw := newClaimingTestPlugin("Openclaw", "openclaw", configPath, 10, true)
+		dwtsclaw := newClaimingTestPlugin("DWTSClaw", "dwtsclaw", configPath, 90, false)
+		if reverseRegistration {
+			pm.Register(dwtsclaw)
+			pm.Register(openclaw)
+		} else {
+			pm.Register(openclaw)
+			pm.Register(dwtsclaw)
+		}
+		assets, err := pm.ScanAllAssets()
+		if err != nil {
+			t.Fatalf("ScanAllAssets returned error: %v", err)
+		}
+		if len(assets) != 1 {
+			t.Fatalf("expected one asset, got %#v", assets)
+		}
+		return assets[0]
+	}
+
+	first := scan(false)
+	second := scan(true)
+	if first.ID != second.ID || first.SourcePlugin != second.SourcePlugin || first.Name != second.Name {
+		t.Fatalf("expected stable winner across registration orders, first=%#v second=%#v", first, second)
+	}
+}
+
+func TestPluginManager_ScanAllAssets_ClaimedDifferentConfigPathsRemainSeparate(t *testing.T) {
+	pm := newTestPluginManager()
+	openclaw := newClaimingTestPlugin("Openclaw", "openclaw", filepath.Join(t.TempDir(), "first", "openclaw.json"), 10, true)
+	coclaw := newClaimingTestPlugin("CoClaw", "coclaw", filepath.Join(t.TempDir(), "second", "openclaw.json"), 80, false)
+	pm.Register(openclaw)
+	pm.Register(coclaw)
+
+	assets, err := pm.ScanAllAssets()
+	if err != nil {
+		t.Fatalf("ScanAllAssets returned error: %v", err)
+	}
+	if len(assets) != 2 {
+		t.Fatalf("expected two distinct config assets, got %#v", assets)
+	}
+	seen := map[string]bool{}
+	for _, asset := range assets {
+		seen[asset.SourcePlugin] = true
+	}
+	if !seen["Openclaw"] || !seen["CoClaw"] {
+		t.Fatalf("expected both plugin presentations, got %#v", assets)
+	}
+}
+
+func TestPluginManager_ScanAllAssets_NonClaimPluginStillBindsIndependently(t *testing.T) {
+	pm := newTestPluginManager()
+	configPath := filepath.Join(t.TempDir(), "openclaw.json")
+	openclaw := newClaimingTestPlugin("Openclaw", "openclaw", configPath, 10, true)
+	unrelated := newTestPlugin("QClaw")
+	unrelated.assets = []Asset{{ID: "qclaw:independent", Name: "QClaw"}}
+	pm.Register(openclaw)
+	pm.Register(unrelated)
+
+	assets, err := pm.ScanAllAssets()
+	if err != nil {
+		t.Fatalf("ScanAllAssets returned error: %v", err)
+	}
+	if len(assets) != 2 {
+		t.Fatalf("expected claimed and unrelated assets, got %#v", assets)
+	}
+	if got := pm.GetPluginByAssetID("qclaw:independent"); got != unrelated {
+		t.Fatalf("expected unrelated plugin instance to remain independently bound, got %#v", got)
+	}
+}
+
+func TestPluginManager_ScanAssetsByPlugin_UsesClaimArbitration(t *testing.T) {
+	pm := newTestPluginManager()
+	configPath := filepath.Join(t.TempDir(), "openclaw.json")
+	openclaw := newClaimingTestPlugin("Openclaw", "openclaw", configPath, 10, true)
+	dwtsclaw := newClaimingTestPlugin("DWTSClaw", "dwtsclaw", configPath, 90, false)
+	pm.Register(openclaw)
+	pm.Register(dwtsclaw)
+
+	losingAssets, err := pm.ScanAssetsByPlugin("Openclaw")
+	if err != nil {
+		t.Fatalf("ScanAssetsByPlugin returned error for loser: %v", err)
+	}
+	if len(losingAssets) != 0 {
+		t.Fatalf("expected losing plugin to receive no assets, got %#v", losingAssets)
+	}
+	winnerAssets, err := pm.ScanAssetsByPlugin("DWTSClaw")
+	if err != nil {
+		t.Fatalf("ScanAssetsByPlugin returned error for winner: %v", err)
+	}
+	if len(winnerAssets) != 1 || winnerAssets[0].SourcePlugin != "DWTSClaw" {
+		t.Fatalf("expected only DWTSClaw winner asset, got %#v", winnerAssets)
+	}
+}
+
+func TestPluginManager_ScanAllAssets_InvalidClaimDoesNotDropUnclaimedAsset(t *testing.T) {
+	pm := newTestPluginManager()
+	configPath := filepath.Join(t.TempDir(), "openclaw.json")
+	plugin := newClaimingTestPlugin("Openclaw", "openclaw", configPath, 10, true)
+	plugin.claims = []RuntimeAssetClaim{{
+		Asset:               Asset{ID: "openclaw:missing"},
+		RuntimeFamily:       "openclaw",
+		CanonicalConfigPath: configPath,
+		VariantID:           "openclaw",
+		Priority:            10,
+		IsFallback:          true,
+	}}
+	pm.Register(plugin)
+
+	assets, err := pm.ScanAllAssets()
+	if err != nil {
+		t.Fatalf("ScanAllAssets returned error: %v", err)
+	}
+	if len(assets) != 1 || assets[0].ID != plugin.assets[0].ID {
+		t.Fatalf("expected unclaimed scanned asset to pass through, got %#v", assets)
+	}
+	if got := pm.GetPluginByAssetID(plugin.assets[0].ID); got != plugin {
+		t.Fatalf("expected passthrough asset to bind to its source plugin, got %#v", got)
 	}
 }
 
