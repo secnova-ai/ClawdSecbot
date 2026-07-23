@@ -80,7 +80,7 @@ jobs:
       - name: Build sandbox_hook.dll with CMake
         working-directory: go_lib/core/sandbox/windows_hook
         run: |
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DENABLE_CUSTOM_COMPILER_FLAGS=Off
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DENABLE_CUSTOM_COMPILER_FLAGS=Off "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
           cmake --build build --config Release
 
       - name: Find and upload hook DLL
