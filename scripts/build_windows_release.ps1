@@ -881,7 +881,7 @@ if (Test-Path $HookDir) {
         Push-Location $HookBuildDir
         try {
             # Force x64 generator platform to avoid ARM64 default on some VS BuildTools setups.
-            & $cmakeExe .. -A x64 -DCMAKE_BUILD_TYPE=Release -DENABLE_CUSTOM_COMPILER_FLAGS=Off
+            & $cmakeExe .. -A x64 -DCMAKE_BUILD_TYPE=Release -DENABLE_CUSTOM_COMPILER_FLAGS=Off "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
             if ($LASTEXITCODE -ne 0) {
                 Write-Warn "CMake configure failed for sandbox_hook; falling back to existing plugins/sandbox_hook.dll if available."
             } else {
