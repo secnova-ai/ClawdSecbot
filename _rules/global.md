@@ -91,6 +91,13 @@
 - `form` 禁止以 `suggestions` 为主承载；`suggestion` 禁止以 `form_schema` 为主承载。
 - `title` 概括目标；`description` 说明背景、目的、影响或前提，可直接用于 UI 与导出。
 
+### 6.3 共享运行时认领
+
+- 同一 `runtime_family` 且 canonical `config_path` 相同的候选资产只能绑定一个插件实例。
+- 产品插件通过可选 `RuntimeAssetClaimProvider` 提供产品证据和优先级；不得依赖插件注册顺序抢占资产。
+- 端口、进程路径等运行态证据仅用于仲裁，不得进入 `asset_id`。
+- 变更已持久化的 `asset_id` 必须走数据库迁移并同步应用版本；普通 claim 仲裁不得隐式改写历史资产 ID。
+
 ## 7. 监控与审计（高层约束）
 
 - 监控（实时态）与审计（持久态）允许采用不同数据结构，但必须边界清晰、职责不重叠。

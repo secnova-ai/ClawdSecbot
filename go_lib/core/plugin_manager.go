@@ -179,10 +179,12 @@ func (pm *PluginManager) resolvePluginInstance(assetID string) (*AssetPluginInst
 
 // ScanAllAssets scans assets via all registered plugins and binds plugin instances by asset ID.
 func (pm *PluginManager) ScanAllAssets() ([]Asset, error) {
-	plugins := pm.GetAllPlugins()
+	plugins := pm.getAllPluginsDeterministic()
 	logging.Info("Starting asset scan with %d plugins", len(plugins))
 
-	var allAssets []Asset
+	candidates := make([]runtimeClaimCandidate, 0)
+	passthrough := make([]resolvedRuntimeAsset, 0)
+	scannedPlugins := make([]BotPlugin, 0, len(plugins))
 	for _, plugin := range plugins {
 		assetName := plugin.GetAssetName()
 		logging.Info("Scanning assets with plugin assetName=%s", assetName)
@@ -191,25 +193,85 @@ func (pm *PluginManager) ScanAllAssets() ([]Asset, error) {
 			logging.Warning("Plugin %s scan failed: %v", assetName, err)
 			continue
 		}
+		scannedPlugins = append(scannedPlugins, plugin)
 
-		scannedAssetIDs := make(map[string]struct{}, len(assets))
 		for i := range assets {
 			if strings.TrimSpace(assets[i].SourcePlugin) == "" {
 				assets[i].SourcePlugin = assetName
 			}
 			pm.attachMainProcessPID(plugin, &assets[i])
-			assetID := strings.TrimSpace(assets[i].ID)
-			if assetID != "" {
-				scannedAssetIDs[assetID] = struct{}{}
-			}
-			pm.bindAssetInstance(plugin, assets[i])
 		}
-		pm.reconcilePluginInstances(assetName, scannedAssetIDs)
+
+		if provider, ok := plugin.(RuntimeAssetClaimProvider); ok {
+			claims := provider.BuildRuntimeAssetClaims(assets)
+			scannedAssetsByID := make(map[string]Asset, len(assets))
+			for _, asset := range assets {
+				assetID := strings.TrimSpace(asset.ID)
+				if assetID != "" {
+					scannedAssetsByID[assetID] = asset
+				}
+			}
+
+			claimedAssetIDs := make(map[string]struct{}, len(claims))
+			for _, claim := range claims {
+				claimedAssetID := strings.TrimSpace(claim.Asset.ID)
+				sourceAsset, exists := scannedAssetsByID[claimedAssetID]
+				if !exists {
+					logging.Warning("Plugin %s returned a claim for an unscanned asset ID %s", assetName, claimedAssetID)
+					continue
+				}
+				claim.Asset = sourceAsset
+				claimedAssetIDs[claimedAssetID] = struct{}{}
+				candidates = append(candidates, runtimeClaimCandidate{plugin: plugin, claim: claim})
+			}
+
+			for _, asset := range assets {
+				if _, claimed := claimedAssetIDs[strings.TrimSpace(asset.ID)]; claimed {
+					continue
+				}
+				passthrough = append(passthrough, resolvedRuntimeAsset{plugin: plugin, asset: asset})
+			}
+		} else {
+			for _, asset := range assets {
+				passthrough = append(passthrough, resolvedRuntimeAsset{plugin: plugin, asset: asset})
+			}
+		}
 
 		logging.Info("Plugin %s found %d assets", assetName, len(assets))
-		allAssets = append(allAssets, assets...)
 	}
 
+	winners := append(passthrough, resolveRuntimeAssetClaims(candidates)...)
+	// Reconcile the post-arbitration owner set before binding reused fallback IDs.
+	scannedAssetIDsByPlugin := make(map[string]map[string]struct{}, len(scannedPlugins))
+	for _, plugin := range scannedPlugins {
+		key := normalizeAssetName(plugin.GetAssetName())
+		if key != "" {
+			scannedAssetIDsByPlugin[key] = make(map[string]struct{})
+		}
+	}
+	for _, winner := range winners {
+		if winner.plugin == nil {
+			continue
+		}
+		key := normalizeAssetName(winner.plugin.GetAssetName())
+		assetIDs, exists := scannedAssetIDsByPlugin[key]
+		if !exists {
+			continue
+		}
+		if assetID := strings.TrimSpace(winner.asset.ID); assetID != "" {
+			assetIDs[assetID] = struct{}{}
+		}
+	}
+	for _, plugin := range scannedPlugins {
+		key := normalizeAssetName(plugin.GetAssetName())
+		pm.reconcilePluginInstances(plugin.GetAssetName(), scannedAssetIDsByPlugin[key])
+	}
+
+	allAssets := make([]Asset, 0, len(winners))
+	for _, winner := range winners {
+		pm.bindAssetInstance(winner.plugin, winner.asset)
+		allAssets = append(allAssets, winner.asset)
+	}
 	logging.Info("Asset scan completed, total assets: %d", len(allAssets))
 	return allAssets, nil
 }
@@ -220,6 +282,13 @@ func (pm *PluginManager) ScanAssetsByPlugin(assetName string) ([]Asset, error) {
 	plugin := pm.GetPluginByAssetName(assetName)
 	if plugin == nil {
 		return nil, fmt.Errorf("plugin not found: %s", assetName)
+	}
+	if _, ok := plugin.(RuntimeAssetClaimProvider); ok {
+		assets, err := pm.ScanAllAssets()
+		if err != nil {
+			return nil, err
+		}
+		return filterAssetsBySourcePlugin(assets, plugin.GetAssetName()), nil
 	}
 
 	pluginAssetName := plugin.GetAssetName()
@@ -245,6 +314,21 @@ func (pm *PluginManager) ScanAssetsByPlugin(assetName string) ([]Asset, error) {
 
 	logging.Info("Single plugin %s found %d assets", pluginAssetName, len(assets))
 	return assets, nil
+}
+
+func filterAssetsBySourcePlugin(assets []Asset, assetName string) []Asset {
+	key := normalizeAssetName(assetName)
+	if key == "" {
+		return nil
+	}
+
+	filtered := make([]Asset, 0)
+	for _, asset := range assets {
+		if normalizeAssetName(asset.SourcePlugin) == key {
+			filtered = append(filtered, asset)
+		}
+	}
+	return filtered
 }
 
 func (pm *PluginManager) attachMainProcessPID(plugin BotPlugin, asset *Asset) {

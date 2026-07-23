@@ -133,6 +133,12 @@ type ProtectionLifecycleHooks interface {
 	OnBeforeProxyStop(ctx *ProtectionContext)
 }
 
+// RuntimeAssetClaimProvider defines an optional capability for plugins that
+// share a runtime configuration root with other compatible plugins.
+type RuntimeAssetClaimProvider interface {
+	BuildRuntimeAssetClaims(assets []Asset) []RuntimeAssetClaim
+}
+
 // ProxyForwardingTarget is the resolved upstream target for proxy forwarding.
 // Plugins that do not require explicit Bot model configuration can provide
 // this target from their own runtime config files.

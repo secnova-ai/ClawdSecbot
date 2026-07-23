@@ -196,6 +196,141 @@ func ensureProviderModelEntry(providerMap map[string]interface{}, modelID string
 	return modelsValue
 }
 
+var modelCapabilityMetadataKeys = []string{
+	"compat",
+	"contextWindow",
+}
+
+func cloneConfigValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		cloned := make(map[string]interface{}, len(typed))
+		for key, item := range typed {
+			cloned[key] = cloneConfigValue(item)
+		}
+		return cloned
+	case []interface{}:
+		cloned := make([]interface{}, len(typed))
+		for index, item := range typed {
+			cloned[index] = cloneConfigValue(item)
+		}
+		return cloned
+	default:
+		return typed
+	}
+}
+
+func copyModelCapabilityMetadata(target map[string]interface{}, source map[string]interface{}) {
+	if target == nil || source == nil {
+		return
+	}
+	for _, key := range modelCapabilityMetadataKeys {
+		if value, exists := source[key]; exists {
+			target[key] = cloneConfigValue(value)
+		}
+	}
+}
+
+func modelIDMatches(candidate string, expectedValues ...string) bool {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return false
+	}
+	for _, expected := range expectedValues {
+		if strings.TrimSpace(expected) == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func modelCapabilityMetadataFromDefaults(rawConfig map[string]interface{}, baseModel string) map[string]interface{} {
+	agentsMap, ok := readMapValue(rawConfig, "agents")
+	if !ok {
+		return nil
+	}
+	defaultsMap, ok := readMapValue(agentsMap, "defaults")
+	if !ok {
+		return nil
+	}
+	defaultModels, ok := readMapValue(defaultsMap, "models")
+	if !ok {
+		return nil
+	}
+	modelConfig, ok := readMapValue(defaultModels, baseModel)
+	if !ok {
+		return nil
+	}
+	metadata := map[string]interface{}{}
+	copyModelCapabilityMetadata(metadata, modelConfig)
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
+}
+
+func modelCapabilityMetadataFromProvider(rawConfig map[string]interface{}, providerName string, baseModel string, realModelID string) map[string]interface{} {
+	modelsMap, ok := readMapValue(rawConfig, "models")
+	if !ok {
+		return nil
+	}
+	providersMap, ok := readMapValue(modelsMap, "providers")
+	if !ok {
+		return nil
+	}
+	providerMap, ok := readMapValue(providersMap, providerName)
+	if !ok {
+		return nil
+	}
+	providerModels, ok := providerMap["models"].([]interface{})
+	if !ok {
+		return nil
+	}
+	for _, item := range providerModels {
+		modelMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		id, _ := modelMap["id"].(string)
+		name, _ := modelMap["name"].(string)
+		if !modelIDMatches(id, realModelID, baseModel) && !modelIDMatches(name, realModelID, baseModel) {
+			continue
+		}
+		metadata := map[string]interface{}{}
+		copyModelCapabilityMetadata(metadata, modelMap)
+		if len(metadata) == 0 {
+			return nil
+		}
+		return metadata
+	}
+	return nil
+}
+
+func modelCapabilityMetadataFromConfig(rawConfig map[string]interface{}, providerName string, baseModel string, realModelID string) map[string]interface{} {
+	metadata := map[string]interface{}{}
+	copyModelCapabilityMetadata(metadata, modelCapabilityMetadataFromProvider(rawConfig, providerName, baseModel, realModelID))
+	copyModelCapabilityMetadata(metadata, modelCapabilityMetadataFromDefaults(rawConfig, baseModel))
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
+}
+
+func applyModelCapabilityMetadataToProvider(providerMap map[string]interface{}, metadata map[string]interface{}) {
+	if len(metadata) == 0 {
+		return
+	}
+	models, ok := providerMap["models"].([]interface{})
+	if !ok || len(models) == 0 {
+		return
+	}
+	modelMap, ok := models[0].(map[string]interface{})
+	if !ok {
+		return
+	}
+	copyModelCapabilityMetadata(modelMap, metadata)
+}
+
 // extractRealModelID extracts the real model ID from baseModel by stripping provider prefix.
 func extractRealModelID(baseModel, providerName string) string {
 	prefix := providerName + "/"
@@ -235,6 +370,8 @@ func ensureProviderForBotModel(rawConfig map[string]interface{}, botConfig *BotM
 
 	// 始终构建全新的 provider 配置，确保覆盖已有状态
 	providerMap := buildDefaultProviderConfig(providerName, realModelID)
+	metadata := modelCapabilityMetadataFromConfig(rawConfig, providerName, baseModel, realModelID)
+	applyModelCapabilityMetadataToProvider(providerMap, metadata)
 
 	// Proxy injects the real API key when forwarding LLM requests.
 	// The value here is just a placeholder to satisfy OpenClaw config validation.
@@ -285,7 +422,7 @@ func normalizeTargetProviderName(providerName string) string {
 }
 
 // updateAgentsDefaultsModels updates agents.defaults.models when non-empty.
-func updateAgentsDefaultsModels(rawConfig map[string]interface{}, newModel string) (interface{}, interface{}, error) {
+func updateAgentsDefaultsModels(rawConfig map[string]interface{}, newModel string, baseModel string) (interface{}, interface{}, error) {
 	agentsMap := ensureMapValue(rawConfig, "agents")
 	defaultsMap := ensureMapValue(agentsMap, "defaults")
 	modelsValue := defaultsMap["models"]
@@ -304,8 +441,13 @@ func updateAgentsDefaultsModels(rawConfig map[string]interface{}, newModel strin
 		if len(modelsValue) == 0 {
 			return modelsValue, modelsValue, nil
 		}
-		if _, exists := modelsValue[newModel]; !exists {
-			modelsValue[newModel] = map[string]interface{}{}
+		metadata := modelCapabilityMetadataFromDefaults(rawConfig, baseModel)
+		if existing, exists := modelsValue[newModel].(map[string]interface{}); exists {
+			copyModelCapabilityMetadata(existing, metadata)
+		} else {
+			newModelConfig := map[string]interface{}{}
+			copyModelCapabilityMetadata(newModelConfig, metadata)
+			modelsValue[newModel] = newModelConfig
 		}
 		defaultsMap["models"] = modelsValue
 		agentsMap["defaults"] = defaultsMap

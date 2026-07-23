@@ -176,3 +176,89 @@ func TestEnsureProviderForBotModel_DoesNotWriteRealAPIKey(t *testing.T) {
 		t.Fatalf("expected empty previousProvider, got %v", previousProvider)
 	}
 }
+
+func TestEnsureProviderForBotModel_InheritsOriginalModelCapabilities(t *testing.T) {
+	rawConfig := map[string]interface{}{
+		"agents": map[string]interface{}{
+			"defaults": map[string]interface{}{
+				"models": map[string]interface{}{
+					"custom/Qwen3-32B": map[string]interface{}{
+						"compat": map[string]interface{}{
+							"supportsTools": false,
+						},
+						"contextWindow": float64(32768),
+					},
+				},
+			},
+		},
+		"models": map[string]interface{}{
+			"providers": map[string]interface{}{
+				"custom": map[string]interface{}{
+					"models": []interface{}{
+						map[string]interface{}{
+							"id": "Qwen3-32B",
+							"compat": map[string]interface{}{
+								"supportsTools": false,
+							},
+							"contextWindow": float64(32768),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	botConfig := &BotModelConfig{
+		Provider: "custom",
+		BaseURL:  "http://10.100.200.19:31125/v1",
+		Model:    "custom/Qwen3-32B",
+	}
+
+	_, providerMap, err := ensureProviderForBotModel(rawConfig, botConfig, "custom", "custom/Qwen3-32B")
+	if err != nil {
+		t.Fatalf("ensureProviderForBotModel returned error: %v", err)
+	}
+
+	models, ok := providerMap["models"].([]interface{})
+	if !ok || len(models) != 1 {
+		t.Fatalf("expected one provider model entry, got %#v", providerMap["models"])
+	}
+	providerModel, ok := models[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected provider model map, got %#v", models[0])
+	}
+
+	compat, ok := providerModel["compat"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected provider model compat to be inherited, got %#v", providerModel["compat"])
+	}
+	if compat["supportsTools"] != false {
+		t.Fatalf("expected provider model supportsTools=false, got %#v", compat["supportsTools"])
+	}
+	if providerModel["contextWindow"] != float64(32768) {
+		t.Fatalf("expected provider model contextWindow inherited, got %#v", providerModel["contextWindow"])
+	}
+
+	_, updatedModels, err := updateAgentsDefaultsModels(rawConfig, "clawdsecbot-custom/custom/Qwen3-32B", "custom/Qwen3-32B")
+	if err != nil {
+		t.Fatalf("updateAgentsDefaultsModels returned error: %v", err)
+	}
+	defaultModels, ok := updatedModels.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected defaults models map, got %#v", updatedModels)
+	}
+	injectedModel, ok := defaultModels["clawdsecbot-custom/custom/Qwen3-32B"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected injected model metadata, got %#v", defaultModels["clawdsecbot-custom/custom/Qwen3-32B"])
+	}
+	injectedCompat, ok := injectedModel["compat"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected injected model compat to be inherited, got %#v", injectedModel["compat"])
+	}
+	if injectedCompat["supportsTools"] != false {
+		t.Fatalf("expected injected model supportsTools=false, got %#v", injectedCompat["supportsTools"])
+	}
+	if injectedModel["contextWindow"] != float64(32768) {
+		t.Fatalf("expected injected model contextWindow inherited, got %#v", injectedModel["contextWindow"])
+	}
+}

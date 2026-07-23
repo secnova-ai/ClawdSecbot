@@ -80,7 +80,7 @@ jobs:
       - name: Build sandbox_hook.dll with CMake
         working-directory: go_lib/core/sandbox/windows_hook
         run: |
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DENABLE_CUSTOM_COMPILER_FLAGS=Off
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DENABLE_CUSTOM_COMPILER_FLAGS=Off "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
           cmake --build build --config Release
 
       - name: Find and upload hook DLL
@@ -168,7 +168,10 @@ jobs:
           $candidates = @(
             "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin",
             "C:\ProgramData\chocolatey\lib\mingw\tools\install\bin",
-            "C:\tools\mingw64\bin"
+            "C:\ProgramData\chocolatey\lib\mingw-w64\tools\install\mingw64\bin",
+            "C:\ProgramData\chocolatey\lib\mingw-w64\tools\install\bin",
+            "C:\tools\mingw64\bin",
+            "C:\msys64\mingw64\bin"
           )
 
           $resolved = $null
@@ -180,19 +183,40 @@ jobs:
           }
 
           if (-not $resolved) {
-            $gccMatch = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw" -Recurse -Filter "gcc.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($gccMatch) {
-              $resolved = $gccMatch.Directory.FullName
+            $searchRoots = @(
+              "C:\ProgramData\chocolatey\lib",
+              "C:\tools",
+              "C:\msys64"
+            )
+            foreach ($root in $searchRoots) {
+              if (-not (Test-Path -LiteralPath $root)) {
+                continue
+              }
+              $gccMatch = Get-ChildItem -LiteralPath $root -Recurse -Filter "gcc.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($gccMatch) {
+                $resolved = $gccMatch.Directory.FullName
+                break
+              }
             }
           }
 
           if (-not $resolved) {
+            Write-Host "Installed Chocolatey packages:"
+            choco list --local-only
             Write-Error "MinGW gcc.exe not found after installation"
             exit 1
           }
 
           Write-Host "Using MinGW bin: $resolved"
           Add-Content -Path $env:GITHUB_PATH -Value $resolved
+          $env:PATH = "$resolved;$env:PATH"
+          $gccAfterPath = Get-Command gcc -ErrorAction SilentlyContinue
+          if ($gccAfterPath) {
+            Write-Host "gcc found: $($gccAfterPath.Source)"
+          } else {
+            Write-Error "gcc still not found after adding MinGW to PATH"
+            exit 1
+          }
 
       - name: Get dependencies
         run: flutter pub get

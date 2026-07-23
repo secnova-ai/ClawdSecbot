@@ -548,51 +548,106 @@ function Get-LatestDirectoryByName {
     return $dirs | Sort-Object Name -Descending | Select-Object -First 1
 }
 
+function Find-VCRuntimeDirectory {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.DirectoryInfo]$RedistVersionDir
+    )
+
+    $requiredDlls = @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")
+    $candidateDirs = New-Object System.Collections.Generic.List[string]
+
+    foreach ($pattern in @(
+        "x64\Microsoft.VC143.CRT",
+        "x64\Microsoft.VC142.CRT",
+        "x64"
+    )) {
+        $candidateDirs.Add((Join-Path $RedistVersionDir.FullName $pattern))
+    }
+
+    $runtimeMatches = Get-ChildItem -LiteralPath $RedistVersionDir.FullName -Recurse -Filter "vcruntime140.dll" -ErrorAction SilentlyContinue
+    foreach ($match in $runtimeMatches) {
+        if ($match.DirectoryName) {
+            $candidateDirs.Add($match.DirectoryName)
+        }
+    }
+
+    foreach ($dir in ($candidateDirs | Select-Object -Unique)) {
+        if ([string]::IsNullOrWhiteSpace($dir) -or -not (Test-Path -LiteralPath $dir)) {
+            continue
+        }
+        $hasAllDlls = $true
+        foreach ($dll in $requiredDlls) {
+            if (-not (Test-Path -LiteralPath (Join-Path $dir $dll))) {
+                $hasAllDlls = $false
+                break
+            }
+        }
+        if ($hasAllDlls) {
+            return $dir
+        }
+    }
+
+    return $null
+}
+
 function Resolve-AppLocalRuntimeFiles {
     $runtimeFiles = New-Object System.Collections.Generic.List[string]
 
-    $vsInstallPath = $null
+    $vsInstallPaths = New-Object System.Collections.Generic.List[string]
     $vswhereCandidates = @(
         "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe",
         "${env:ProgramFiles}\Microsoft Visual Studio\Installer\vswhere.exe"
     )
     foreach ($vswhere in $vswhereCandidates) {
         if (-not (Test-Path -LiteralPath $vswhere)) { continue }
-        $detected = & $vswhere -latest -products * -property installationPath 2>$null
-        if ($detected) {
-            $vsInstallPath = $detected.Trim()
-            break
+        $detectedPaths = & $vswhere -products * -property installationPath 2>$null
+        foreach ($detected in $detectedPaths) {
+            if (-not [string]::IsNullOrWhiteSpace($detected)) {
+                $vsInstallPaths.Add($detected.Trim())
+            }
         }
     }
 
     $vcRedistRoots = @()
-    if ($vsInstallPath) {
+    foreach ($vsInstallPath in ($vsInstallPaths | Select-Object -Unique)) {
         $vcRedistRoots += (Join-Path $vsInstallPath "VC\Redist\MSVC")
     }
     $vcRedistRoots += @(
         "C:\BuildTools\VC\Redist\MSVC",
         "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools\VC\Redist\MSVC",
-        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\VC\Redist\MSVC"
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\VC\Redist\MSVC",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC",
+        "${env:ProgramFiles}\Microsoft Visual Studio\18\Enterprise\VC\Redist\MSVC",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\BuildTools\VC\Redist\MSVC",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\VC\Redist\MSVC",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Enterprise\VC\Redist\MSVC"
     ) | Select-Object -Unique
 
-    $vcRedistVersionDir = Get-LatestDirectoryByName -CandidatePaths $vcRedistRoots -NamePattern '*.*'
-    if (-not $vcRedistVersionDir) {
+    $vcRedistVersionDirs = @()
+    foreach ($root in ($vcRedistRoots | Select-Object -Unique)) {
+        if (Test-Path -LiteralPath $root) {
+            $vcRedistVersionDirs += Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Where-Object {
+                $_.Name -like '*.*'
+            }
+        }
+    }
+    $vcRedistVersionDirs = $vcRedistVersionDirs | Sort-Object FullName -Descending
+    if (-not $vcRedistVersionDirs -or $vcRedistVersionDirs.Count -eq 0) {
         Stop-WithError "VC runtime redistributable directory not found. Install Visual C++ x64 build tools/redist."
     }
 
     $vcRuntimeDir = $null
-    foreach ($candidate in @(
-        (Join-Path $vcRedistVersionDir.FullName "x64\Microsoft.VC143.CRT"),
-        (Join-Path $vcRedistVersionDir.FullName "x64\Microsoft.VC142.CRT")
-    )) {
-        if (Test-Path -LiteralPath $candidate) {
-            $vcRuntimeDir = $candidate
+    foreach ($versionDir in $vcRedistVersionDirs) {
+        $vcRuntimeDir = Find-VCRuntimeDirectory -RedistVersionDir $versionDir
+        if ($vcRuntimeDir) {
             break
         }
     }
     if (-not $vcRuntimeDir) {
-        Stop-WithError "VC runtime app-local directory not found under $($vcRedistVersionDir.FullName)"
+        $searched = ($vcRedistVersionDirs | Select-Object -First 8 | ForEach-Object { $_.FullName }) -join "; "
+        Stop-WithError "VC runtime app-local directory not found. Searched MSVC redist versions: $searched"
     }
+    Write-Ok "Using VC runtime app-local directory: $vcRuntimeDir"
 
     foreach ($dll in @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")) {
         $path = Join-Path $vcRuntimeDir $dll
@@ -826,7 +881,7 @@ if (Test-Path $HookDir) {
         Push-Location $HookBuildDir
         try {
             # Force x64 generator platform to avoid ARM64 default on some VS BuildTools setups.
-            & $cmakeExe .. -A x64 -DCMAKE_BUILD_TYPE=Release -DENABLE_CUSTOM_COMPILER_FLAGS=Off
+            & $cmakeExe .. -A x64 -DCMAKE_BUILD_TYPE=Release -DENABLE_CUSTOM_COMPILER_FLAGS=Off "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
             if ($LASTEXITCODE -ne 0) {
                 Write-Warn "CMake configure failed for sandbox_hook; falling back to existing plugins/sandbox_hook.dll if available."
             } else {
