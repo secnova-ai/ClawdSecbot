@@ -10,7 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../utils/app_fonts.dart';
 import 'package:launch_at_startup/launch_at_startup.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_lite/lucide_icons_lite.dart';
 import 'package:provider/provider.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'security_model_config_form.dart';
 import '../l10n/app_localizations.dart';
 import '../utils/app_fonts.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_lite/lucide_icons_lite.dart';
 
 /// 安全模型配置对话框
 /// 用于 ShepherdGate 风险检测的 LLM 配置
