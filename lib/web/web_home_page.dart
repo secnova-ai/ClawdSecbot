@@ -6,7 +6,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_lite/lucide_icons_lite.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../config/build_config.dart';

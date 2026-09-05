@@ -34,8 +34,7 @@ dependencies:
   animated_text_kit: ^4.2.3
   flutter_animate: ^4.5.2
 
-  lucide_icons:
-    path: assets/lucide_icons
+  lucide_icons_lite: ^1.41.0
   shimmer: ^3.0.0
   ffi: ^2.1.5
   flutter_localizations:
@@ -126,6 +125,3 @@ flutter:
       fonts:
         - asset: assets/fonts/RobotoMono-Regular.ttf
           weight: 400
-    - family: Lucide
-      fonts:
-        - asset: assets/lucide_icons/assets/lucide.ttf
